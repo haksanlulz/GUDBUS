@@ -1,0 +1,4 @@
+# Keeps the gurps-bot data/ dir present in fresh checkouts + worktrees so the bot /
+# alembic can create the SQLite DB without first having to mkdir. The runtime *.db /
+# *.db-shm / *.db-wal / *.log files stay gitignored (workspace .gitignore:47-50).
+# Worktree-readiness audit 2026-06-01 (finding I5).

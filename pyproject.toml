@@ -1,0 +1,42 @@
+[project]
+name = "gudbus"
+version = "1.0.0"
+description = "Discord bot for GURPS 4e: character sheets, dice, ~50 rules calculators, and turn-based combat tracking"
+requires-python = ">=3.10"
+dependencies = [
+    "discord.py>=2.3",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.19",
+    "rapidfuzz>=3.0",
+    "python-dotenv>=1.0",
+    "alembic>=1.12",
+]
+
+# PEP-735 dependency group. `uv sync` installs the default `dev` group
+# automatically, so the documented `uv run python -m pytest` works on a fresh
+# clone without an explicit extra. (The `.[dev]` optional extra below is kept so
+# `pip install -e ".[dev]"` still resolves the same tools for non-uv setups.)
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pyright>=1.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pyright>=1.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["gurps_bot*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

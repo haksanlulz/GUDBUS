@@ -1,0 +1,36 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Database
+*.db
+data/*.db
+
+# Vendored GCS master-library data — reproduce via tools/sync_gcs_library.py (pinned in PROVENANCE.md)
+gurps_bot/data/gcs_library/
+
+# IDE
+.vscode/
+.idea/
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Logs
+*.log
+
+# Local env / tooling
+.venv/

@@ -1,0 +1,404 @@
+# magic.spell_energy_reduction
+reduction(skill=0, low_mana=False) = 0
+reduction(skill=0, low_mana=True) = 0
+reduction(skill=1, low_mana=False) = 0
+reduction(skill=1, low_mana=True) = 0
+reduction(skill=2, low_mana=False) = 0
+reduction(skill=2, low_mana=True) = 0
+reduction(skill=3, low_mana=False) = 0
+reduction(skill=3, low_mana=True) = 0
+reduction(skill=4, low_mana=False) = 0
+reduction(skill=4, low_mana=True) = 0
+reduction(skill=5, low_mana=False) = 0
+reduction(skill=5, low_mana=True) = 0
+reduction(skill=6, low_mana=False) = 0
+reduction(skill=6, low_mana=True) = 0
+reduction(skill=7, low_mana=False) = 0
+reduction(skill=7, low_mana=True) = 0
+reduction(skill=8, low_mana=False) = 0
+reduction(skill=8, low_mana=True) = 0
+reduction(skill=9, low_mana=False) = 0
+reduction(skill=9, low_mana=True) = 0
+reduction(skill=10, low_mana=False) = 0
+reduction(skill=10, low_mana=True) = 0
+reduction(skill=11, low_mana=False) = 0
+reduction(skill=11, low_mana=True) = 0
+reduction(skill=12, low_mana=False) = 0
+reduction(skill=12, low_mana=True) = 0
+reduction(skill=13, low_mana=False) = 0
+reduction(skill=13, low_mana=True) = 0
+reduction(skill=14, low_mana=False) = 0
+reduction(skill=14, low_mana=True) = 0
+reduction(skill=15, low_mana=False) = 1
+reduction(skill=15, low_mana=True) = 0
+reduction(skill=16, low_mana=False) = 1
+reduction(skill=16, low_mana=True) = 0
+reduction(skill=17, low_mana=False) = 1
+reduction(skill=17, low_mana=True) = 0
+reduction(skill=18, low_mana=False) = 1
+reduction(skill=18, low_mana=True) = 0
+reduction(skill=19, low_mana=False) = 1
+reduction(skill=19, low_mana=True) = 0
+reduction(skill=20, low_mana=False) = 2
+reduction(skill=20, low_mana=True) = 1
+reduction(skill=21, low_mana=False) = 2
+reduction(skill=21, low_mana=True) = 1
+reduction(skill=22, low_mana=False) = 2
+reduction(skill=22, low_mana=True) = 1
+reduction(skill=23, low_mana=False) = 2
+reduction(skill=23, low_mana=True) = 1
+reduction(skill=24, low_mana=False) = 2
+reduction(skill=24, low_mana=True) = 1
+reduction(skill=25, low_mana=False) = 3
+reduction(skill=25, low_mana=True) = 2
+reduction(skill=26, low_mana=False) = 3
+reduction(skill=26, low_mana=True) = 2
+reduction(skill=27, low_mana=False) = 3
+reduction(skill=27, low_mana=True) = 2
+reduction(skill=28, low_mana=False) = 3
+reduction(skill=28, low_mana=True) = 2
+reduction(skill=29, low_mana=False) = 3
+reduction(skill=29, low_mana=True) = 2
+reduction(skill=30, low_mana=False) = 4
+reduction(skill=30, low_mana=True) = 3
+# magic.effective_spell_cost
+effective_spell_cost({'base_cost': 0, 'skill': 10}) = SpellCostResult(base_cost=0, scaled_cost=0, reduction=0, final_cost=0, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 1, 'skill': 10}) = SpellCostResult(base_cost=1, scaled_cost=1, reduction=0, final_cost=1, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 2, 'skill': 10}) = SpellCostResult(base_cost=2, scaled_cost=2, reduction=0, final_cost=2, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 3, 'skill': 10}) = SpellCostResult(base_cost=3, scaled_cost=3, reduction=0, final_cost=3, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 0.5, 'skill': 10}) = SpellCostResult(base_cost=0.5, scaled_cost=1, reduction=0, final_cost=1, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 1.5, 'skill': 10}) = SpellCostResult(base_cost=1.5, scaled_cost=2, reduction=0, final_cost=2, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 4, 'skill': 15}) = SpellCostResult(base_cost=4, scaled_cost=4, reduction=1, final_cost=3, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 4, 'skill': 20}) = SpellCostResult(base_cost=4, scaled_cost=4, reduction=2, final_cost=2, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 4, 'skill': 25}) = SpellCostResult(base_cost=4, scaled_cost=4, reduction=3, final_cost=1, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 4, 'skill': 30}) = SpellCostResult(base_cost=4, scaled_cost=4, reduction=4, final_cost=0, size_modifier=0, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 2, 'skill': 20, 'size_modifier': 1}) = SpellCostResult(base_cost=2, scaled_cost=4, reduction=2, final_cost=2, size_modifier=1, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 2, 'skill': 20, 'size_modifier': 3}) = SpellCostResult(base_cost=2, scaled_cost=8, reduction=2, final_cost=6, size_modifier=3, area_radius=0, low_mana=False)
+effective_spell_cost({'base_cost': 2, 'skill': 20, 'area_radius': 1}) = SpellCostResult(base_cost=2, scaled_cost=2, reduction=2, final_cost=0, size_modifier=0, area_radius=1, low_mana=False)
+effective_spell_cost({'base_cost': 2, 'skill': 20, 'area_radius': 2}) = SpellCostResult(base_cost=2, scaled_cost=4, reduction=2, final_cost=2, size_modifier=0, area_radius=2, low_mana=False)
+effective_spell_cost({'base_cost': 0.5, 'skill': 10, 'area_radius': 3}) = SpellCostResult(base_cost=0.5, scaled_cost=2, reduction=0, final_cost=2, size_modifier=0, area_radius=3, low_mana=False)
+effective_spell_cost({'base_cost': 3, 'skill': 25, 'low_mana': True}) = SpellCostResult(base_cost=3, scaled_cost=3, reduction=2, final_cost=1, size_modifier=0, area_radius=0, low_mana=True)
+effective_spell_cost({'base_cost': 3, 'skill': 25, 'size_modifier': 2, 'area_radius': 2}) = ValueError: A spell is Regular (size_modifier) xor Area (area_radius), not both
+effective_spell_cost({'base_cost': -1, 'skill': 10}) = ValueError: base_cost must be non-negative
+effective_spell_cost({'base_cost': 2, 'skill': 10, 'area_radius': -1}) = ValueError: area_radius must be non-negative
+# magic.maintenance_cost
+maintenance(base=0, skill=10, low_mana=False) = 0
+maintenance(base=0, skill=10, low_mana=True) = 0
+maintenance(base=0, skill=15, low_mana=False) = 0
+maintenance(base=0, skill=15, low_mana=True) = 0
+maintenance(base=0, skill=20, low_mana=False) = 0
+maintenance(base=0, skill=20, low_mana=True) = 0
+maintenance(base=0, skill=25, low_mana=False) = 0
+maintenance(base=0, skill=25, low_mana=True) = 0
+maintenance(base=0, skill=30, low_mana=False) = 0
+maintenance(base=0, skill=30, low_mana=True) = 0
+maintenance(base=1, skill=10, low_mana=False) = 1
+maintenance(base=1, skill=10, low_mana=True) = 1
+maintenance(base=1, skill=15, low_mana=False) = 0
+maintenance(base=1, skill=15, low_mana=True) = 1
+maintenance(base=1, skill=20, low_mana=False) = 0
+maintenance(base=1, skill=20, low_mana=True) = 0
+maintenance(base=1, skill=25, low_mana=False) = 0
+maintenance(base=1, skill=25, low_mana=True) = 0
+maintenance(base=1, skill=30, low_mana=False) = 0
+maintenance(base=1, skill=30, low_mana=True) = 0
+maintenance(base=2, skill=10, low_mana=False) = 2
+maintenance(base=2, skill=10, low_mana=True) = 2
+maintenance(base=2, skill=15, low_mana=False) = 1
+maintenance(base=2, skill=15, low_mana=True) = 2
+maintenance(base=2, skill=20, low_mana=False) = 0
+maintenance(base=2, skill=20, low_mana=True) = 1
+maintenance(base=2, skill=25, low_mana=False) = 0
+maintenance(base=2, skill=25, low_mana=True) = 0
+maintenance(base=2, skill=30, low_mana=False) = 0
+maintenance(base=2, skill=30, low_mana=True) = 0
+maintenance(base=3, skill=10, low_mana=False) = 3
+maintenance(base=3, skill=10, low_mana=True) = 3
+maintenance(base=3, skill=15, low_mana=False) = 2
+maintenance(base=3, skill=15, low_mana=True) = 3
+maintenance(base=3, skill=20, low_mana=False) = 1
+maintenance(base=3, skill=20, low_mana=True) = 2
+maintenance(base=3, skill=25, low_mana=False) = 0
+maintenance(base=3, skill=25, low_mana=True) = 1
+maintenance(base=3, skill=30, low_mana=False) = 0
+maintenance(base=3, skill=30, low_mana=True) = 0
+maintenance(base=5, skill=10, low_mana=False) = 5
+maintenance(base=5, skill=10, low_mana=True) = 5
+maintenance(base=5, skill=15, low_mana=False) = 4
+maintenance(base=5, skill=15, low_mana=True) = 5
+maintenance(base=5, skill=20, low_mana=False) = 3
+maintenance(base=5, skill=20, low_mana=True) = 4
+maintenance(base=5, skill=25, low_mana=False) = 2
+maintenance(base=5, skill=25, low_mana=True) = 3
+maintenance(base=5, skill=30, low_mana=False) = 1
+maintenance(base=5, skill=30, low_mana=True) = 2
+# magic.casting_time
+casting_time(base=1, skill=5, low_mana=False, ceremonial=False) = 2
+casting_time(base=1, skill=5, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=5, low_mana=True, ceremonial=False) = 2
+casting_time(base=1, skill=5, low_mana=True, ceremonial=True) = 10
+casting_time(base=1, skill=10, low_mana=False, ceremonial=False) = 1
+casting_time(base=1, skill=10, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=10, low_mana=True, ceremonial=False) = 2
+casting_time(base=1, skill=10, low_mana=True, ceremonial=True) = 10
+casting_time(base=1, skill=15, low_mana=False, ceremonial=False) = 1
+casting_time(base=1, skill=15, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=15, low_mana=True, ceremonial=False) = 1
+casting_time(base=1, skill=15, low_mana=True, ceremonial=True) = 10
+casting_time(base=1, skill=20, low_mana=False, ceremonial=False) = 1
+casting_time(base=1, skill=20, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=20, low_mana=True, ceremonial=False) = 1
+casting_time(base=1, skill=20, low_mana=True, ceremonial=True) = 10
+casting_time(base=1, skill=25, low_mana=False, ceremonial=False) = 1
+casting_time(base=1, skill=25, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=25, low_mana=True, ceremonial=False) = 1
+casting_time(base=1, skill=25, low_mana=True, ceremonial=True) = 10
+casting_time(base=1, skill=30, low_mana=False, ceremonial=False) = 1
+casting_time(base=1, skill=30, low_mana=False, ceremonial=True) = 10
+casting_time(base=1, skill=30, low_mana=True, ceremonial=False) = 1
+casting_time(base=1, skill=30, low_mana=True, ceremonial=True) = 10
+casting_time(base=2, skill=5, low_mana=False, ceremonial=False) = 4
+casting_time(base=2, skill=5, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=5, low_mana=True, ceremonial=False) = 4
+casting_time(base=2, skill=5, low_mana=True, ceremonial=True) = 20
+casting_time(base=2, skill=10, low_mana=False, ceremonial=False) = 2
+casting_time(base=2, skill=10, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=10, low_mana=True, ceremonial=False) = 4
+casting_time(base=2, skill=10, low_mana=True, ceremonial=True) = 20
+casting_time(base=2, skill=15, low_mana=False, ceremonial=False) = 2
+casting_time(base=2, skill=15, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=15, low_mana=True, ceremonial=False) = 2
+casting_time(base=2, skill=15, low_mana=True, ceremonial=True) = 20
+casting_time(base=2, skill=20, low_mana=False, ceremonial=False) = 1
+casting_time(base=2, skill=20, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=20, low_mana=True, ceremonial=False) = 2
+casting_time(base=2, skill=20, low_mana=True, ceremonial=True) = 20
+casting_time(base=2, skill=25, low_mana=False, ceremonial=False) = 1
+casting_time(base=2, skill=25, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=25, low_mana=True, ceremonial=False) = 1
+casting_time(base=2, skill=25, low_mana=True, ceremonial=True) = 20
+casting_time(base=2, skill=30, low_mana=False, ceremonial=False) = 1
+casting_time(base=2, skill=30, low_mana=False, ceremonial=True) = 20
+casting_time(base=2, skill=30, low_mana=True, ceremonial=False) = 1
+casting_time(base=2, skill=30, low_mana=True, ceremonial=True) = 20
+casting_time(base=5, skill=5, low_mana=False, ceremonial=False) = 10
+casting_time(base=5, skill=5, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=5, low_mana=True, ceremonial=False) = 10
+casting_time(base=5, skill=5, low_mana=True, ceremonial=True) = 50
+casting_time(base=5, skill=10, low_mana=False, ceremonial=False) = 5
+casting_time(base=5, skill=10, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=10, low_mana=True, ceremonial=False) = 10
+casting_time(base=5, skill=10, low_mana=True, ceremonial=True) = 50
+casting_time(base=5, skill=15, low_mana=False, ceremonial=False) = 5
+casting_time(base=5, skill=15, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=15, low_mana=True, ceremonial=False) = 5
+casting_time(base=5, skill=15, low_mana=True, ceremonial=True) = 50
+casting_time(base=5, skill=20, low_mana=False, ceremonial=False) = 3
+casting_time(base=5, skill=20, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=20, low_mana=True, ceremonial=False) = 5
+casting_time(base=5, skill=20, low_mana=True, ceremonial=True) = 50
+casting_time(base=5, skill=25, low_mana=False, ceremonial=False) = 2
+casting_time(base=5, skill=25, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=25, low_mana=True, ceremonial=False) = 3
+casting_time(base=5, skill=25, low_mana=True, ceremonial=True) = 50
+casting_time(base=5, skill=30, low_mana=False, ceremonial=False) = 1
+casting_time(base=5, skill=30, low_mana=False, ceremonial=True) = 50
+casting_time(base=5, skill=30, low_mana=True, ceremonial=False) = 2
+casting_time(base=5, skill=30, low_mana=True, ceremonial=True) = 50
+casting_time(base=10, skill=5, low_mana=False, ceremonial=False) = 20
+casting_time(base=10, skill=5, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=5, low_mana=True, ceremonial=False) = 20
+casting_time(base=10, skill=5, low_mana=True, ceremonial=True) = 100
+casting_time(base=10, skill=10, low_mana=False, ceremonial=False) = 10
+casting_time(base=10, skill=10, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=10, low_mana=True, ceremonial=False) = 20
+casting_time(base=10, skill=10, low_mana=True, ceremonial=True) = 100
+casting_time(base=10, skill=15, low_mana=False, ceremonial=False) = 10
+casting_time(base=10, skill=15, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=15, low_mana=True, ceremonial=False) = 10
+casting_time(base=10, skill=15, low_mana=True, ceremonial=True) = 100
+casting_time(base=10, skill=20, low_mana=False, ceremonial=False) = 5
+casting_time(base=10, skill=20, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=20, low_mana=True, ceremonial=False) = 10
+casting_time(base=10, skill=20, low_mana=True, ceremonial=True) = 100
+casting_time(base=10, skill=25, low_mana=False, ceremonial=False) = 3
+casting_time(base=10, skill=25, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=25, low_mana=True, ceremonial=False) = 5
+casting_time(base=10, skill=25, low_mana=True, ceremonial=True) = 100
+casting_time(base=10, skill=30, low_mana=False, ceremonial=False) = 2
+casting_time(base=10, skill=30, low_mana=False, ceremonial=True) = 100
+casting_time(base=10, skill=30, low_mana=True, ceremonial=False) = 3
+casting_time(base=10, skill=30, low_mana=True, ceremonial=True) = 100
+casting_time(base=0, skill=10) = ValueError: base_seconds must be at least 1
+# magic.ceremonial_energy
+ceremonial_energy({'spell_cost': 10}) = CeremonialResult(spell_cost=10, total_energy=0, extra_energy=0, skill_bonus=0, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'caster_energy': 5}) = CeremonialResult(spell_cost=10, total_energy=5, extra_energy=0, skill_bonus=0, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'caster_energy': 10, 'mage_energy': 2}) = CeremonialResult(spell_cost=10, total_energy=12, extra_energy=2, skill_bonus=1, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'mage_energy': 20}) = CeremonialResult(spell_cost=10, total_energy=20, extra_energy=10, skill_bonus=4, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'skilled_nonmages': 4}) = CeremonialResult(spell_cost=10, total_energy=12, extra_energy=2, skill_bonus=1, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'low_skill_mages': 4}) = CeremonialResult(spell_cost=10, total_energy=12, extra_energy=2, skill_bonus=1, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'supporters': 50}) = CeremonialResult(spell_cost=10, total_energy=50, extra_energy=40, skill_bonus=7, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'supporters': 200}) = CeremonialResult(spell_cost=10, total_energy=100, extra_energy=90, skill_bonus=12, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'opposers': 1}) = CeremonialResult(spell_cost=10, total_energy=0, extra_energy=0, skill_bonus=0, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 10, 'opposers': 50}) = CeremonialResult(spell_cost=10, total_energy=0, extra_energy=0, skill_bonus=0, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 20, 'caster_energy': 20, 'mage_energy': 20, 'supporters': 10}) = CeremonialResult(spell_cost=20, total_energy=50, extra_energy=30, skill_bonus=4, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 5, 'caster_energy': 10}) = CeremonialResult(spell_cost=5, total_energy=10, extra_energy=5, skill_bonus=4, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 5, 'caster_energy': 20}) = CeremonialResult(spell_cost=5, total_energy=20, extra_energy=15, skill_bonus=6, time_multiplier=10, coordination_note='Ceremonial: casting time x10; high skill gives no cost/time reduction; a roll of 16 always fails and 17-18 always critically fails.')
+ceremonial_energy({'spell_cost': 0}) = ValueError: spell_cost must be at least 1
+ceremonial_energy({'spell_cost': 10, 'caster_energy': -1}) = ValueError: caster_energy must be non-negative
+# magic.long_distance_modifier
+long_distance(yards=0) = 0
+long_distance(yards=50) = 0
+long_distance(yards=200) = 0
+long_distance(yards=880) = -1
+long_distance(yards=1760) = -2
+long_distance(yards=5280) = -3
+long_distance(yards=17600) = -4
+long_distance(yards=176000) = -6
+long_distance(miles=0) = 0
+long_distance(miles=0.5) = -1
+long_distance(miles=1) = -2
+long_distance(miles=3) = -3
+long_distance(miles=10) = -4
+long_distance(miles=30) = -5
+long_distance(miles=100) = -6
+long_distance(miles=300) = -7
+long_distance(miles=1000) = -8
+long_distance(miles=3000) = -10
+long_distance(miles=10000) = -10
+long_distance(yards=1, miles=1) = ValueError: Provide exactly one of yards or miles.
+long_distance() = ValueError: Provide exactly one of yards or miles.
+long_distance(miles=-1) = ValueError: distance must be non-negative
+# magic.regular_spell_distance_penalty
+regular_penalty(yards=0, can_touch=False, can_see=True) = 0
+regular_penalty(yards=0, can_touch=False, can_see=False) = -5
+regular_penalty(yards=0, can_touch=True, can_see=True) = 0
+regular_penalty(yards=0, can_touch=True, can_see=False) = 0
+regular_penalty(yards=0.5, can_touch=False, can_see=True) = -1
+regular_penalty(yards=0.5, can_touch=False, can_see=False) = -6
+regular_penalty(yards=0.5, can_touch=True, can_see=True) = 0
+regular_penalty(yards=0.5, can_touch=True, can_see=False) = 0
+regular_penalty(yards=1, can_touch=False, can_see=True) = -1
+regular_penalty(yards=1, can_touch=False, can_see=False) = -6
+regular_penalty(yards=1, can_touch=True, can_see=True) = 0
+regular_penalty(yards=1, can_touch=True, can_see=False) = 0
+regular_penalty(yards=1.5, can_touch=False, can_see=True) = -2
+regular_penalty(yards=1.5, can_touch=False, can_see=False) = -7
+regular_penalty(yards=1.5, can_touch=True, can_see=True) = 0
+regular_penalty(yards=1.5, can_touch=True, can_see=False) = 0
+regular_penalty(yards=2, can_touch=False, can_see=True) = -2
+regular_penalty(yards=2, can_touch=False, can_see=False) = -7
+regular_penalty(yards=2, can_touch=True, can_see=True) = 0
+regular_penalty(yards=2, can_touch=True, can_see=False) = 0
+regular_penalty(yards=5, can_touch=False, can_see=True) = -5
+regular_penalty(yards=5, can_touch=False, can_see=False) = -10
+regular_penalty(yards=5, can_touch=True, can_see=True) = 0
+regular_penalty(yards=5, can_touch=True, can_see=False) = 0
+regular_penalty(yards=10, can_touch=False, can_see=True) = -10
+regular_penalty(yards=10, can_touch=False, can_see=False) = -15
+regular_penalty(yards=10, can_touch=True, can_see=True) = 0
+regular_penalty(yards=10, can_touch=True, can_see=False) = 0
+regular_penalty(yards=-1) = ValueError: yards must be non-negative
+# magic.missile_spell_damage
+missile(magery=0, seconds=1, energy=None) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=1, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=1, energy=1) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=1, energy=5) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=1, energy=100) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=2, energy=None) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=2, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=2, energy=1) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=2, energy=5) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=2, energy=100) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=3, energy=None) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=3, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=3, energy=1) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=3, energy=5) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=3, energy=100) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=4, energy=None) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=4, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=4, energy=1) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=4, energy=5) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=0, seconds=4, energy=100) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=1, seconds=1, energy=None) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=1, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=1, seconds=1, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=1, energy=5) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=1, energy=100) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=2, energy=None) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=1, seconds=2, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=1, seconds=2, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=2, energy=5) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=1, seconds=2, energy=100) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=1, seconds=3, energy=None) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=1, seconds=3, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=1, seconds=3, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=3, energy=5) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=1, seconds=3, energy=100) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=1, seconds=4, energy=None) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=1, seconds=4, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=1, seconds=4, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=1, seconds=4, energy=5) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=1, seconds=4, energy=100) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=2, seconds=1, energy=None) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=2, seconds=1, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=2, seconds=1, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=2, seconds=1, energy=5) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=2, seconds=1, energy=100) = DiceSpec(count=2, sides=6, modifier=0)
+missile(magery=2, seconds=2, energy=None) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=2, seconds=2, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=2, seconds=2, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=2, seconds=2, energy=5) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=2, seconds=2, energy=100) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=2, seconds=3, energy=None) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=2, seconds=3, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=2, seconds=3, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=2, seconds=3, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=2, seconds=3, energy=100) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=2, seconds=4, energy=None) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=2, seconds=4, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=2, seconds=4, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=2, seconds=4, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=2, seconds=4, energy=100) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=3, seconds=1, energy=None) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=3, seconds=1, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=3, seconds=1, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=3, seconds=1, energy=5) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=3, seconds=1, energy=100) = DiceSpec(count=3, sides=6, modifier=0)
+missile(magery=3, seconds=2, energy=None) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=3, seconds=2, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=3, seconds=2, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=3, seconds=2, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=3, seconds=2, energy=100) = DiceSpec(count=6, sides=6, modifier=0)
+missile(magery=3, seconds=3, energy=None) = DiceSpec(count=9, sides=6, modifier=0)
+missile(magery=3, seconds=3, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=3, seconds=3, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=3, seconds=3, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=3, seconds=3, energy=100) = DiceSpec(count=9, sides=6, modifier=0)
+missile(magery=3, seconds=4, energy=None) = DiceSpec(count=9, sides=6, modifier=0)
+missile(magery=3, seconds=4, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=3, seconds=4, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=3, seconds=4, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=3, seconds=4, energy=100) = DiceSpec(count=9, sides=6, modifier=0)
+missile(magery=4, seconds=1, energy=None) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=4, seconds=1, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=4, seconds=1, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=4, seconds=1, energy=5) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=4, seconds=1, energy=100) = DiceSpec(count=4, sides=6, modifier=0)
+missile(magery=4, seconds=2, energy=None) = DiceSpec(count=8, sides=6, modifier=0)
+missile(magery=4, seconds=2, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=4, seconds=2, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=4, seconds=2, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=4, seconds=2, energy=100) = DiceSpec(count=8, sides=6, modifier=0)
+missile(magery=4, seconds=3, energy=None) = DiceSpec(count=12, sides=6, modifier=0)
+missile(magery=4, seconds=3, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=4, seconds=3, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=4, seconds=3, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=4, seconds=3, energy=100) = DiceSpec(count=12, sides=6, modifier=0)
+missile(magery=4, seconds=4, energy=None) = DiceSpec(count=12, sides=6, modifier=0)
+missile(magery=4, seconds=4, energy=0) = DiceSpec(count=0, sides=6, modifier=0)
+missile(magery=4, seconds=4, energy=1) = DiceSpec(count=1, sides=6, modifier=0)
+missile(magery=4, seconds=4, energy=5) = DiceSpec(count=5, sides=6, modifier=0)
+missile(magery=4, seconds=4, energy=100) = DiceSpec(count=12, sides=6, modifier=0)
+missile(magery=-1) = ValueError: magery must be non-negative
+missile(magery=2, seconds=0) = ValueError: seconds must be at least 1
