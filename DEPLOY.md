@@ -38,7 +38,7 @@ cd /opt/gurps-bot
 cp .env.example .env
 nano .env                 # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
 
-./deploy/deploy.sh        # deps, re-vendor GCS data, smoke test
+./deploy/deploy.sh        # deps, re-vendor GCS data, DB create/migrations, smoke test
 
 sudo cp deploy/gurps-bot.service /etc/systemd/system/
 sudo sed -i 's/^User=.*/User=ubuntu/' /etc/systemd/system/gurps-bot.service
@@ -77,6 +77,15 @@ to an hour; instant if you set `DEV_GUILD_ID`.
 ```sh
 cd /opt/gurps-bot && git pull && ./deploy/deploy.sh
 ```
+
+**Migrations:** `deploy.sh` runs `uv run python -m gurps_bot.db.bootstrap` on
+every update — a fresh database is created at the current schema and stamped
+at Alembic head; a stamped database gets `alembic upgrade head`. Startup
+`create_all` can only create tables, never add columns to existing ones, so
+updates rely on this step. One-time note for a database deployed before the
+bootstrap existed (tables present, no `alembic_version`): confirm the bot
+ran fine on the code that built it, then `uv run python -m alembic stamp head`
+once — the bootstrap refuses to guess and will tell you the same thing.
 
 Run `/sync clear:true` only if commands changed. Never overwrite
 `data/gurps_bot.db` — if you rsync instead of pull, exclude it.

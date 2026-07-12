@@ -49,15 +49,18 @@ class ErrorHandler(commands.Cog):
         error: app_commands.AppCommandError,
     ) -> None:
         try:
-            if isinstance(error, app_commands.CheckFailure):
-                msg = "You don't have permission to use this command."
-            elif isinstance(error, app_commands.CommandOnCooldown):
+            # most-specific first: CommandOnCooldown and MissingPermissions
+            # both subclass CheckFailure — a CheckFailure-first chain swallows
+            # them into the generic permission message
+            if isinstance(error, app_commands.CommandOnCooldown):
                 # round up, floor at 1; never tell the user to wait "0s"
                 wait = max(1, math.ceil(error.retry_after))
                 msg = f"Command on cooldown. Try again in {wait}s."
             elif isinstance(error, app_commands.MissingPermissions):
                 missing = ", ".join(error.missing_permissions)
                 msg = f"Missing permissions: {missing}"
+            elif isinstance(error, app_commands.CheckFailure):
+                msg = "You don't have permission to use this command."
             elif isinstance(error, app_commands.TransformerError):
                 msg = f"Invalid input: {error}"
             else:

@@ -25,6 +25,12 @@ grep -qE '^DISCORD_TOKEN=.+' .env || { echo "!!  DISCORD_TOKEN not set in .env";
 grep -qE '^BOT_AUTHOR_LEGAL_NAME=.+' .env \
   || echo "!!  warning: BOT_AUTHOR_LEGAL_NAME unset — /legal notice ships non-compliant"
 
+echo "==> Database create/stamp + migrations"
+# Fresh DB: created at current schema + stamped at Alembic head. Stamped DB:
+# alembic upgrade head. Unstamped legacy DB: refuses with the one-time fix
+# (create_all can't add columns — updates need migrations to actually run).
+uv run python -m gurps_bot.db.bootstrap
+
 echo "==> Smoke test"
 uv run python -m pytest tests/ -q || { echo "!!  tests failed — review before restarting"; exit 1; }
 

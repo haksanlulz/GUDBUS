@@ -447,6 +447,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             if not ctx.ok:
                 return
             c = ctx.cs.find_combatant(target)
+            ctx.cs.require_gm_or_owner(c)
             combatant, warning = await modify_hp(ctx.session, c.id, amount)
 
             # B420: major wound triggers a knockdown/stun roll unless already down
@@ -502,6 +503,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             if not ctx.ok:
                 return
             c = ctx.cs.find_combatant(target)
+            ctx.cs.require_gm_or_owner(c)
             combatant = await modify_fp(ctx.session, c.id, amount)
             await ctx.commit()
 
@@ -531,6 +533,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             if not ctx.ok:
                 return
             c = ctx.cs.find_combatant(target)
+            ctx.cs.require_gm_or_owner(c)
 
             try:
                 if action == "add":

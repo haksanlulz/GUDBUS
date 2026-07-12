@@ -79,11 +79,16 @@ async def _skill_attr_autocomplete(
 
         _skill_cache.set(cache_key, candidates)
 
+    # discord caps Choice name/value at 100 chars — same rule as
+    # _autocomplete.make_autocomplete (one over-long imported skill name
+    # would 400 the whole payload)
     if not current:
-        return [app_commands.Choice(name=c, value=c) for c in candidates[:25]]
+        return [
+            app_commands.Choice(name=c[:100], value=c[:100]) for c in candidates[:25]
+        ]
 
     matches = fuzzy_match(current, candidates, limit=25, score_cutoff=40)
-    return [app_commands.Choice(name=m, value=m) for m, _ in matches]
+    return [app_commands.Choice(name=m[:100], value=m[:100]) for m, _ in matches]
 
 
 async def _resolve_target(

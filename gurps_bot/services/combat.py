@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import random
 from datetime import datetime, timedelta, timezone
 
@@ -223,6 +224,10 @@ async def add_npc_combatant(
     ht: int = 10,
     will: int = 10,
 ) -> Combatant:
+    # NaN compares False with everything, so a NaN speed makes the initiative
+    # sort arbitrary and undetectable; mirror the wealth service's guard.
+    if not math.isfinite(basic_speed):
+        raise ValueError("Basic Speed must be a finite number.")
     log.info("Adding NPC '%s' to combat id=%d (speed=%.2f, hp=%d)", name, combat.id, basic_speed, hp)
     combatant = Combatant(
         combat_id=combat.id,
@@ -325,14 +330,21 @@ def advance_turn(combat: Combat) -> str | None:
         if StatusEffect.DEAD in effects or StatusEffect.UNCONSCIOUS in effects:
             continue
 
-        # B419: at <=0 HP, roll HT at turn start or fall unconscious — auto-rolled,
-        # GM can override via /combat status
+        # B419: at <=0 HP, roll HT at turn start or fall unconscious — at a
+        # cumulative -1 per full multiple of HP below zero (flat HT in the
+        # 0..-1xHP band, HT-1 from -1xHP, ...). Auto-rolled, GM can override
+        # via /combat status
         if next_combatant.hp_current <= 0:
-            con = check(next_combatant.ht)
+            penalty = 0
+            if next_combatant.hp_max > 0:
+                penalty = -(abs(next_combatant.hp_current) // next_combatant.hp_max)
+            con = check(next_combatant.ht, penalty)
+            effective = next_combatant.ht + penalty
+            note = f", B419 {penalty} at -{-penalty}×HP" if penalty else ""
             if con.outcome.succeeded:
                 messages.append(
                     f"**{next_combatant.name}** stays conscious "
-                    f"(HT {con.rolled} vs {next_combatant.ht})."
+                    f"(HT {con.rolled} vs {effective}{note})."
                 )
             else:
                 next_combatant.status_effects = (
@@ -340,7 +352,7 @@ def advance_turn(combat: Combat) -> str | None:
                 )
                 messages.append(
                     f"**{next_combatant.name}** falls unconscious "
-                    f"(HT {con.rolled} vs {next_combatant.ht})."
+                    f"(HT {con.rolled} vs {effective}{note})."
                 )
                 continue
 

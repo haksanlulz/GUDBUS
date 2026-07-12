@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import discord
 
 from gurps_bot.services.combat_session import CombatPermissionError, CombatSession
@@ -275,12 +277,16 @@ class AddNPCModal(discord.ui.Modal, title="Add NPC"):
 
         try:
             speed_val = float(self.speed.value)
+            if not math.isfinite(speed_val):
+                # float() happily parses "nan"/"inf"; a NaN speed silently
+                # poisons the initiative sort. The service guards too.
+                raise ValueError
             hp_val = int(self.hp.value)
             fp_val = int(self.fp.value or "10")
             dx_val = int(self.dx_input.value or "10")
         except ValueError:
             await interaction.response.send_message(
-                "Invalid numbers. Speed must be a decimal, HP/FP/DX must be integers.",
+                "Invalid numbers. Speed must be a finite decimal, HP/FP/DX must be integers.",
                 ephemeral=True,
             )
             return

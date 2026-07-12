@@ -135,13 +135,24 @@ class ReferenceIndex:
 
         target = name.strip().casefold()
         prefix_hit = None
+        prefix_name = None
+        ambiguous = False
         for name_l, entry in pairs:
             if name_l == target:
                 return entry
-            if prefix_hit is None and name_l.startswith(target):
-                prefix_hit = entry
+            if name_l.startswith(target):
+                if prefix_hit is None:
+                    prefix_hit, prefix_name = entry, name_l
+                elif name_l != prefix_name:
+                    # a second, different name shares the prefix — keep scanning
+                    # for an exact hit, but the prefix tier no longer holds a
+                    # single trustworthy answer (same-named entries recurring
+                    # across books are one answer, not an ambiguity)
+                    ambiguous = True
 
-        return prefix_hit
+        # no exact hit -> only an unambiguous prefix match is trustworthy;
+        # ambiguity belongs to search()/autocomplete
+        return None if ambiguous else prefix_hit
 
 
 # ---------------------------------------------------------------------------

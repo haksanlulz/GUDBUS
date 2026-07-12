@@ -65,6 +65,14 @@ class CombatSession:
                 "Only the current-turn player or the GM can do this."
             )
 
+    def require_gm_or_owner(self, combatant: Combatant) -> None:
+        # gates per-combatant mutation (HP/FP/status); NPCs have no owning
+        # player (discord_user_id is None), so they are GM-only
+        if not self.is_gm and combatant.discord_user_id != self.user_id:
+            raise CombatPermissionError(
+                "Only the GM or that combatant's player can do this."
+            )
+
     def find_own_combatant(self) -> Combatant | None:
         return next(
             (c for c in self.combat.combatants if c.discord_user_id == self.user_id),

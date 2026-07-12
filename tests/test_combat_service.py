@@ -244,6 +244,85 @@ class TestConsciousnessCheck:
         assert ordered_combatants(combat)[combat.current_index].name == "B"
         assert "stays conscious" in (msg or "").lower()
 
+    async def test_no_penalty_above_minus_one_full_hp(self, db_session):
+        """B419: 0..-1xHP band rolls at flat HT (no penalty yet)."""
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 6.0, 10, 10)
+        downed = await add_npc_combatant(db_session, combat, "B", 5.0, 10, 10)
+        await db_session.commit()
+        downed.hp_current = -5  # below zero but above -1xHP
+
+        with patch(
+            "gurps_bot.services.combat.check", return_value=self._fake(True)
+        ) as mock_check:
+            advance_turn(combat)
+        mock_check.assert_called_once_with(10, 0)
+
+    async def test_penalty_one_at_minus_one_full_hp(self, db_session):
+        """B419: reaching -1xHP costs -1 on the consciousness roll."""
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 6.0, 10, 10)
+        downed = await add_npc_combatant(db_session, combat, "B", 5.0, 10, 10)
+        await db_session.commit()
+        downed.hp_current = -10  # exactly -1xHP
+
+        with patch(
+            "gurps_bot.services.combat.check", return_value=self._fake(True)
+        ) as mock_check:
+            advance_turn(combat)
+        mock_check.assert_called_once_with(10, -1)
+
+    async def test_penalty_scales_with_negative_hp_multiples(self, db_session):
+        """B419: -1 per full multiple of HP below zero (-25 on 10 HP -> -2)."""
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 6.0, 10, 10)
+        downed = await add_npc_combatant(db_session, combat, "B", 5.0, 10, 10)
+        await db_session.commit()
+        downed.hp_current = -25  # two full multiples of hp_max 10
+
+        with patch(
+            "gurps_bot.services.combat.check", return_value=self._fake(True)
+        ) as mock_check:
+            advance_turn(combat)
+        mock_check.assert_called_once_with(10, -2)
+
+    async def test_penalty_surfaced_in_message(self, db_session):
+        """The GM sees the B419 modifier math, not a bare flat-HT line."""
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 6.0, 10, 10)
+        downed = await add_npc_combatant(db_session, combat, "B", 5.0, 10, 10)
+        await db_session.commit()
+        downed.hp_current = -10
+
+        with patch(
+            "gurps_bot.services.combat.check", return_value=self._fake(True, rolled=8)
+        ):
+            msg = advance_turn(combat)
+        assert "B419" in (msg or "")
+        assert "-1" in (msg or "")
+
+
+class TestAddNpcValidation:
+    """NaN/inf Basic Speed poisons the initiative sort (NaN compares False
+    with everything, so sorted() order becomes arbitrary and undetectable).
+    Mirror the wealth service's isfinite guard."""
+
+    async def test_nan_speed_rejected(self, db_session):
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        with pytest.raises(ValueError, match="finite"):
+            await add_npc_combatant(db_session, combat, "Ghost", float("nan"), 10, 10)
+
+    async def test_inf_speed_rejected(self, db_session):
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        for bad in (float("inf"), float("-inf")):
+            with pytest.raises(ValueError, match="finite"):
+                await add_npc_combatant(db_session, combat, "Flash", bad, 10, 10)
+
+    async def test_finite_speed_accepted(self, db_session):
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        c = await add_npc_combatant(db_session, combat, "Goblin", 5.25, 10, 10)
+        assert c.basic_speed == 5.25
+
 
 class TestPreviousTurn:
     async def test_basic_undo(self, db_session):

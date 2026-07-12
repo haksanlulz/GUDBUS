@@ -393,6 +393,58 @@ class TestRowClassificationAndRecursion:
         assert any(isinstance(x, CatalogTechnique) for x in out_techs)
 
 
+class TestTraitPlaceholderFiltering:
+    """Grouping containers + template placeholders must not become catalog traits.
+
+    Named grouping rows ('Martial Arts Abilities') and template placeholders
+    ("Must take template's Duty") — rows with no base_points, no
+    points_per_level, and no reference — used to appear as junk /trait
+    entries. Real zero-point traits keep their page cite ('Contact' B44) and
+    must survive.
+    """
+
+    def _walk_traits(self, rows):
+        out: list = []
+        library._walk_simple_rows(
+            rows, out, book="Basic Set",
+            builder=library._build_trait, name_field="name",
+            skip=library._trait_is_placeholder,
+        )
+        return [t.name for t in out]
+
+    def test_named_grouping_container_recursed_not_emitted(self):
+        grouping = {
+            "id": "g1",
+            "name": "Martial Arts Abilities",
+            "children": [TRAIT_ROW],
+        }
+        names = self._walk_traits([grouping])
+        assert "Martial Arts Abilities" not in names
+        assert "Absent-Mindedness" in names  # child still emitted
+
+    def test_placeholder_leaf_not_emitted(self):
+        placeholder = {"id": "p1", "name": "Must take template's Duty", "tags": []}
+        assert self._walk_traits([placeholder]) == []
+
+    def test_zero_point_trait_with_page_survives(self):
+        contact = {"id": "zp", "name": "Contact", "reference": "B44"}
+        assert self._walk_traits([contact]) == ["Contact"]
+
+    def test_meta_trait_container_with_page_emits_and_recurses(self):
+        meta = {
+            "id": "mt",
+            "name": "Body of Metal",
+            "reference": "B262",
+            "children": [TRAIT_ROW],
+        }
+        names = self._walk_traits([meta])
+        assert names == ["Body of Metal", "Absent-Mindedness"]
+
+    def test_points_per_level_only_trait_survives(self):
+        leveled = {"id": "lv", "name": "Magery", "points_per_level": 10}
+        assert self._walk_traits([leveled]) == ["Magery"]
+
+
 class TestRealLibrary:
     def test_real_library_has_skills_if_present(self):
         default_root = library.DEFAULT_LIBRARY_ROOT
@@ -403,6 +455,23 @@ class TestRealLibrary:
         assert len(cat["skills"]) > 0
         for sk in cat["skills"]:
             _assert_no_prose(sk)
+
+    def test_real_library_traits_carry_no_placeholder_junk(self):
+        # every emitted trait must have at least one of points /
+        # points_per_level / page; spot-checks pin both directions
+        default_root = library.DEFAULT_LIBRARY_ROOT
+        if not Path(default_root).is_dir():
+            pytest.skip(f"vendored library not present at {default_root}")
+        traits = load_library()["traits"]
+        junk = [
+            t for t in traits
+            if not t.points and not t.points_per_level and not t.page
+        ]
+        assert junk == [], f"{len(junk)} placeholder traits leaked: {junk[:5]}"
+        names = {t.name for t in traits}
+        assert "Martial Arts Abilities" not in names
+        assert "Must take template's Duty" not in names
+        assert "Contact" in names  # zero-point but real (B44)
 
 
 class TestSpellTerseFactCap:

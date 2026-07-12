@@ -192,6 +192,37 @@ class TestGet:
         assert result is not None
         assert result.name == "Combat Reflexes"
 
+    def test_get_ambiguous_prefix_returns_none(self, index):
+        # "Sw" prefixes Sword, Swordsmanship, and Sword Art — no single answer.
+        # The contract: a facts lookup must never assert an arbitrary entry's
+        # page cite; ambiguity belongs to search()/autocomplete.
+        assert index.get("skills", "Sw") is None
+
+    def test_get_unambiguous_prefix_still_resolves(self, index):
+        # "Steal" prefixes only Stealth — the single-hit prefix tier stays.
+        result = index.get("skills", "Steal")
+        assert result is not None
+        assert result.name == "Stealth"
+
+    def test_get_exact_wins_even_when_prefix_tier_is_ambiguous(self):
+        # Exact match must win regardless of catalog order — an ambiguous
+        # prefix tier scanned before the exact entry must not short-circuit.
+        index = ReferenceIndex(
+            {"skills": [_skill("Swordsmanship"), _skill("Sword Art"), _skill("Sword")]}
+        )
+        result = index.get("skills", "Sword")
+        assert result is not None
+        assert result.name == "Sword"
+
+    def test_get_same_named_entries_are_not_ambiguous(self):
+        # The same skill recurring across books is one answer, not two.
+        index = ReferenceIndex(
+            {"skills": [_skill("Broadsword"), _skill("Broadsword", book="Martial Arts")]}
+        )
+        result = index.get("skills", "Broadsw")
+        assert result is not None
+        assert result.name == "Broadsword"
+
 
 class TestNames:
     def test_names_lists_all(self, index):

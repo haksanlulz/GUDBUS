@@ -64,7 +64,25 @@ class DatabaseManager:
             )
         return self._session_factory
 
+    @property
+    def engine(self) -> AsyncEngine:
+        if self._engine is None:
+            raise RuntimeError("Database not initialized. Call init() first.")
+        return self._engine
+
     async def create_tables(self) -> None:
+        """Create all tables if they don't exist.
+
+        A brand-fresh file database (no tables before create_all) is stamped
+        at Alembic head: create_all builds the full current schema, and the
+        stamp is what lets the deploy path's ``upgrade head`` apply future
+        column adds (create_all never alters an existing table). In-memory
+        databases (test fixtures) and databases that already had tables are
+        never stamped — a legacy DB may sit at any historical schema, and
+        guessing its revision belongs to the operator (see db/bootstrap.py).
+        """
+        import asyncio
+
         from gurps_bot.config import DATA_DIR
         from gurps_bot.db.models import Base
 
@@ -73,7 +91,22 @@ class DatabaseManager:
 
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         async with self._engine.begin() as conn:
+
+            def _table_names(sync_conn):
+                from sqlalchemy import inspect
+
+                return inspect(sync_conn).get_table_names()
+
+            pre_existing = await conn.run_sync(_table_names)
             await conn.run_sync(Base.metadata.create_all)
+
+        from gurps_bot.db.bootstrap import is_transient_sqlite_url, stamp_head
+
+        url = self._engine.url.render_as_string(hide_password=False)
+        if not pre_existing and not is_transient_sqlite_url(url):
+            # stamp_head is sync (alembic's env.py runs asyncio.run itself) —
+            # dispatch to a worker thread to keep this loop clean
+            await asyncio.to_thread(stamp_head, url)
 
     async def dispose(self) -> None:
         """Safe to call multiple times."""

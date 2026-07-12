@@ -61,7 +61,26 @@ ORANGE = discord.Color.dark_orange()
 # keep bodies/lists under discord's embed caps
 EMBED_FIELD_LIMIT = 1024
 EMBED_DESC_LIMIT = 4096
+EMBED_TITLE_LIMIT = 256
 _LIST_PAGE = 10
+
+
+def _cap_title(text: str) -> str:
+    """Fit user text into an embed title (256) — slash options allow 6000.
+
+    Display-only: storage keeps the full text. Overflow used to 400 the reply
+    after the DB commit, which read as a bot crash and caused retry-duplicates.
+    """
+    if len(text) <= EMBED_TITLE_LIMIT:
+        return text
+    return text[: EMBED_TITLE_LIMIT - 1] + "…"
+
+
+def _cap_desc(text: str) -> str:
+    """Fit user text into an embed description (4096). Display-only."""
+    if len(text) <= EMBED_DESC_LIMIT:
+        return text
+    return text[: EMBED_DESC_LIMIT - 40] + "\n*…truncated*"
 
 # no 'adventuring' choice — it's GM-set per session and needs a multiplier arg
 STUDY_METHOD_CHOICES = [
@@ -174,7 +193,7 @@ class StudyCog(commands.Cog):
             return
 
         method_label = row.method.replace("_", " ").title()
-        embed = discord.Embed(title=f"Studied {skill}", color=GREEN)
+        embed = discord.Embed(title=_cap_title(f"Studied {skill}"), color=GREEN)
         embed.add_field(name="Method", value=method_label, inline=True)
         embed.add_field(
             name="Real Hours", value=_fmt_hours(row.real_hours), inline=True
@@ -225,7 +244,9 @@ class StudyCog(commands.Cog):
                 session, interaction.user.id, skill, character_id=char_id
             )
 
-        embed = discord.Embed(title=f"{skill} — Study Progress", color=BLUE)
+        embed = discord.Embed(
+            title=_cap_title(f"{skill} — Study Progress"), color=BLUE
+        )
         embed.add_field(
             name="Total Learning Hours",
             value=_fmt_hours(progress.total_learning_hours),
@@ -321,7 +342,7 @@ class StudyCog(commands.Cog):
             await session.commit()
 
         embed = discord.Embed(
-            title=f"Reset {skill}",
+            title=_cap_title(f"Reset {skill}"),
             description=(
                 f"Deleted **{deleted}** study session(s)."
                 if deleted
@@ -398,8 +419,8 @@ class NotesCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title=f"Note #{note_id}: {note_title}",
-            description=body or "*No body.*",
+            title=_cap_title(f"Note #{note_id}: {note_title}"),
+            description=_cap_desc(body) if body else "*No body.*",
             color=GOLD if secret else GREEN,
         )
         if note_tags:
@@ -513,8 +534,8 @@ class NotesCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title=f"Note #{note_id}: {note_title}",
-            description=note_body or "*No body.*",
+            title=_cap_title(f"Note #{note_id}: {note_title}"),
+            description=_cap_desc(note_body) if note_body else "*No body.*",
             color=GOLD if note_secret else GREEN,
         )
         if note_tags:
@@ -643,7 +664,9 @@ class TimersCog(commands.Cog):
             )
             return
 
-        embed = discord.Embed(title=f"Timer Started: {timer_label}", color=ORANGE)
+        embed = discord.Embed(
+            title=_cap_title(f"Timer Started: {timer_label}"), color=ORANGE
+        )
         embed.add_field(
             name="Remaining",
             value=f"{timer_remaining}/{timer_total} {unit}",

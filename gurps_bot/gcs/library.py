@@ -339,18 +339,47 @@ def _walk_skl_rows(rows: list, out: list, *, book: str) -> None:
         # rows with neither difficulty nor children are skipped (placeholders)
 
 
-def _walk_simple_rows(rows: list, out: list, *, book: str, builder, name_field: str) -> None:
-    """flatten traits/spells/equipment rows; recursion is defensive — Basic Set is flat but the schema allows nesting"""
+def _trait_is_placeholder(row: dict) -> bool:
+    """True for grouping containers and template placeholders in .adq files.
+
+    No base_points + no points_per_level + no reference = not a real catalog
+    trait: grouping rows ("Martial Arts Abilities") and template scaffolding
+    ("Must take template's Duty") match; real zero-point entries keep their
+    page cite ("Contact" B44) and meta-trait containers cite theirs, so both
+    survive.
+    """
+    return (
+        not row.get("base_points")
+        and not row.get("points_per_level")
+        and not row.get("reference")
+    )
+
+
+def _walk_simple_rows(
+    rows: list, out: list, *, book: str, builder, name_field: str, skip=None,
+) -> None:
+    """flatten traits/spells/equipment rows; recursion is defensive — Basic Set is flat but the schema allows nesting.
+
+    ``skip`` (row -> bool) suppresses emission of matching named rows while
+    still recursing their children — how trait grouping/placeholder rows are
+    filtered.
+    """
     for row in rows:
         children = row.get("children")
         if children is not None and not row.get(name_field):
-            _walk_simple_rows(children, out, book=book, builder=builder, name_field=name_field)
+            _walk_simple_rows(
+                children, out, book=book, builder=builder,
+                name_field=name_field, skip=skip,
+            )
             continue
-        if row.get(name_field):
+        if row.get(name_field) and not (skip is not None and skip(row)):
             out.append(builder(row, book=book))
         if children:
             # a named container still gets recursed
-            _walk_simple_rows(children, out, book=book, builder=builder, name_field=name_field)
+            _walk_simple_rows(
+                children, out, book=book, builder=builder,
+                name_field=name_field, skip=skip,
+            )
 
 
 def _load_rows(path: Path) -> list:
@@ -402,7 +431,10 @@ def load_library(root: str | Path | None = None) -> dict[str, list]:
                     else:
                         catalog["skills"].append(entry)
             elif category == "traits":
-                _walk_simple_rows(rows, catalog["traits"], book=book, builder=_build_trait, name_field="name")
+                _walk_simple_rows(
+                    rows, catalog["traits"], book=book, builder=_build_trait,
+                    name_field="name", skip=_trait_is_placeholder,
+                )
             elif category == "spells":
                 _walk_simple_rows(rows, catalog["spells"], book=book, builder=_build_spell, name_field="name")
             elif category == "equipment":
