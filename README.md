@@ -198,26 +198,25 @@ gurps_bot/
 
 ## Development
 
-**Run tests** (~1,800 tests):
+**Run tests** (~1,800):
 ```bash
 uv run python -m pytest
 ```
 
 **Database migrations:**
 ```bash
-# Generate a new migration after model changes
+# new migration after model changes
 uv run python -m alembic revision --autogenerate -m "describe change"
 
-# Apply migrations (stamped databases only — see note)
+# apply pending migrations
 uv run python -m alembic upgrade head
-
-# Deploys use the bootstrap wrapper instead: creates + stamps a fresh DB at
-# head, upgrades a stamped one, refuses (with the fix) on an unstamped legacy DB
-uv run python -m gurps_bot.db.bootstrap
 ```
 
-A brand-new database is created at the current schema by startup `create_all`
-and stamped at Alembic head automatically; `upgrade head` only works on
-stamped databases (the initial migration assumes a pre-existing schema).
+Deploys run `uv run python -m gurps_bot.db.bootstrap` instead — it creates and
+stamps a fresh database at head, upgrades a stamped one, and refuses with
+instructions on an unstamped legacy one. Startup `create_all` builds a new
+database at the current schema and stamps it automatically; `upgrade head`
+only works on stamped databases (the initial migration assumes a pre-existing
+schema).
 
 **Dependencies:** Python 3.10+, discord.py 2.3+, SQLAlchemy 2.0+ (async), aiosqlite, rapidfuzz, Alembic.
