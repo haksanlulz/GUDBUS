@@ -198,7 +198,7 @@ gurps_bot/
 
 ## Development
 
-**Run tests** (~1,800):
+**Run tests:**
 ```bash
 uv run python -m pytest
 ```
@@ -220,3 +220,16 @@ only works on stamped databases (the initial migration assumes a pre-existing
 schema).
 
 **Dependencies:** Python 3.10+, discord.py 2.3+, SQLAlchemy 2.0+ (async), aiosqlite, rapidfuzz, Alembic.
+
+## AI assistance
+
+This project was built with AI assistance (Claude). Correctness was established
+by the test suite — including golden-file harnesses for the GCS parser and the
+magic mechanics, and a test that pins the SJG legal notice character-exact —
+and by the deploy script, which runs the full suite before every service
+restart. The author reviews and is accountable for all shipped code.
+
+## License
+
+MIT (see `LICENSE`). The vendored reference data is MPL-2.0 — see
+[Reference data](#reference-data).

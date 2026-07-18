@@ -15,7 +15,7 @@ build/
 *.db
 data/*.db
 
-# Vendored GCS master-library data — reproduce via tools/sync_gcs_library.py (pinned in PROVENANCE.md)
+# Vendored GCS master-library data — reproduce via tools/sync_gcs_library.py (pin = PINNED_REF in that script)
 gurps_bot/data/gcs_library/
 
 # IDE
