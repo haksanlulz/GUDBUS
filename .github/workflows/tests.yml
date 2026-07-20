@@ -1,8 +1,9 @@
 name: Tests
 
 # Runs the pytest suite on every PR and on pushes to main, across the min and a
-# current supported Python. Vendoring the GCS library (as deploy.sh does) lets
-# the reference/library/sync tests run instead of skipping.
+# current supported Python. No GCS data is vendored here (that would clone a
+# third-party repo on every run), so the ~18 vendored-data tests skip; deploy.sh
+# exercises them at deploy time.
 on:
   pull_request:
   push:
@@ -33,9 +34,6 @@ jobs:
 
       - name: Sync dependencies
         run: uv sync --frozen
-
-      - name: Vendor GCS reference data
-        run: uv run python tools/sync_gcs_library.py
 
       - name: Run tests
         run: uv run python -m pytest -q
