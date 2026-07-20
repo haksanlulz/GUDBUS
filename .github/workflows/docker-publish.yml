@@ -20,6 +20,9 @@ concurrency:
   group: docker-publish-${{ github.ref }}
   cancel-in-progress: true
 
+# Default-deny; the one job re-grants exactly what it needs.
+permissions: {}
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest

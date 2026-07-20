@@ -16,6 +16,12 @@ services:
     image: gudbus:latest
     container_name: gurps-bot
     restart: unless-stopped
+    # Runtime hardening: the bot is outbound-only, binds no port, and runs no
+    # setuid binary, so it needs no Linux capabilities and no privilege gain.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # `env_file` loads every variable from .env. The `environment:` block below
     # lists each one explicitly, sourced from .env (or the shell) — no secrets in
     # this committed file. Set them in .env once; every `docker compose up` reads
