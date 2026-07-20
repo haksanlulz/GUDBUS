@@ -31,9 +31,17 @@ GUILD_ID = 999_500
 
 
 @pytest_asyncio.fixture
-async def session_factory():
-    """Provide a session factory so concurrency tests spawn independent sessions."""
-    init_engine("sqlite+aiosqlite://")
+async def session_factory(tmp_path):
+    """Provide a session factory so concurrency tests spawn independent sessions.
+
+    Uses a file-based DB, not shared in-memory: file sqlite gives each session
+    its own pooled connection (as production does), whereas in-memory sqlite
+    forces one shared connection (StaticPool). Under that shared connection a
+    concurrent commit resets a cursor another task is mid-fetch on — which
+    surfaces deterministically on Python 3.10's task scheduling.
+    """
+    db_path = tmp_path / "combat_load.db"
+    init_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
     await init_db()
     yield get_session_factory()
     await dispose_engine()
