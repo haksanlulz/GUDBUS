@@ -16,7 +16,32 @@ services:
     image: gudbus:latest
     container_name: gurps-bot
     restart: unless-stopped
+    # `env_file` loads every variable from .env into the container. The
+    # `environment:` block below just makes the full list of knobs visible in
+    # one place — each value is pulled straight from .env (or your shell), so
+    # secrets still never live in this committed file. Fill them in in .env once;
+    # every `docker compose up` picks them up automatically.
     env_file: .env
+    environment:
+      # --- Core -------------------------------------------------------------
+      # DISCORD_TOKEN is required; compose errors out with this message if unset.
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env (copy .env.example)}
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///data/gurps_bot.db}
+      # --- Legal / about (/legal, /about) ----------------------------------
+      BOT_AUTHOR_LEGAL_NAME: ${BOT_AUTHOR_LEGAL_NAME:-}
+      BOT_INVITE_URL: ${BOT_INVITE_URL:-}
+      BOT_SUPPORT_URL: ${BOT_SUPPORT_URL:-}
+      # --- Command sync (optional) -----------------------------------------
+      DEV_GUILD_ID: ${DEV_GUILD_ID:-}
+      SYNC_ON_START: ${SYNC_ON_START:-}
+      # --- Donation links (optional, /support + /donate) -------------------
+      KOFI_URL: ${KOFI_URL:-}
+      BUYMEACOFFEE_URL: ${BUYMEACOFFEE_URL:-}
+      PATREON_URL: ${PATREON_URL:-}
+      GITHUB_SPONSORS_URL: ${GITHUB_SPONSORS_URL:-}
+      PAYPAL_URL: ${PAYPAL_URL:-}
+      LIBERAPAY_URL: ${LIBERAPAY_URL:-}
+      SUPPORT_MESSAGE: ${SUPPORT_MESSAGE:-}
     volumes:
       # SQLite DB + rotating logs. A named volume keeps the non-root container
       # user's write permissions; back it up with deploy/backup-db.sh or
