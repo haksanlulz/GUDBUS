@@ -12,14 +12,20 @@
 # Build:  docker build -t gudbus .
 # Run:    docker run --env-file .env -v gurps-data:/app/data gudbus
 # (or just `docker compose up -d --build` — see docker-compose.yml)
+#
+# Base images are pinned by digest for reproducible, tamper-resistant builds
+# (the tag stays for readability; the digest is what's enforced, and is a
+# multi-arch manifest list so ARM still resolves). Bump with:
+#   docker buildx imagetools inspect python:3.12-slim
+#   docker buildx imagetools inspect ghcr.io/astral-sh/uv:latest
 
 ############################
 # Stage 1 — builder
 ############################
-FROM python:3.12-slim AS builder
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
 
 # uv: reproducible installs from the repo's uv.lock.
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:93b61e21202b1dab861092748e46bbd6e0e41dd84f59b9174efd2353186e1b47 /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -50,7 +56,7 @@ RUN uv run python tools/sync_gcs_library.py \
 ############################
 # Stage 2 — runtime
 ############################
-FROM python:3.12-slim AS runtime
+FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS runtime
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

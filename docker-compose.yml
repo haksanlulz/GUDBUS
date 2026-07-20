@@ -22,6 +22,12 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Immutable root filesystem — the only writes are the SQLite DB + logs (the
+    # /app/data volume below) and scratch in /tmp (tmpfs). Bytecode writes are
+    # off (PYTHONDONTWRITEBYTECODE=1 in the image).
+    read_only: true
+    tmpfs:
+      - /tmp
     # `env_file` loads every variable from .env. The `environment:` block below
     # lists each one explicitly, sourced from .env (or the shell) — no secrets in
     # this committed file. Set them in .env once; every `docker compose up` reads
