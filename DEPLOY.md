@@ -12,7 +12,7 @@ Two ways to run it: **Docker** (below; only the container engine to install) or
 
 The image bakes in dependencies and the vendored GCS library; the SQLite DB and
 logs live in a `/app/data` volume, and the container bootstraps/migrates the DB
-on every start. Multi-arch friendly — builds on x86-64 and ARM (Oracle A1, Pi).
+on every start. Multi-arch: builds on x86-64 and ARM (Oracle A1, Pi).
 
 ```sh
 git clone https://github.com/haksanlulz/GUDBUS.git /opt/gurps-bot

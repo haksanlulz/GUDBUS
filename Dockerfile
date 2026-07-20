@@ -6,16 +6,15 @@
 #   * builder  — installs deps with uv (from uv.lock) and vendors the pinned
 #                GCS reference library (needs git + network at build time).
 #   * runtime  — slim, non-root, no build tools; ships the built venv + source
-#                + vendored data. The SQLite DB and logs live in the /app/data
-#                volume so they survive image rebuilds.
+#                + vendored data.
 #
 # Build:  docker build -t gudbus .
 # Run:    docker run --env-file .env -v gurps-data:/app/data gudbus
-# (or just `docker compose up -d --build` — see docker-compose.yml)
+# (or `docker compose up -d --build` — see docker-compose.yml)
 #
 # Base images are pinned by digest for reproducible, tamper-resistant builds
-# (the tag stays for readability; the digest is what's enforced, and is a
-# multi-arch manifest list so ARM still resolves). Bump with:
+# (the tag stays for readability; the digest is enforced, and is a multi-arch
+# manifest list so ARM still resolves). Bump with:
 #   docker buildx imagetools inspect python:3.12-slim
 #   docker buildx imagetools inspect ghcr.io/astral-sh/uv:latest
 
@@ -43,7 +42,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# 2) Project source, then install the package itself.
+# 2) Project source, then install the package.
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev

@@ -42,7 +42,7 @@ htmlcov/
 .idea/
 .DS_Store
 
-# Docs & docker files themselves (not needed at runtime)
+# Docker build files — not needed inside the image
 Dockerfile
 .dockerignore
 docker-compose.yml
