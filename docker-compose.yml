@@ -9,9 +9,10 @@
 services:
   gurps-bot:
     build: .
-    # To run a prebuilt image from the repo's registry instead of building
-    # locally, comment out `build:` above and uncomment:
+    # To run a prebuilt image instead of building locally, comment out `build:`
+    # above and uncomment one of these (both are published by CI):
     # image: ghcr.io/haksanlulz/gudbus:latest
+    # image: docker.io/<dockerhub-user>/gudbus:latest
     image: gudbus:latest
     container_name: gurps-bot
     restart: unless-stopped

@@ -39,9 +39,11 @@ time, so a rebuild picks up any pin bump. Run `/sync clear:true` only if command
 changed.
 
 **Prebuilt image:** pushes to `main` publish `ghcr.io/haksanlulz/gudbus:latest`
-(see `.github/workflows/docker-publish.yml`). To pull instead of build, swap the
-`build:`/`image:` lines in `docker-compose.yml` as noted there, then
-`docker compose pull && docker compose up -d`.
+(see `.github/workflows/docker-publish.yml`). The same workflow also pushes to
+Docker Hub (`docker.io/<user>/gudbus`) when the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repo secrets are set — without them it publishes to GHCR only.
+To pull instead of build, swap the `build:`/`image:` lines in
+`docker-compose.yml` as noted there, then `docker compose pull && docker compose up -d`.
 
 **Data & backups:** the DB is in the `gurps-data` named volume. Back it up with
 

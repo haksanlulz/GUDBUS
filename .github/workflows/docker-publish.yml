@@ -1,8 +1,15 @@
 name: Publish Docker image
 
-# Builds the bot image and publishes it to this repo's GitHub Container
-# Registry (ghcr.io/haksanlulz/gudbus). Runs on pushes to main, on version
-# tags, and on demand. Consumers pull it via docker-compose.yml.
+# Builds the bot image and publishes it to GitHub Container Registry
+# (ghcr.io/haksanlulz/gudbus) and, when Docker Hub credentials are configured,
+# to Docker Hub as well. Runs on pushes to main, on version tags, and on demand.
+#
+# GHCR needs no setup (uses the built-in GITHUB_TOKEN). To also publish to
+# Docker Hub, add two repository secrets:
+#   DOCKERHUB_USERNAME — your Docker Hub account/org name
+#   DOCKERHUB_TOKEN    — a Docker Hub access token (Account Settings -> Security)
+# The image is pushed as docker.io/<DOCKERHUB_USERNAME>/gudbus. Without those
+# secrets the Docker Hub steps are skipped and GHCR publishing still runs.
 on:
   push:
     branches: [main]
@@ -26,6 +33,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # Secrets can't be read in `if:` conditions directly, so surface a boolean
+      # output the later Docker Hub steps can gate on.
+      - name: Detect Docker Hub credentials
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME not set — publishing to GHCR only."
+          fi
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
@@ -33,11 +54,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Derive image tags
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository }}
+          # Publish to GHCR always; add Docker Hub only when credentials exist.
+          images: |
+            ghcr.io/${{ github.repository }}
+            name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gudbus,enable=${{ steps.dockerhub.outputs.enabled == 'true' }}
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}
