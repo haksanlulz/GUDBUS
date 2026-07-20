@@ -5,8 +5,8 @@ Small discord.py bot, one SQLite file, runs as a systemd service. ~200 MB RAM,
 below), a $4-5 VPS (Hetzner/Vultr/DO), or a Raspberry Pi. Not serverless — the bot
 holds a persistent gateway connection.
 
-Two ways to run it: **Docker** (below — one file to persist, nothing to install on
-the host but the engine) or **systemd + uv** (the rest of this doc). Pick one.
+Two ways to run it: **Docker** (below; only the container engine to install) or
+**systemd + uv** (the rest of this doc). Pick one.
 
 ## Docker (recommended)
 

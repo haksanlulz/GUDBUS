@@ -18,7 +18,7 @@
 ############################
 FROM python:3.12-slim AS builder
 
-# uv gives us reproducible installs straight from the repo's uv.lock.
+# uv: reproducible installs from the repo's uv.lock.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 ENV UV_COMPILE_BYTECODE=1 \
@@ -62,9 +62,8 @@ RUN groupadd --system --gid 10001 gurps \
 
 WORKDIR /app
 
-# Bring over the built venv + source (incl. the vendored GCS library). The venv
-# is pinned to the absolute path /app/.venv, identical in both stages, so it
-# works unchanged here.
+# Copy the built venv + source (incl. vendored GCS library). The venv's absolute
+# path /app/.venv is identical in both stages, so it works unchanged.
 COPY --from=builder --chown=gurps:gurps /app /app
 
 # Ensure the entrypoint is executable regardless of the host's git file mode.

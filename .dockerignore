@@ -1,6 +1,5 @@
-# Keep the build context (and final image) lean. The Dockerfile vendors the
-# GCS library itself and creates a fresh .venv, so none of the local build/runtime
-# cruft needs to ship into the context.
+# Keep the build context lean. The Dockerfile vendors the GCS library and creates
+# a fresh .venv, so local build/runtime artifacts stay out of the context.
 
 # VCS
 .git

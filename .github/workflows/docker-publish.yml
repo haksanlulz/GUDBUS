@@ -1,8 +1,8 @@
 name: Publish Docker image
 
 # Builds the bot image and publishes it to GitHub Container Registry
-# (ghcr.io/haksanlulz/gudbus) and, when Docker Hub credentials are configured,
-# to Docker Hub as well. Runs on pushes to main, on version tags, and on demand.
+# (ghcr.io/haksanlulz/gudbus), and to Docker Hub when its credentials are set.
+# Runs on pushes to main, on version tags, and on demand.
 #
 # GHCR needs no setup (uses the built-in GITHUB_TOKEN). To also publish to
 # Docker Hub, add two repository secrets:

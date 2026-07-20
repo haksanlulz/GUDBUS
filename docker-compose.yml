@@ -4,27 +4,26 @@
 #   docker compose up -d --build
 #   docker compose logs -f
 #
-# The bot only dials out to Discord — no inbound ports to publish.
+# Dials out to Discord only; no inbound ports.
 
 services:
   gurps-bot:
     build: .
-    # To run a prebuilt image instead of building locally, comment out `build:`
-    # above and uncomment one of these (both are published by CI):
+    # To run a prebuilt image instead of building, comment out `build:` above
+    # and uncomment one (both are published by CI):
     # image: ghcr.io/haksanlulz/gudbus:latest
     # image: docker.io/<dockerhub-user>/gudbus:latest
     image: gudbus:latest
     container_name: gurps-bot
     restart: unless-stopped
-    # `env_file` loads every variable from .env into the container. The
-    # `environment:` block below just makes the full list of knobs visible in
-    # one place — each value is pulled straight from .env (or your shell), so
-    # secrets still never live in this committed file. Fill them in in .env once;
-    # every `docker compose up` picks them up automatically.
+    # `env_file` loads every variable from .env. The `environment:` block below
+    # lists each one explicitly, sourced from .env (or the shell) — no secrets in
+    # this committed file. Set them in .env once; every `docker compose up` reads
+    # them.
     env_file: .env
     environment:
       # --- Core -------------------------------------------------------------
-      # DISCORD_TOKEN is required; compose errors out with this message if unset.
+      # Required; compose aborts with this message if unset.
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env (copy .env.example)}
       DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///data/gurps_bot.db}
       # --- Legal / about (/legal, /about) ----------------------------------
@@ -43,11 +42,9 @@ services:
       LIBERAPAY_URL: ${LIBERAPAY_URL:-}
       SUPPORT_MESSAGE: ${SUPPORT_MESSAGE:-}
     volumes:
-      # SQLite DB + rotating logs. A named volume keeps the non-root container
-      # user's write permissions; back it up with deploy/backup-db.sh or
-      # `docker compose exec`. For a host-visible path instead, swap this for a
-      # bind mount like `./data:/app/data` (ensure the dir is writable by
-      # UID 10001, or add `user: "0:0"`).
+      # SQLite DB + rotating logs. A named volume preserves the non-root user's
+      # write access. For a host-visible path, use a bind mount (`./data:/app/data`)
+      # writable by UID 10001, or add `user: "0:0"`.
       - gurps-data:/app/data
     stop_grace_period: 20s
 
