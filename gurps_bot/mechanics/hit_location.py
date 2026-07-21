@@ -23,7 +23,7 @@ LOCATIONS: tuple[HitLocation, ...] = (
     HitLocation("Face", -5, "x1.5 from corrosion; a major wound can blind/stun."),
     HitLocation("Neck", -5, "x1.5 crushing, x2 cutting; a cut here can decapitate."),
     HitLocation("Torso", 0, "The default target; no special penalty or bonus."),
-    HitLocation("Groin", -3, "Humans take x2 shock from crushing; risks knockdown."),
+    HitLocation("Groin", -3, "Human males take x2 crushing shock; -5 to knockdown."),
     HitLocation("Right Arm", -2, "pi/imp wound as if pi; >1/2 HP in one blow cripples."),
     HitLocation("Left Arm", -2, "pi/imp wound as if pi; >1/2 HP in one blow cripples."),
     HitLocation("Right Leg", -2, "pi/imp wound as if pi; >1/2 HP in one blow cripples."),
@@ -40,7 +40,7 @@ LOCATIONS: tuple[HitLocation, ...] = (
     HitLocation(
         "Vitals",
         -3,
-        "x3 wounding from impaling/piercing/tight-beam burn; extra shock.",
+        "x3 from impaling/any piercing, x2 from a tight-beam burn.",
         deliberate_only=True,
     ),
     HitLocation(

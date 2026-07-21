@@ -10,6 +10,80 @@ from gurps_bot.mechanics.damage import (
 )
 
 
+class TestB399LocationWounding:
+    """Wounding modifiers by hit location, straight off B399.
+
+    Asserts the multiplier only (never the rolled total), so these are
+    deterministic without patching the dice. Complements TestLocationMultiplierRaw
+    below, which pins the same table through a forced roll.
+    """
+
+    def _mult(self, damage_type: str, location: str) -> float:
+        return roll_damage("2d", damage_type, location=location).wounding_multiplier
+
+    # --- Skull / Eye: x4 for all attacks, EXCEPT toxic ---------------------
+    @pytest.mark.parametrize("location", ["Skull", "Eye"])
+    @pytest.mark.parametrize("damage_type", ["cr", "cut", "imp", "pi", "burn", "cor"])
+    def test_skull_and_eye_are_x4(self, location, damage_type):
+        assert self._mult(damage_type, location) == 4.0
+
+    @pytest.mark.parametrize("location", ["Skull", "Eye"])
+    def test_toxic_is_exempt_from_the_x4(self, location):
+        # B399 Skull: "Exception: None of these effects apply to toxic damage."
+        # B399 Eye: "As with skull hits, toxic damage has no special effect."
+        assert self._mult("tox", location) == 1.0
+
+    # --- Face: corrosion ONLY ----------------------------------------------
+    def test_face_corrosion_is_x1_5(self):
+        # "Corrosion damage (only) gets a x1.5 wounding modifier"
+        assert self._mult("cor", "Face") == 1.5
+
+    @pytest.mark.parametrize("damage_type", ["cr", "cut", "imp", "pi"])
+    def test_face_is_otherwise_unmodified(self, damage_type):
+        assert self._mult(damage_type, "Face") == WOUNDING_MULTIPLIERS[damage_type]
+
+    # --- Groin: a torso hit for wounding purposes --------------------------
+    @pytest.mark.parametrize("damage_type", ["cr", "cut", "imp", "pi"])
+    def test_groin_wounds_exactly_as_torso(self, damage_type):
+        # "Treat as a torso hit, except that human males ... suffer double the
+        # usual SHOCK from crushing damage ... and get -5 to knockdown rolls."
+        # Doubled shock is not a wounding multiplier — there is no x1.5 here.
+        assert self._mult(damage_type, "Groin") == self._mult(damage_type, "Torso")
+
+    # --- Vitals: impaling and ANY piercing ---------------------------------
+    @pytest.mark.parametrize("damage_type", ["imp", "pi-", "pi", "pi+", "pi++"])
+    def test_vitals_x3_covers_every_piercing_size(self, damage_type):
+        # "Increase the wounding modifier for an impaling or ANY piercing
+        # attack to x3." pi- is small piercing — still piercing.
+        assert self._mult(damage_type, "Vitals") == 3.0
+
+    @pytest.mark.parametrize("damage_type", ["cr", "cut"])
+    def test_vitals_ignores_non_targeting_types(self, damage_type):
+        assert self._mult(damage_type, "Vitals") == WOUNDING_MULTIPLIERS[damage_type]
+
+    # --- Limbs and extremities: large piercing / impaling reduced to x1 -----
+    LIMBS = ["Right Arm", "Left Arm", "Right Leg", "Left Leg", "Hand", "Foot"]
+
+    @pytest.mark.parametrize("location", LIMBS)
+    @pytest.mark.parametrize("damage_type", ["pi+", "pi++", "imp"])
+    def test_limbs_reduce_large_piercing_and_impaling(self, location, damage_type):
+        # "reduce the wounding multiplier of large piercing, huge piercing,
+        # and impaling damage to x1"
+        assert self._mult(damage_type, location) == 1.0
+
+    @pytest.mark.parametrize("location", LIMBS)
+    @pytest.mark.parametrize("damage_type", ["cr", "cut", "pi", "pi-"])
+    def test_limbs_leave_other_types_alone(self, location, damage_type):
+        assert self._mult(damage_type, location) == WOUNDING_MULTIPLIERS[damage_type]
+
+    # --- Neck ---------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "damage_type,expected", [("cr", 1.5), ("cor", 1.5), ("cut", 2.0)]
+    )
+    def test_neck(self, damage_type, expected):
+        assert self._mult(damage_type, "Neck") == expected
+
+
 class TestRollDamage:
     def test_basic_cr_damage(self):
         result = roll_damage("2d", "cr")

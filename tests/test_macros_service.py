@@ -1,3 +1,9 @@
+"""Dice-macro service CRUD (services/macros.py).
+
+Per-user named dice expressions, case-insensitive names, upsert-on-save, expression
+validated through the dice parser. In-memory SQLite per test.
+"""
+
 from __future__ import annotations
 
 import pytest
@@ -6,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from gurps_bot.db.models import Base
 from gurps_bot.services.macros import (
+    MAX_NAME_LEN,
     delete_macro,
     get_macro,
     list_macros,
@@ -46,6 +53,35 @@ class TestSaveMacro:
     async def test_invalid_expression_raises(self, session):
         with pytest.raises(ValueError):
             await save_macro(session, U1, "bad", "not-dice")
+
+
+class TestNameSanitizing:
+    """The saved name is echoed back into public replies, so it is sanitized
+    and length-capped at the service boundary, not only at the cog."""
+
+    async def test_markdown_and_mention_chars_stripped(self, session):
+        m = await save_macro(session, U1, "**gs**", "2d+4")
+        await session.commit()
+        assert m.name == "gs"
+
+    async def test_masked_link_name_cannot_survive(self, session):
+        m = await save_macro(session, U1, "[click](http://evil)", "2d")
+        await session.commit()
+        assert "[" not in m.name and "]" not in m.name
+
+    async def test_name_capped_at_max_len(self, session):
+        m = await save_macro(session, U1, "x" * 300, "2d")
+        await session.commit()
+        assert len(m.name) == MAX_NAME_LEN
+
+    async def test_name_with_no_usable_chars_raises(self, session):
+        with pytest.raises(ValueError):
+            await save_macro(session, U1, "***", "2d")
+
+    async def test_lookup_normalizes_the_same_way(self, session):
+        await save_macro(session, U1, "**gs**", "2d+4")
+        await session.commit()
+        assert (await get_macro(session, U1, "GS")).expression == "2d+4"
 
 
 class TestGetMacro:

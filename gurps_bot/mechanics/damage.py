@@ -25,13 +25,26 @@ WOUNDING_MULTIPLIERS: dict[str, float] = {
 # per-location wounding overrides (B398-400) — replace the base multiplier.
 # type-specific keys beat "all" (B399: skull/eye x4 excludes toxic).
 # no tight-beam burn flag in the engine, so the vitals burn x2 case is out of scope.
+
+# B399: pi+/pi++/imp all drop to x1 against a limb or extremity. Typed once.
+_LIMB_REDUCTION: dict[str, float] = {"pi+": 1.0, "pi++": 1.0, "imp": 1.0}
+
 LOCATION_MULTIPLIERS: dict[str, dict[str, float]] = {
     "skull": {"all": 4.0, "tox": 1.0},
     "eye": {"all": 4.0, "tox": 1.0},
-    "vitals": {"imp": 3.0, "pi": 3.0, "pi+": 3.0, "pi++": 3.0},
+    # B399 "an impaling or ANY piercing attack" — pi- is small piercing, still piercing
+    "vitals": {"imp": 3.0, "pi-": 3.0, "pi": 3.0, "pi+": 3.0, "pi++": 3.0},
     "neck": {"cr": 1.5, "cor": 1.5, "cut": 2.0},
     "face": {"cor": 1.5},  # B399: otherwise torso wounding; cor major wound also blinds an eye (GM call)
     "groin": {},  # B399: torso wounding; cr doubles SHOCK on males, not injury
+    "right arm": dict(_LIMB_REDUCTION),
+    "left arm": dict(_LIMB_REDUCTION),
+    "right leg": dict(_LIMB_REDUCTION),
+    "left leg": dict(_LIMB_REDUCTION),
+    "arm": dict(_LIMB_REDUCTION),
+    "leg": dict(_LIMB_REDUCTION),
+    "hand": dict(_LIMB_REDUCTION),
+    "foot": dict(_LIMB_REDUCTION),
 }
 
 # display names for UI choices

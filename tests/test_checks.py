@@ -8,6 +8,8 @@ from gurps_bot.mechanics.dice import DiceSpec, RollResult
 
 
 class TestDetermineOutcome:
+    """Test critical threshold logic with known rolls."""
+
     def test_crit_success_on_3(self):
         assert _determine_outcome(3, 10) == Outcome.CRITICAL_SUCCESS
 
@@ -30,15 +32,15 @@ class TestDetermineOutcome:
         assert _determine_outcome(17, 16) == Outcome.FAILURE  # not critical
 
     def test_17_always_fails_even_at_high_skill(self):
-        # B347: 17 is at best an ordinary failure, never a success
+        # B347: a 17 is never a success, however high the effective skill.
         assert _determine_outcome(17, 17) == Outcome.FAILURE
         assert _determine_outcome(17, 18) == Outcome.FAILURE
         assert _determine_outcome(17, 25) == Outcome.FAILURE
 
     def test_crit_failure_on_10_plus_mof(self):
-        # target 6, roll 16 -> MoF 10 -> critical
+        # Target 6, rolled 16 -> MoF = 10, so critical
         assert _determine_outcome(16, 6) == Outcome.CRITICAL_FAILURE
-        # roll 15 -> MoF 9, plain failure
+        # Target 6, rolled 15 -> MoF = 9, not critical (just failure)
         assert _determine_outcome(15, 6) == Outcome.FAILURE
 
     def test_normal_success(self):
@@ -88,18 +90,18 @@ class TestContest:
         assert winner in ("A", "B", "Tie")
 
     def test_contest_higher_margin_wins(self):
-        # not worth mocking random here; check winner agrees with margins instead
+        # We can't easily mock random, so just verify the logic is consistent
         for _ in range(50):
             a, b, winner = contest(12, 12)
             if a.margin > b.margin:
                 assert winner == "A"
             elif b.margin > a.margin:
                 assert winner == "B"
-            # ties fall through to the target tiebreak (both 12 -> "Tie")
+            # Ties resolved by target comparison (both 12 = "Tie")
 
     def test_tie_break_higher_target_wins(self):
-        # B348: equal margins -> higher target wins; equal target -> tie
-        # stub check() so margins tie and only the target differs
+        # Equal margins -> higher target wins (B348); equal target -> Tie.
+        # Force equal margins by stubbing check() so only the target differs.
         fixed = CheckResult(
             roll_result=RollResult(spec=DiceSpec(3, 6, 0), dice=(3, 4, 3), total=10),
             target=0, margin=0, outcome=Outcome.SUCCESS,
