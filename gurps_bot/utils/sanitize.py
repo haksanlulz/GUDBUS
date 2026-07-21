@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-# keep [ and ] (they form masked-link syntax [text](url)); ( ) alone are inert and
+# strip [ and ] (they form masked-link syntax [text](url)); ( ) alone are inert and
 # appear in ~22% of catalog names like "Vow (Chastity)", so leave them intact
 _MARKDOWN_CHARS = frozenset('*_~`|>[]\\')
 

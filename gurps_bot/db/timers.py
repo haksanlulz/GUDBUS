@@ -37,7 +37,7 @@ class Timer(Base):
 
     @property
     def progress(self) -> float:
-        """remaining/total; the 0.0 branch just guards display math (add_timer enforces total >= 1)."""
+        """remaining/total; the 0.0 branch guards display math (add_timer enforces total >= 1)."""
         if self.total > 0:
             return self.remaining / self.total
         return 0.0
