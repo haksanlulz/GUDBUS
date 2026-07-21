@@ -1,4 +1,11 @@
-"""Shock (B419) and major wound (B420); HP-state labels live in combat_constants, not here."""
+"""Per-blow injury effects — shock (B419) and major wound (B420) (mechanics/injury.py).
+
+Pure logic — no DB, no discord. The rule numbers (shock cap, major-wound
+threshold) live in mechanics/injury.py as the single owner; the combat cog
+composes them into the /combat hp response. HP-STATE labels (Reeling / Collapsing
+/ Dying / Dead) are owned separately by combat_constants.hp_status_label and are
+deliberately NOT duplicated here.
+"""
 
 from __future__ import annotations
 
@@ -153,6 +160,9 @@ class TestKnockdownModifier:
     @pytest.mark.parametrize(
         "location,expected",
         [
+            # B420 verbatim: "-5 for a major wound to the face or vitals (or to
+            # the groin, on a humanoid male); -10 for a major wound to the skull
+            # or eye". Vitals and groin are -5, NOT -10.
             ("face", -5),
             ("FACE", -5),
             (" face ", -5),
