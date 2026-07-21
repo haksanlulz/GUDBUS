@@ -37,7 +37,7 @@ class TestPinnedRef:
         assert re.fullmatch(r"[0-9a-f]{40}", ref), f"not a 40-char hex sha: {ref!r}"
 
     def test_branch_and_repo_constants(self):
-        assert sync.BRANCH == "master"
+        assert sync.BRANCH == "main"
         assert "richardwilkes/gcs_master_library" in sync.REPO_URL
 
     def test_category_extensions_cover_contract(self):

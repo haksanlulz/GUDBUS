@@ -15,7 +15,7 @@ from pathlib import Path
 # pinned upstream; bump these together to take a new snapshot
 REPO_URL = "https://github.com/richardwilkes/gcs_master_library.git"
 REPO_SLUG = "richardwilkes/gcs_master_library"
-BRANCH = "master"
+BRANCH = "main"
 PINNED_REF = "924a2fd801fccda0e3e32d8bdc430a9403217241"
 
 # extension determines category (rows carry no type field); .skl holds both
@@ -57,17 +57,22 @@ def _run_git(args: list[str], *, cwd: Path | None = None) -> None:
 
 
 def _clone_pinned(dest: Path) -> None:
-    """Full clone (no --depth: the pinned SHA may not be the branch tip), then detach-checkout."""
+    """Fetch the pinned SHA directly (branch-independent, shallow), then detach-checkout."""
     # PINNED_REF must be a bare hex SHA, never a ref expression or path
     if not re.fullmatch(r"[0-9a-f]{7,40}", PINNED_REF):
         raise RuntimeError(
             f"PINNED_REF is not a hex SHA (got {PINNED_REF!r}); refusing to check out."
         )
-    print(f"Cloning {REPO_URL} (branch {BRANCH}) ...", flush=True)
-    _run_git(["clone", "--branch", BRANCH, REPO_URL, str(dest)])
+    print(f"Fetching {REPO_URL} @ {PINNED_REF} ...", flush=True)
+    # Fetch the exact commit instead of cloning a named branch: the pin stays
+    # valid across upstream default-branch renames (master -> main broke the old
+    # clone), and --depth 1 pulls just that commit — GitHub serves any reachable SHA.
+    _run_git(["init", "-q", str(dest)])
+    _run_git(["remote", "add", "origin", REPO_URL], cwd=dest)
+    _run_git(["fetch", "--depth", "1", "origin", PINNED_REF], cwd=dest)
     print(f"Checking out pinned ref {PINNED_REF} ...", flush=True)
-    # --detach: take the SHA as-is, never resolve it as a branch or path
-    _run_git(["checkout", "--detach", PINNED_REF], cwd=dest)
+    # --detach: the fetched commit, taken as-is (never resolved as a branch or path)
+    _run_git(["checkout", "--detach", "FETCH_HEAD"], cwd=dest)
 
 
 def _copy_library(src_root: Path) -> int:
