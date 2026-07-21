@@ -18,7 +18,6 @@ from gurps_bot.services.combat import (
     add_status,
     advance_turn,
     cleanup_stale_combats,
-    end_combat,
     get_combat,
     modify_hp,
     record_defense,
@@ -31,9 +30,17 @@ GUILD_ID = 999_500
 
 
 @pytest_asyncio.fixture
-async def session_factory():
-    """Provide a session factory so concurrency tests spawn independent sessions."""
-    init_engine("sqlite+aiosqlite://")
+async def session_factory(tmp_path):
+    """Provide a session factory so concurrency tests spawn independent sessions.
+
+    Uses a file-based DB, not shared in-memory: file sqlite gives each session
+    its own pooled connection (as production does), whereas in-memory sqlite
+    forces one shared connection (StaticPool). Under that shared connection a
+    concurrent commit resets a cursor another task is mid-fetch on — which
+    surfaces deterministically on Python 3.10's task scheduling.
+    """
+    db_path = tmp_path / "combat_load.db"
+    init_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
     await init_db()
     yield get_session_factory()
     await dispose_engine()
@@ -72,6 +79,7 @@ class TestMultiCombatLoad:
         async def add_npc(combat_channel: int, idx: int) -> tuple[int, int]:
             async with session_factory() as s:
                 c = await get_combat(s, GUILD_ID, combat_channel)
+                assert c is not None  # pre-created above
                 npc = await add_npc_combatant(
                     s, c, f"NPC-{combat_channel}-{idx}", 5.0, 30, 10
                 )
