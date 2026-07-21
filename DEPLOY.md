@@ -5,6 +5,59 @@ Small discord.py bot, one SQLite file, runs as a systemd service. ~200 MB RAM,
 below), a $4-5 VPS (Hetzner/Vultr/DO), or a Raspberry Pi. Not serverless — the bot
 holds a persistent gateway connection.
 
+Two ways to run it: **Docker** (below; only the container engine to install) or
+**systemd + uv** (the rest of this doc). Pick one.
+
+## Docker (recommended)
+
+The image bakes in dependencies and the vendored GCS library; the SQLite DB and
+logs live in a `/app/data` volume, and the container bootstraps/migrates the DB
+on every start. Multi-arch: builds on x86-64 and ARM (Oracle A1, Pi).
+
+```sh
+git clone https://github.com/haksanlulz/GUDBUS.git /opt/gurps-bot
+cd /opt/gurps-bot
+cp .env.example .env
+nano .env                 # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
+
+docker compose up -d --build
+docker compose logs -f
+```
+
+Then once, in Discord as the bot owner: `/sync clear:true` (global sync takes up
+to an hour; instant if you set `DEV_GUILD_ID`).
+
+**Updating:**
+
+```sh
+cd /opt/gurps-bot && git pull && docker compose up -d --build
+```
+
+The bootstrap step (`gurps_bot.db.bootstrap`) runs automatically on each start, so
+schema migrations apply themselves. Re-vendoring the GCS data happens at build
+time, so a rebuild picks up any pin bump. Run `/sync clear:true` only if commands
+changed.
+
+**Prebuilt image:** pushes to `main` publish `ghcr.io/haksanlulz/gudbus:latest`
+(see `.github/workflows/docker-publish.yml`). The same workflow also pushes to
+Docker Hub (`docker.io/<user>/gudbus`) when the `DOCKERHUB_USERNAME` and
+`DOCKERHUB_TOKEN` repo secrets are set — without them it publishes to GHCR only.
+To pull instead of build, swap the `build:`/`image:` lines in
+`docker-compose.yml` as noted there, then `docker compose pull && docker compose up -d`.
+
+**Data & backups:** the DB is in the `gurps-data` named volume. Back it up with
+
+```sh
+docker compose exec gurps-bot sh -c 'sqlite3 data/gurps_bot.db ".backup /app/data/backup.db"'
+docker compose cp gurps-bot:/app/data/backup.db ./gurps_bot-backup.db
+```
+
+or bind-mount a host path instead (see the comment in `docker-compose.yml`).
+
+---
+
+## systemd + uv (manual)
+
 Get the source onto the host:
 
 ```sh

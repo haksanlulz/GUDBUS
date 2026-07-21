@@ -1,0 +1,48 @@
+# Keep the build context lean. The Dockerfile vendors the GCS library and creates
+# a fresh .venv, so local build/runtime artifacts stay out of the context.
+
+# VCS
+.git
+.gitignore
+.gitattributes
+
+# Secrets — never bake credentials into an image layer.
+.env
+.env.*
+!.env.example
+
+# Local virtualenv (rebuilt inside the image from uv.lock)
+.venv/
+
+# Vendored GCS data — re-vendored at build time from the pinned upstream.
+gurps_bot/data/gcs_library/
+
+# Runtime state — the DB + logs live in the /app/data volume, not the image.
+data/*.db
+data/*.db-shm
+data/*.db-wal
+*.log
+backups/
+
+# Python caches / build output
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Docker build files — not needed inside the image
+Dockerfile
+.dockerignore
+docker-compose.yml

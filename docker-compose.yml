@@ -1,0 +1,67 @@
+# One-command deploy for the GURPS bot.
+#
+#   cp .env.example .env      # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
+#   docker compose up -d --build
+#   docker compose logs -f
+#
+# Dials out to Discord only; no inbound ports.
+
+services:
+  gurps-bot:
+    build: .
+    # To run a prebuilt image instead of building, comment out `build:` above
+    # and uncomment one (both are published by CI):
+    # image: ghcr.io/haksanlulz/gudbus:latest
+    # image: docker.io/<dockerhub-user>/gudbus:latest
+    image: gudbus:latest
+    container_name: gurps-bot
+    restart: unless-stopped
+    # Runtime hardening: the bot is outbound-only, binds no port, and runs no
+    # setuid binary, so it needs no Linux capabilities and no privilege gain.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Immutable root filesystem — the only writes are the SQLite DB + logs (the
+    # /app/data volume below) and scratch in /tmp (tmpfs). Bytecode writes are
+    # off (PYTHONDONTWRITEBYTECODE=1 in the image).
+    read_only: true
+    tmpfs:
+      - /tmp
+    # `env_file` loads every variable from .env. The `environment:` block below
+    # lists each one explicitly, sourced from .env (or the shell) — no secrets in
+    # this committed file. Set them in .env once; every `docker compose up` reads
+    # them.
+    env_file: .env
+    environment:
+      # --- Core -------------------------------------------------------------
+      # Required; compose aborts with this message if unset.
+      DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env (copy .env.example)}
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///data/gurps_bot.db}
+      # --- Legal / about (/legal, /about) ----------------------------------
+      # Also required. The SJG Online Policy notice /legal renders names the
+      # author; unset, it renders a placeholder where the name belongs and the
+      # notice is not policy-compliant. Fail here rather than ship that.
+      BOT_AUTHOR_LEGAL_NAME: ${BOT_AUTHOR_LEGAL_NAME:?set BOT_AUTHOR_LEGAL_NAME in .env — /legal must name the author to satisfy the SJG Online Policy}
+      BOT_INVITE_URL: ${BOT_INVITE_URL:-}
+      BOT_SUPPORT_URL: ${BOT_SUPPORT_URL:-}
+      # --- Command sync (optional) -----------------------------------------
+      DEV_GUILD_ID: ${DEV_GUILD_ID:-}
+      SYNC_ON_START: ${SYNC_ON_START:-}
+      # --- Donation links (optional, /support + /donate) -------------------
+      KOFI_URL: ${KOFI_URL:-}
+      BUYMEACOFFEE_URL: ${BUYMEACOFFEE_URL:-}
+      PATREON_URL: ${PATREON_URL:-}
+      GITHUB_SPONSORS_URL: ${GITHUB_SPONSORS_URL:-}
+      PAYPAL_URL: ${PAYPAL_URL:-}
+      LIBERAPAY_URL: ${LIBERAPAY_URL:-}
+      SUPPORT_MESSAGE: ${SUPPORT_MESSAGE:-}
+    volumes:
+      # SQLite DB + rotating logs. A named volume preserves the non-root user's
+      # write access. For a host-visible path, use a bind mount (`./data:/app/data`)
+      # writable by UID 10001, or add `user: "0:0"`.
+      - gurps-data:/app/data
+    stop_grace_period: 20s
+
+volumes:
+  gurps-data:
