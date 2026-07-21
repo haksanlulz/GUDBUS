@@ -40,6 +40,36 @@ class TestShockPenalty:
         assert SHOCK_CAP == 4
 
 
+class TestShockScalesWithHighHP:
+    """B380: "-1 per HP lost unless you have 20 or more HP, in which case it is
+    -1 per (HP/10) lost, rounded down. The shock penalty cannot exceed -4."
+
+    High HP does not raise the cap — it makes each point of shock cost more HP.
+    """
+
+    def test_under_20_hp_is_one_per_hp(self):
+        assert shock_penalty(3, hp_max=10) == -3
+        assert shock_penalty(3, hp_max=19) == -3
+
+    def test_at_20_hp_each_shock_point_costs_2_hp(self):
+        # HP/10 = 2, so -1 per 2 HP lost.
+        assert shock_penalty(1, hp_max=20) == 0
+        assert shock_penalty(2, hp_max=20) == -1
+        assert shock_penalty(5, hp_max=20) == -2
+        assert shock_penalty(8, hp_max=20) == -4
+
+    def test_30_hp_each_shock_point_costs_3_hp(self):
+        assert shock_penalty(2, hp_max=30) == 0
+        assert shock_penalty(3, hp_max=30) == -1
+        assert shock_penalty(9, hp_max=30) == -3
+
+    def test_cap_still_minus_4_at_high_hp(self):
+        assert shock_penalty(1000, hp_max=100) == -4
+
+    def test_hp_max_defaults_to_the_common_case(self):
+        # Callers that don't know HP get the standard -1/HP behaviour.
+        assert shock_penalty(3) == -3
+
 class TestIsMajorWound:
     def test_exactly_half_is_not_major(self):
         # "more than half" is strict — 5 of 10 HP is exactly half, not a major wound.

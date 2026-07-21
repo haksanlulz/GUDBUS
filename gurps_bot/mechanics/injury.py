@@ -6,15 +6,27 @@ from enum import Enum
 
 from gurps_bot.mechanics.combat_constants import StatusEffect
 
-# B419: cap for HP <= 20; very high HP raises it, GM can override
+# B380: the cap is -4 at ANY HP total. High HP doesn't raise it — it raises how
+# much injury each point of shock costs (see shock_penalty).
 SHOCK_CAP: int = 4
 
+# B380: at or above this HP, shock is -1 per (HP/10) lost rather than -1 per HP
+SHOCK_SCALING_HP: int = 20
 
-def shock_penalty(injury: int) -> int:
-    """B419 shock: -1 per HP of injury, capped; does not reduce active defenses."""
+
+def shock_penalty(injury: int, hp_max: int | None = None) -> int:
+    """B380/B419 shock: -1 per HP lost, or per (HP/10) at 20+ HP; capped at -4.
+
+    A tough creature is shocked LESS easily, not more: each point of shock costs
+    it HP/10 rather than 1 HP. hp_max is optional — omitting it gives -1 per HP,
+    which is correct below 20 HP. Advisory; does not reduce active defenses.
+    """
     if injury <= 0:
         return 0
-    return -min(SHOCK_CAP, injury)
+    hp_per_point = 1
+    if hp_max is not None and hp_max >= SHOCK_SCALING_HP:
+        hp_per_point = hp_max // 10
+    return -min(SHOCK_CAP, injury // hp_per_point)
 
 
 def is_major_wound(injury: int, hp_max: int) -> bool:
@@ -36,7 +48,7 @@ def injury_effects(injury: int, hp_max: int) -> list[str]:
             "+ knocked down (Prone); failure by 5+ or a critical failure = "
             "unconscious."
         )
-    penalty = shock_penalty(injury)
+    penalty = shock_penalty(injury, hp_max)
     if penalty:
         notes.append(
             f"Shock {penalty} to DX, IQ, and DX/IQ-based skills next turn "
