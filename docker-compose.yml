@@ -39,7 +39,10 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env (copy .env.example)}
       DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///data/gurps_bot.db}
       # --- Legal / about (/legal, /about) ----------------------------------
-      BOT_AUTHOR_LEGAL_NAME: ${BOT_AUTHOR_LEGAL_NAME:-}
+      # Also required. The SJG Online Policy notice /legal renders names the
+      # author; unset, it renders a placeholder where the name belongs and the
+      # notice is not policy-compliant. Fail here rather than ship that.
+      BOT_AUTHOR_LEGAL_NAME: ${BOT_AUTHOR_LEGAL_NAME:?set BOT_AUTHOR_LEGAL_NAME in .env — /legal must name the author to satisfy the SJG Online Policy}
       BOT_INVITE_URL: ${BOT_INVITE_URL:-}
       BOT_SUPPORT_URL: ${BOT_SUPPORT_URL:-}
       # --- Command sync (optional) -----------------------------------------
