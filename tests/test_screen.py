@@ -10,9 +10,11 @@ from gurps_bot.mechanics import speed_range as sr
 from gurps_bot.mechanics.combat_constants import STATUS_ICONS, Maneuver, StatusEffect
 from gurps_bot.mechanics.reaction import REACTION_BANDS
 from gurps_bot.mechanics.tables import (
+    CRITICAL_HEAD_BLOW_TABLE,
     CRITICAL_HIT_TABLE,
     CRITICAL_MISS_TABLE,
     FRIGHT_CHECK_TABLE,
+    UNARMED_CRITICAL_MISS_TABLE,
 )
 from gurps_bot.ui import screen
 
@@ -69,7 +71,10 @@ class TestSourcing:
     def test_crit_and_fright_reference_are_the_owned_tables(self):
         assert screen.crit_hit_reference() == CRITICAL_HIT_TABLE
         assert screen.crit_miss_reference() == CRITICAL_MISS_TABLE
-        assert screen.fright_reference()[0] == FRIGHT_CHECK_TABLE[0]
+        assert screen.head_blow_reference() == CRITICAL_HEAD_BLOW_TABLE
+        assert screen.unarmed_crit_miss_reference() == UNARMED_CRITICAL_MISS_TABLE
+        # Fright table keys are 3d+margin totals (4-40+), not margins (B360).
+        assert screen.fright_reference()[4] == FRIGHT_CHECK_TABLE[4]
 
 
 class TestPages:
@@ -90,6 +95,42 @@ class TestPages:
         for cat in screen.CATEGORIES:
             idx = screen.CATEGORY_INDEX[cat]
             assert 0 <= idx < len(pages)
+
+    def test_no_page_field_is_silently_truncated(self):
+        # _cap keeps Discord happy but eats reference rows — a rules table that
+        # renders truncated is a data-loss bug, not a layout choice.
+        for p in screen.build_screen_pages():
+            for field in p.fields:
+                assert "…(truncated)" not in field.value, (p.title, field.name)
+
+
+class TestCritsAndFrightPages:
+    def test_crits_category_exists(self):
+        assert "crits" in screen.CATEGORIES
+        assert "crits" in screen.CATEGORY_INDEX
+
+    def test_crits_page_shows_head_blow_and_unarmed(self):
+        page = screen.build_screen_pages()[screen.CATEGORY_INDEX["crits"]]
+        names = " ".join(f.name for f in page.fields)
+        assert "Head Blow" in names
+        assert "Unarmed" in names
+
+    def test_screen_cog_choices_cover_every_category(self):
+        # The /screen category picker is hand-listed in the cog; a category
+        # without a Choice is unreachable except by paging.
+        from gurps_bot.cogs.gmscreen import _CATEGORY_CHOICES
+
+        assert {c.value for c in _CATEGORY_CHOICES} == set(screen.CATEGORIES)
+
+    def test_fright_page_describes_the_raw_procedure(self):
+        page = screen.fright_page()
+        desc = page.description or ""
+        # Will-based, Rule of 14, and the 3d+margin second roll — the old
+        # description said "Roll vs HT (or Will)" and keyed rows by margin.
+        assert "Will" in desc
+        assert "14" in desc
+        assert "HT" not in desc
+        assert "3d" in desc and "margin" in desc
 
 
 from gurps_bot.mechanics import damage
