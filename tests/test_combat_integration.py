@@ -3,17 +3,14 @@ catching are app-level read-modify-write patterns in the service code."""
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
+from unittest.mock import patch
 
-import pytest
 import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gurps_bot.db.engine import (
-    dispose_engine,
-    get_session_factory,
-    init_db,
-    init_engine,
-)
+from gurps_bot.db.models import Base
+from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
+from gurps_bot.mechanics.dice import DiceSpec, RollResult
 from gurps_bot.services.combat import (
     add_npc_combatant,
     add_status,
@@ -33,16 +30,38 @@ CHANNEL_ID = 888_001
 
 
 @pytest_asyncio.fixture
-async def session_factory():
-    """Factory, not a session — concurrency tests need independent sessions on one DB."""
-    init_engine("sqlite+aiosqlite://")
-    await init_db()
-    yield get_session_factory()
-    await dispose_engine()
+async def engine():
+    """One engine per test, not the process-global singleton — no cross-test leakage."""
+    eng = create_async_engine("sqlite+aiosqlite://")
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def session_factory(engine):
+    """Factory, not a session — concurrency tests need independent sessions on one DB.
+
+    One engine per TEST, never per session: the gather'd sessions inside a single
+    test must all see each other's writes, so they share this test's engine.
+    """
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+def _fixed_check(rolled: int, target: int) -> CheckResult:
+    """A deterministic CheckResult for a fixed 3d6 total vs target (real outcome engine)."""
+    rr = RollResult(spec=DiceSpec(3, 6, 0), dice=(rolled,), total=rolled)
+    return CheckResult(
+        roll_result=rr,
+        target=target,
+        margin=target - rolled,
+        outcome=_determine_outcome(rolled, target),
+    )
 
 
 class TestCombatLifecycle:
-    async def test_full_round_trip(self, session_factory, monkeypatch):
+    async def test_full_round_trip(self, session_factory):
         async with session_factory() as session:
             combat = await start_combat(session, GUILD_ID, CHANNEL_ID, GM_ID)
             await session.commit()
@@ -81,14 +100,8 @@ class TestCombatLifecycle:
             # the wrap lands back on the goblin at <=0 HP, so advance_turn auto-rolls
             # the B419 consciousness check — left live, the landing index is a coin
             # flip. force success; the unconscious-skip path is covered elsewhere
-            monkeypatch.setattr(
-                "gurps_bot.services.combat.check",
-                lambda *a, **k: SimpleNamespace(
-                    rolled=3, outcome=SimpleNamespace(succeeded=True)
-                ),
-            )
-
-            advance_turn(combat)
+            with patch("gurps_bot.services.combat.check", return_value=_fixed_check(7, 10)):
+                advance_turn(combat)
             await session.commit()
             assert combat.round_number == 2
             assert combat.current_index == 0
