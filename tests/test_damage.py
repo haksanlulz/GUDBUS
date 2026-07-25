@@ -260,6 +260,14 @@ class TestMinimumInjuryFloor:
         assert res.raw_damage == 0
         assert res.wound == 0
 
+    def test_book_example_cutting_rounds_down(self, monkeypatch):
+        # B379 worked example: basic 7, DR 2 -> 5 penetrating, x1.5 cutting = 7.5,
+        # which rounds DOWN to 7 HP.
+        self._forced(monkeypatch, 7)
+        res = roll_damage("1d", "cut", dr=2)
+        assert res.raw_damage == 5
+        assert res.wound == 7
+
 
 class TestLocationMultiplierRaw:
     """B398-400 cells: groin wounds as torso, face cor x1.5, skull/eye x4 excludes toxic."""
