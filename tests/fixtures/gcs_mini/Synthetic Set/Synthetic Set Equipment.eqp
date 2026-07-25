@@ -1,0 +1,55 @@
+{
+  "version": 5,
+  "rows": [
+    {
+      "id": "syn-eqp-001",
+      "description": "Notched Falchion",
+      "base_value": "410",
+      "base_weight": "3 lb",
+      "legality_class": "3",
+      "tech_level": "3",
+      "rated_strength": 11,
+      "reference": "SYN51",
+      "tags": ["Melee Weapon"],
+      "weapons": [
+        {
+          "id": "w1",
+          "damage": {"type": "cut", "st": "sw", "base": "1"},
+          "usage": "Swung",
+          "reach": "1",
+          "parry": "0",
+          "usage_notes": "The notch catches a blade once and ruins the falchion doing it.",
+          "defaults": [{"type": "skill", "name": "Glasswright"}],
+          "calc": {"damage": "sw+1 cut", "parry": "9", "reach": "1"}
+        }
+      ],
+      "local_notes": "The notch catches a blade once and ruins the falchion doing it.",
+      "reference_highlight": "Notched Falchion",
+      "modifiers": [],
+      "calc": {"extended_value": "410", "extended_weight": "3 lb"}
+    },
+    {
+      "id": "syn-eqp-002",
+      "description": "Cut Gemstone",
+      "base_value": "9*(@carats@*@carats@)",
+      "base_weight": "@carats@/500",
+      "legality_class": "4",
+      "tech_level": "1",
+      "reference": "SYN52",
+      "tags": ["Valuable"],
+      "calc": {"value": 180, "weight": "0.1 lb"},
+      "local_notes": "A cut stone is worth what the last buyer paid and nothing more."
+    },
+    {
+      "id": "syn-eqp-003",
+      "description": "Tuned Resonator",
+      "base_value": "@units@*12",
+      "base_weight": "@units@*0.5 lb",
+      "legality_class": "4",
+      "tech_level": "5",
+      "reference": "SYN53",
+      "tags": ["Gear"],
+      "calc": {"value": "@units@*12", "weight": "@units@*0.5 lb"}
+    }
+  ]
+}
