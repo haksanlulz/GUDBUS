@@ -36,7 +36,6 @@ from gurps_bot.ui.formatters import (
 )
 from gurps_bot.cogs._autocomplete import make_autocomplete
 from gurps_bot.ui.views import ConfirmView, PaginatorView
-from gurps_bot.utils._cache_instances import skill_cache as _skill_cache
 from gurps_bot.utils.fuzzy import fuzzy_match
 
 log = logging.getLogger(__name__)
@@ -160,8 +159,9 @@ class ImportCog(commands.Cog):
             )
             await set_active_character(session, user_id, guild_id, char.id)
             await session.commit()
-
-            _skill_cache.invalidate_user(user_id)
+            # Cache invalidation is owned by services/characters.py
+            # (import_character + set_active_character), so /char switch and
+            # /char delete get it too — they never had it here.
 
             attrs = {a.attr_id: a.value for a in parsed.attributes}
             for a in parsed.attributes:

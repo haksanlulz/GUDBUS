@@ -1,4 +1,12 @@
-"""Character queries. Callers own the transaction — nothing here commits."""
+"""Character queries. Callers own the transaction — nothing here commits.
+
+Cache coupling: rolling.py caches a user's rollable skill/attribute names under
+(user_id, guild_id). The key carries no character id, so every mutation here that
+changes WHICH character is active — or deletes one — drops the affected entries.
+That invalidation lives at this layer rather than in the cogs so a new caller
+can't forget it; it runs pre-commit, which errs toward an unnecessary cache miss
+if the transaction rolls back (the safe direction).
+"""
 
 from __future__ import annotations
 
@@ -19,6 +27,7 @@ from gurps_bot.db.models import (
     Trait,
 )
 from gurps_bot.gcs.parser import ParsedCharacter
+from gurps_bot.utils._cache_instances import skill_cache
 
 
 class NoActiveCharacter(Exception):
@@ -89,6 +98,8 @@ async def get_character_traits(
 async def set_active_character(
     session: AsyncSession, user_id: int, guild_id: int, char_id: int,
 ) -> None:
+    """Upsert the active character. Drops this user's cached skill names for THIS
+    guild — their other guilds still point where they pointed before."""
     stmt = select(ActiveCharacter).where(
         ActiveCharacter.discord_user_id == user_id,
         ActiveCharacter.guild_id == guild_id,
@@ -103,6 +114,7 @@ async def set_active_character(
             guild_id=guild_id,
             character_id=char_id,
         ))
+    skill_cache.invalidate((user_id, guild_id))
 
 
 async def get_user_character_names(
@@ -139,7 +151,12 @@ async def import_character(
     filename: str,
     raw_data: dict | None = None,
 ) -> tuple[Character, bool]:
-    """Import a parsed GCS sheet; returns (character, was_replacement)."""
+    """Import a parsed GCS sheet; returns (character, was_replacement).
+
+    Drops the user's cached skill names in every guild: a replacement rewrites the
+    whole skill list in place, so the cache goes stale without the active pointer
+    moving at all.
+    """
     gcs_id: str | None = None
     if raw_data:
         rid = raw_data.get("id")
@@ -255,15 +272,26 @@ async def import_character(
             notes=t.notes,
         ))
 
+    # Last thing before returning: the new skill rows are staged, so the window
+    # in which a concurrent autocomplete could re-cache the outgoing sheet is as
+    # small as this layer can make it.
+    skill_cache.invalidate_user(user_id)
     return char, existing is not None
 
 
 async def delete_character(session: AsyncSession, char_id: int) -> bool:
+    """Delete by ID; True if one was found.
+
+    Drops the owner's cached skill names in EVERY guild: the same character can be
+    the active one in several, and this signature carries no guild to narrow by.
+    The owner is read off the row — the caller supplies only a char_id.
+    """
     stmt = select(Character).where(Character.id == char_id)
     result = await session.execute(stmt)
     char = result.scalar_one_or_none()
     if char:
         log.info("Deleting character '%s' (id=%d)", char.name, char_id)
+        skill_cache.invalidate_user(char.discord_user_id)
         await session.delete(char)
         return True
     return False
