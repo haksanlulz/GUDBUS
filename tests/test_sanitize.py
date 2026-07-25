@@ -11,6 +11,15 @@ class TestSanitizeName:
     def test_preserves_normal_chars(self):
         assert sanitize_name("Sir Brannar") == "Sir Brannar"
 
+    def test_parens_survive(self):
+        # Parens alone are inert markdown and appear in real catalog names
+        # ("Vow (Chastity)"); stripping [ ] already breaks masked-link syntax
+        # [text](url), so ( ) stay.
+        assert sanitize_name("Vow (Chastity)") == "Vow (Chastity)"
+
+    def test_masked_link_still_neutered(self):
+        assert sanitize_name("[click me](https://x.example)") == "click me(https://x.example)"
+
     def test_empty_input(self):
         assert sanitize_name("") == ""
 

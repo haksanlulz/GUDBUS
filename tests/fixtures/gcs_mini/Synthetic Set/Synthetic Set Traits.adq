@@ -1,0 +1,67 @@
+{
+  "version": 5,
+  "rows": [
+    {
+      "id": "syn-adq-001",
+      "name": "Hoardsickness",
+      "base_points": -10,
+      "cr": 12,
+      "cr_adj": "action_penalty",
+      "reference": "SYN31",
+      "tags": ["Disadvantage", "Mental"],
+      "modifiers": [
+        {
+          "id": "m1",
+          "name": "Mitigator",
+          "cost_adj": "-20%",
+          "local_notes": "Counting the hoard settles the sickness for one full day and one full night."
+        }
+      ],
+      "local_notes": "Counting the hoard settles the sickness for one full day and one full night.",
+      "reference_highlight": "Hoardsickness",
+      "features": [],
+      "calc": {"points": -10}
+    },
+    {
+      "id": "syn-adq-002",
+      "name": "Nightdread",
+      "base_points": -15,
+      "cr": 6,
+      "cr_adj": "action_penalty",
+      "reference": "SYN32",
+      "tags": ["Disadvantage", "Mental"],
+      "local_notes": "Any lamp going out within sight forces the dread, and the dread lasts until dawn."
+    },
+    {
+      "id": "syn-adq-003",
+      "name": "Stonehide",
+      "points_per_level": 4,
+      "levels": 3,
+      "reference": "SYN33",
+      "tags": ["Advantage", "Exotic"],
+      "local_notes": "Each layer of hide is one more winter the body has already survived."
+    },
+    {
+      "id": "syn-adq-004",
+      "name": "Assorted Oddments",
+      "tags": ["Grouping"]
+    },
+    {
+      "id": "syn-adq-005",
+      "name": "Frame of Brass",
+      "base_points": 40,
+      "reference": "SYN35",
+      "tags": ["Advantage", "Meta-Trait"],
+      "children": [
+        {
+          "id": "syn-adq-006",
+          "name": "Ceramic Lungs",
+          "base_points": 5,
+          "reference": "SYN36",
+          "tags": ["Advantage", "Exotic"],
+          "local_notes": "Ceramic lungs ring faintly when the body is struck, which is how the frame is found."
+        }
+      ]
+    }
+  ]
+}
