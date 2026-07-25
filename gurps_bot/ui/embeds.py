@@ -175,9 +175,13 @@ def contest_embed(
     return embed
 
 
-def fright_check_embed(result: CheckResult, effect: str) -> discord.Embed:
+def fright_check_embed(
+    result: CheckResult, effect: str, label: str | None = None,
+) -> discord.Embed:
+    """label carries the caller's context line (character name, modifier suffix,
+    Rule of 14 marker); without one the title stays bare."""
     embed = discord.Embed(
-        title="Fright Check",
+        title=label[:256] if label else "Fright Check",
         color=_outcome_color(result.outcome),
     )
     dice_str = " + ".join(str(d) for d in result.roll_result.dice)

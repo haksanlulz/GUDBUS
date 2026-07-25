@@ -18,8 +18,8 @@ from gurps_bot.mechanics.damage import (
     HIT_LOCATION_NAMES,
     roll_damage,
 )
-from gurps_bot.mechanics.dice import parse_dice, roll
-from gurps_bot.mechanics.tables import fright_check_effect
+from gurps_bot.mechanics.dice import parse_dice, roll, roll_3d6
+from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_effect
 from gurps_bot.services.characters import (
     get_active_character,
     get_character_attrs,
@@ -259,13 +259,28 @@ class RollingCog(commands.Cog):
 
         label += format_modifier_suffix(modifier)
 
-        result = check(will_value, modifier)
+        # Rule of 14 (B360): modified Will above 13 counts as 13 for a Fright
+        # Check, so a roll of 14+ always fails. Fold the modifier in first —
+        # the cap applies to the FINAL modified Will, not the base attribute.
+        effective = will_value + modifier
+        if effective > FRIGHT_WILL_CAP:
+            effective = FRIGHT_WILL_CAP
+            label += " · Rule of 14"
+
+        result = check(effective, 0)
         effect = ""
         if not result.outcome.succeeded:
+            # B360: on a failure, roll 3d, ADD the margin of failure, and read
+            # the Fright Check Table at that total (4-40+).
             mof = abs(result.margin)
-            effect = fright_check_effect(mof)
+            fright_roll = roll_3d6()
+            total = fright_roll.total + mof
+            effect = (
+                f"Fright roll 3d ({fright_roll.total}) + margin {mof} = **{total}**\n"
+                f"{fright_table_effect(total)}"
+            )
 
-        embed = embeds.fright_check_embed(result, effect)
+        embed = embeds.fright_check_embed(result, effect, label=label)
         await interaction.response.send_message(embed=embed, ephemeral=hidden)
 
     @app_commands.command(name="damage", description="Roll Damage Dice With Type")

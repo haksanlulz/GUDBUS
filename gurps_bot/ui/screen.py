@@ -12,9 +12,11 @@ from gurps_bot.mechanics.hit_location import deliberate_locations, gross_targeti
 from gurps_bot.mechanics.posture import POSTURES
 from gurps_bot.mechanics.reaction import REACTION_BANDS
 from gurps_bot.mechanics.tables import (
+    CRITICAL_HEAD_BLOW_TABLE,
     CRITICAL_HIT_TABLE,
     CRITICAL_MISS_TABLE,
     FRIGHT_CHECK_TABLE,
+    UNARMED_CRITICAL_MISS_TABLE,
 )
 from gurps_bot.ui.embeds import EMBED_FIELD_LIMIT
 
@@ -30,7 +32,9 @@ SAMPLE_SIZES: tuple[float, ...] = (
 )
 
 # page order; /screen's category choice jumps to one of these
-CATEGORIES: tuple[str, ...] = ("combat", "body", "ranged", "movement", "rolls", "fright")
+CATEGORIES: tuple[str, ...] = (
+    "combat", "body", "ranged", "movement", "rolls", "crits", "fright",
+)
 CATEGORY_INDEX: dict[str, int] = {c: i for i, c in enumerate(CATEGORIES)}
 
 _COMBAT = discord.Color.dark_orange()
@@ -112,6 +116,14 @@ def crit_hit_reference() -> dict[int, str]:
 
 def crit_miss_reference() -> dict[int, str]:
     return CRITICAL_MISS_TABLE
+
+
+def head_blow_reference() -> dict[int, str]:
+    return CRITICAL_HEAD_BLOW_TABLE
+
+
+def unarmed_crit_miss_reference() -> dict[int, str]:
+    return UNARMED_CRITICAL_MISS_TABLE
 
 
 def posture_reference() -> list[dict]:
@@ -202,43 +214,71 @@ def movement_page() -> discord.Embed:
     return e
 
 
+def _table_field_lines(table: dict[int, str], lo: int, hi: int) -> str:
+    """Rows lo..hi of a 3d6-style table, one line per key."""
+    return "\n".join(f"`{r:>2}` {table[r]}" for r in range(lo, hi + 1))
+
+
+def _add_split_table(
+    e: discord.Embed, name: str, table: dict[int, str],
+) -> None:
+    """Add a 3-18 table as two fields so full-fidelity rows never truncate."""
+    e.add_field(name=f"{name} · 3-10", value=_cap(_table_field_lines(table, 3, 10)), inline=False)
+    e.add_field(name=f"{name} · 11-18", value=_cap(_table_field_lines(table, 11, 18)), inline=False)
+
+
 def rolls_page() -> discord.Embed:
-    e = discord.Embed(title="GM Screen — Reaction & Criticals", color=_GOLD)
+    e = discord.Embed(
+        title="GM Screen — Reaction & Criticals",
+        description="Head-blow and unarmed critical-miss tables: next page.",
+        color=_GOLD,
+    )
     e.add_field(
         name="Reaction (B560)",
         value="\n".join(f"`{rng:>5}` {name}" for name, rng in reaction_reference()),
         inline=False,
     )
-    e.add_field(
-        name="Critical Hit — 3d6 (B556)",
-        value=_cap("\n".join(f"`{r:>2}` {eff}" for r, eff in sorted(crit_hit_reference().items()))),
-        inline=True,
+    _add_split_table(e, "Critical Hit — 3d6 (B556)", crit_hit_reference())
+    _add_split_table(e, "Critical Miss — 3d6 (B556)", crit_miss_reference())
+    return e
+
+
+def crits_page() -> discord.Embed:
+    e = discord.Embed(
+        title="GM Screen — Criticals (Head Blow & Unarmed)",
+        description=(
+            "Head Blow: critical hits to the face, skull, or eye. Unarmed: "
+            "critical misses on unarmed attacks/parries, incl. animals. "
+            "Can't-fall fighters take 1d-3 injury on a fall result; "
+            "fliers/swimmers are forced awkward (-4 att / -3 def) instead."
+        ),
+        color=_GOLD,
     )
-    e.add_field(
-        name="Critical Miss — 3d6 (B556)",
-        value=_cap("\n".join(f"`{r:>2}` {eff}" for r, eff in sorted(crit_miss_reference().items()))),
-        inline=True,
-    )
+    _add_split_table(e, "Critical Head Blow — 3d6 (B556)", head_blow_reference())
+    _add_split_table(e, "Unarmed Critical Miss — 3d6 (B556-557)", unarmed_crit_miss_reference())
     return e
 
 
 def fright_page() -> discord.Embed:
     e = discord.Embed(
-        title="GM Screen — Fright Check (B360)",
-        description="Roll vs HT (or Will); read the margin of failure here.",
+        title="GM Screen — Fright Check (B360-361)",
+        description=(
+            "Roll vs Will, capped at 13 — Rule of 14. "
+            "On a failure: roll 3d + margin of failure, read the total here."
+        ),
         color=_PURPLE,
     )
     items = sorted(fright_reference().items())
-    e.add_field(
-        name="Margin 0-9",
-        value=_cap("\n".join(f"`{m:>2}` {eff}" for m, eff in items if m < 10)),
-        inline=False,
-    )
-    e.add_field(
-        name="Margin 10-19",
-        value=_cap("\n".join(f"`{m:>2}` {eff}" for m, eff in items if m >= 10)),
-        inline=False,
-    )
+
+    def _band(lo: int, hi: int) -> str:
+        return "\n".join(
+            f"`{'40+' if t == 40 else t:>3}` {eff}" for t, eff in items if lo <= t <= hi
+        )
+
+    e.add_field(name="Total 4-15", value=_cap(_band(4, 15)), inline=False)
+    e.add_field(name="Total 16-25", value=_cap(_band(16, 25)), inline=False)
+    e.add_field(name="Total 26-33", value=_cap(_band(26, 33)), inline=False)
+    e.add_field(name="Total 34-40+", value=_cap(_band(34, 40)), inline=False)
     return e
 
 
@@ -305,6 +345,7 @@ _PAGE_BUILDERS = (
     ranged_page,
     movement_page,
     rolls_page,
+    crits_page,
     fright_page,
 )
 

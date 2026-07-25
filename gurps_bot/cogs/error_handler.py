@@ -13,22 +13,81 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Option names whose values are user free text. Redacted regardless of length: a
+# length threshold alone would pass "he did it" straight into the log, and a
+# gm_secret note's title is exactly as secret as its body.
+_FREE_TEXT_OPTIONS = frozenset({
+    "body", "text", "content", "note", "notes", "title", "description", "desc",
+    "detail", "details", "summary", "comment", "reason", "message", "msg",
+    "query", "search", "tags",
+})
+
+# Any OTHER string longer than this is treated as free text — the denylist can't
+# know every option a future cog adds. Enum values, dice notation, character and
+# skill names, and snowflake IDs all sit well under it.
+_MAX_LOGGED_VALUE_LEN = 50
+
+# Option types that carry nested options instead of a value:
+# 1 = SUB_COMMAND, 2 = SUB_COMMAND_GROUP.
+_SUBCOMMAND_TYPES = frozenset({1, 2})
+
+
+def _redact_value(name: str, value: object) -> object:
+    """A log-safe stand-in for one option value.
+
+    Kept verbatim: non-strings, and short strings not on the free-text denylist.
+    Everything else becomes a placeholder carrying type + length — enough to tell
+    "empty" from "the user pasted 4KB" without reproducing the content.
+    """
+    if not isinstance(value, str):
+        return value
+    if name.lower() in _FREE_TEXT_OPTIONS or len(value) > _MAX_LOGGED_VALUE_LEN:
+        return f"<redacted str len={len(value)}>"
+    return value
+
+
+def _flatten_options(
+    options: object, prefix: str = "",
+) -> list[tuple[str, object]]:
+    """Flatten raw interaction options to (dotted_name, value) leaves.
+
+    Group commands nest their real options one or two levels under the subcommand
+    entry, so a top-level-only read saw a single pseudo-option {"name": "add",
+    "value": None} — no diagnostic at all for every grouped command in the bot.
+    Descending is what makes the log useful, and also what puts note bodies in
+    reach, hence _redact_value.
+    """
+    leaves: list[tuple[str, object]] = []
+    for o in options if isinstance(options, list) else []:
+        if not isinstance(o, dict):
+            continue
+        name = f"{prefix}{o.get('name')}"
+        nested = o.get("options")
+        if o.get("type") in _SUBCOMMAND_TYPES or (nested and "value" not in o):
+            leaves.extend(_flatten_options(nested, prefix=f"{name}."))
+        else:
+            leaves.append((name, o.get("value")))
+    return leaves
+
 
 def _interaction_context(interaction: discord.Interaction) -> dict[str, object]:
-    """Best-effort log context from an interaction; never raises."""
+    """Best-effort log context from an interaction; never raises.
+
+    Option NAMES are what make an error reproducible and are always kept; free-text
+    VALUES are redacted — the bot log is a lower trust tier than the channel a
+    command came from, and a gm_secret note has no "author only" guarantee there.
+    """
     ctx: dict[str, object] = {}
     try:
         ctx["user_id"] = getattr(interaction.user, "id", None)
         ctx["guild_id"] = interaction.guild_id
         ctx["channel_id"] = getattr(interaction.channel, "id", None)
         ctx["command"] = interaction.command.name if interaction.command else None
-        # names + simple values only; Member/Role/Channel objects bloat logs and can leak
+        # names + redacted values only; Member/Role/Channel objects bloat logs and can leak
         if interaction.data and isinstance(interaction.data, dict):
-            opts = interaction.data.get("options") or []
             ctx["options"] = [
-                {"name": o.get("name"), "value": o.get("value")}
-                for o in opts
-                if isinstance(o, dict)
+                {"name": name, "value": _redact_value(name, value)}
+                for name, value in _flatten_options(interaction.data.get("options"))
             ]
     except Exception:  # pragma: no cover — defensive only
         ctx["context_capture_failed"] = True

@@ -32,6 +32,7 @@ _CATEGORY_CHOICES = [
     app_commands.Choice(name="Speed/Range & Size", value="ranged"),
     app_commands.Choice(name="Movement (Encumbrance, Travel)", value="movement"),
     app_commands.Choice(name="Reaction & Criticals", value="rolls"),
+    app_commands.Choice(name="Criticals (Head Blow, Unarmed)", value="crits"),
     app_commands.Choice(name="Fright Check", value="fright"),
 ]
 

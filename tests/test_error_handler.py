@@ -117,3 +117,146 @@ class TestUnknownErrorLogging:
             if "handler itself failed" in c.args[0]
         ]
         assert meta_calls, "meta-failure was not logged"
+
+
+# --- Option-value redaction --------------------------------------------------
+#
+# The diagnostic context goes to the bot's log, a lower trust tier than the
+# channel the command came from: /notes add carries a gm_secret flag whose whole
+# contract is "visible only to the author", and the log has no such filter.
+# Option NAMES are what make an error reproducible; the free-text VALUES are the
+# payload.
+
+
+def _options_interaction(options: list[dict], command_name: str = "notes add"):
+    interaction = _interaction(response_done=False)
+    interaction.command.name = command_name
+    interaction.data = {"options": options}
+    return interaction
+
+
+async def _logged_context(interaction) -> dict:
+    """Run the unknown-error branch and return the ctx dict it logged."""
+    with patch("gurps_bot.cogs.error_handler.log") as mock_log:
+        await _handler().on_app_command_error(
+            interaction, app_commands.AppCommandError("boom")
+        )
+    mock_log.exception.assert_called_once()
+    return mock_log.exception.call_args.args[2]
+
+
+def _opt(ctx: dict, name: str):
+    for o in ctx["options"]:
+        if o["name"] == name:
+            return o
+    raise AssertionError(f"option {name!r} not captured: {ctx['options']!r}")
+
+
+class TestOptionValueRedaction:
+    SECRET = (
+        "The duke's bastard is the one funding the cult, and the party's "
+        "patron already knows it."
+    )
+
+    async def test_long_free_text_is_redacted_with_its_length(self):
+        interaction = _options_interaction(
+            [{"name": "body", "type": 3, "value": self.SECRET}]
+        )
+        ctx = await _logged_context(interaction)
+        assert self.SECRET not in repr(ctx)
+        assert "duke" not in repr(ctx)
+        assert _opt(ctx, "body")["value"] == f"<redacted str len={len(self.SECRET)}>"
+
+    async def test_short_free_text_option_is_redacted_by_name(self):
+        # A length threshold alone lets a short secret through — "he did it"
+        # is as secret as three paragraphs of it.
+        interaction = _options_interaction(
+            [{"name": "body", "type": 3, "value": "he did it"}]
+        )
+        ctx = await _logged_context(interaction)
+        assert "he did it" not in repr(ctx)
+        assert _opt(ctx, "body")["value"].startswith("<redacted")
+
+    async def test_nested_subcommand_options_are_reached(self):
+        # Group commands nest the real options one level under the subcommand.
+        # Reading only the top level logged a single pseudo-option
+        # {"name": "add", "value": None} — no leak, but no diagnostic either.
+        # Flattening reaches them, so redaction has to as well.
+        interaction = _options_interaction([
+            {
+                "name": "add",
+                "type": 1,
+                "options": [
+                    {"name": "title", "type": 3, "value": "Session 4"},
+                    {"name": "body", "type": 3, "value": self.SECRET},
+                    {"name": "secret", "type": 5, "value": True},
+                ],
+            }
+        ])
+        ctx = await _logged_context(interaction)
+        names = [o["name"] for o in ctx["options"]]
+        assert names == ["add.title", "add.body", "add.secret"]
+        assert self.SECRET not in repr(ctx)
+        assert _opt(ctx, "add.secret")["value"] is True
+
+    async def test_short_enum_and_scalar_values_are_kept(self):
+        # Debuggability: these are what make an error reproducible and none of
+        # them is free text.
+        interaction = _options_interaction(
+            [
+                {"name": "dice", "type": 3, "value": "3d6"},
+                {"name": "amount", "type": 4, "value": -5},
+                {"name": "location", "type": 3, "value": "torso"},
+                {"name": "character_scoped", "type": 5, "value": False},
+            ],
+            command_name="damage",
+        )
+        ctx = await _logged_context(interaction)
+        assert _opt(ctx, "dice")["value"] == "3d6"
+        assert _opt(ctx, "amount")["value"] == -5
+        assert _opt(ctx, "location")["value"] == "torso"
+        assert _opt(ctx, "character_scoped")["value"] is False
+
+    async def test_unknown_long_value_is_redacted_by_length(self):
+        # The denylist can't know every future free-text option name, so a
+        # length threshold backstops it.
+        blob = "z" * 400
+        interaction = _options_interaction(
+            [{"name": "somefutureoption", "type": 3, "value": blob}],
+            command_name="future",
+        )
+        ctx = await _logged_context(interaction)
+        assert blob not in repr(ctx)
+        assert _opt(ctx, "somefutureoption")["value"] == "<redacted str len=400>"
+
+    async def test_option_names_always_survive(self):
+        interaction = _options_interaction([
+            {"name": "title", "type": 3, "value": self.SECRET},
+            {"name": "body", "type": 3, "value": self.SECRET},
+            {"name": "tags", "type": 3, "value": "cult,duke"},
+        ])
+        ctx = await _logged_context(interaction)
+        assert [o["name"] for o in ctx["options"]] == ["title", "body", "tags"]
+
+    async def test_meta_failure_path_is_redacted_too(self):
+        # The handler's own except branch re-captures context; it has to go
+        # through the same redaction or the leak just moves.
+        interaction = _options_interaction(
+            [{"name": "body", "type": 3, "value": self.SECRET}]
+        )
+        interaction.response.send_message.side_effect = RuntimeError("dead socket")
+        with patch("gurps_bot.cogs.error_handler.log") as mock_log:
+            await _handler().on_app_command_error(
+                interaction, app_commands.AppCommandError("boom")
+            )
+        assert self.SECRET not in repr(mock_log.exception.call_args_list)
+
+    async def test_malformed_options_do_not_break_capture(self):
+        # Never raise from the diagnostic path — it runs while already handling
+        # an error.
+        interaction = _options_interaction(
+            ["not-a-dict", {"name": "body", "type": 3, "value": self.SECRET}]
+        )
+        ctx = await _logged_context(interaction)
+        assert self.SECRET not in repr(ctx)
+        assert _opt(ctx, "body")["value"].startswith("<redacted")
