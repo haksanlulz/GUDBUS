@@ -141,5 +141,19 @@ def run_bot() -> None:
             "DISCORD_TOKEN not set. Copy .env.example to .env and add your token."
         )
 
+    # Schema gate — refuse to launch against a database the code has outgrown.
+    # setup_hook's init_db() -> create_all builds MISSING tables but can never
+    # ALTER an existing one, so a stale schema boots clean and fails mid-session.
+    # db/bootstrap owns the decision; this is only the wiring.
+    from gurps_bot.db.bootstrap import SchemaGateError, ensure_schema_current
+
+    try:
+        ensure_schema_current()
+    except SchemaGateError as exc:
+        # Log before re-raising so the refusal lands in the rotating log file as
+        # well as on the terminal the operator is watching.
+        log.critical("%s", exc)
+        raise
+
     bot = GURPSBot()
     bot.run(DISCORD_TOKEN, log_handler=None)
