@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from sqlalchemy import func, select
 
-from gurps_bot.cogs.admin import cleanup_guild_data
+from gurps_bot.services.admin import cleanup_guild_data
 from gurps_bot.db.models import ActiveCharacter, Character, Combat, Combatant
 from gurps_bot.db.notes import Note
 from gurps_bot.db.timers import Timer

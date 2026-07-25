@@ -540,3 +540,23 @@ async def cleanup_stale_combats(
     for c in stale:
         await session.delete(c)
     return len(stale)
+
+
+async def count_combats(session: AsyncSession) -> int:
+    """Total active combats across all guilds (/status diagnostics)."""
+    return await session.scalar(select(func.count(Combat.id)))
+
+
+async def purge_guild_combats(session: AsyncSession, guild_id: int) -> None:
+    """Bulk-delete a guild's combats AND their combatants (guild teardown).
+
+    Combatant has no guild_id, and bulk delete(Combat) DML fires no ORM
+    cascade; whether the DB-level ON DELETE CASCADE fires depends on the
+    deployed schema's FK clause. Delete the guild's combatants explicitly
+    first so teardown depends on neither. Caller commits.
+    """
+    guild_combats = select(Combat.id).where(Combat.guild_id == guild_id)
+    await session.execute(
+        delete(Combatant).where(Combatant.combat_id.in_(guild_combats))
+    )
+    await session.execute(delete(Combat).where(Combat.guild_id == guild_id))

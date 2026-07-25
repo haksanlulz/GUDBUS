@@ -11,23 +11,12 @@ from discord.ext import commands
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
-from sqlalchemy import delete, func, select
 
-from gurps_bot.db.models import ActiveCharacter, Character, Combat, Combatant
-from gurps_bot.db.notes import Note
-from gurps_bot.db.timers import Timer
+from gurps_bot.services.admin import cleanup_guild_data
+from gurps_bot.services.characters import count_characters
+from gurps_bot.services.combat import count_combats
 
 log = logging.getLogger(__name__)
-
-
-async def cleanup_guild_data(session, guild_id: int) -> None:
-    """Purge a departed guild's rows; characters etc. are user-scoped and stay. Caller commits."""
-    # Combatant has no guild_id and bulk delete(Combat) won't fire the cascade
-    # (sqlite fk enforcement off), so clear combatants first or they dangle
-    guild_combats = select(Combat.id).where(Combat.guild_id == guild_id)
-    await session.execute(delete(Combatant).where(Combatant.combat_id.in_(guild_combats)))
-    for model in (ActiveCharacter, Combat, Note, Timer):
-        await session.execute(delete(model).where(model.guild_id == guild_id))
 
 
 class AdminCog(commands.Cog):
@@ -123,8 +112,8 @@ class AdminCog(commands.Cog):
         )
 
         async with bot.db() as session:
-            char_count = await session.scalar(select(func.count(Character.id)))
-            combat_count = await session.scalar(select(func.count(Combat.id)))
+            char_count = await count_characters(session)
+            combat_count = await count_combats(session)
         embed.add_field(name="Characters", value=str(char_count), inline=True)
         embed.add_field(name="Active Combats", value=str(combat_count), inline=True)
 

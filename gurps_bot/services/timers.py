@@ -163,3 +163,12 @@ async def clear_timers(
         stmt.execution_options(synchronize_session=False)
     )
     return result.rowcount
+
+
+async def purge_guild_timers(session: AsyncSession, guild_id: int) -> None:
+    """Bulk-delete ALL of a guild's timers, every channel (guild teardown).
+
+    Unlike clear_timers (one channel, optional filters), this is the
+    guild-leave purge: no channel scoping, no filters. Caller commits.
+    """
+    await session.execute(delete(Timer).where(Timer.guild_id == guild_id))

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.models import (
@@ -295,3 +295,23 @@ async def delete_character(session: AsyncSession, char_id: int) -> bool:
         await session.delete(char)
         return True
     return False
+
+
+async def count_characters(session: AsyncSession) -> int:
+    """Total imported characters across all users (/status diagnostics)."""
+    return await session.scalar(select(func.count(Character.id)))
+
+
+async def purge_guild_active_characters(
+    session: AsyncSession, guild_id: int,
+) -> None:
+    """Bulk-delete a guild's active-character selections (guild teardown).
+
+    Selections are guild-scoped pointers; the Characters they point at are
+    global and survive. No skill_cache invalidation: the bot has left the
+    guild, so no roll or autocomplete can consume a stale entry, and the short
+    TTL covers an instant rejoin. Caller commits.
+    """
+    await session.execute(
+        delete(ActiveCharacter).where(ActiveCharacter.guild_id == guild_id)
+    )

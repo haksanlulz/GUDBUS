@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.notes import Note
@@ -243,3 +243,12 @@ async def get_note(
     if note.gm_secret and note.discord_user_id != requesting_user_id:
         return None
     return note
+
+
+async def purge_guild_notes(session: AsyncSession, guild_id: int) -> None:
+    """Bulk-delete a guild's notes — including gm_secret ones (guild teardown).
+
+    No visibility predicate: teardown removes EVERY note scoped to the guild
+    regardless of author. Caller commits.
+    """
+    await session.execute(delete(Note).where(Note.guild_id == guild_id))
