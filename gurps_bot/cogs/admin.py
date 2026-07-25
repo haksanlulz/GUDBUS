@@ -25,63 +25,46 @@ class AdminCog(commands.Cog):
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="sync", description="Sync Slash Commands (Bot Owner Only)")
-    @app_commands.describe(
-        scope="Where to register: 'guild' = this server (instant), 'global' = all servers (~1h)",
-        clear="Also clear the OTHER scope first — fixes doubled-up commands",
+    # Registration is single-scope (global) and normally happens at startup,
+    # fingerprint-gated (command_sync.auto_sync). This is the manual force.
+    # The old scope/clear machinery is gone on purpose: guild+clear left every
+    # registration guild-scoped with the global set emptied, so one kick wiped
+    # all commands with no in-Discord way back (2026-07-25 escape).
+    @app_commands.command(
+        name="sync", description="Force a global slash-command re-register (Bot Owner Only)"
     )
-    @app_commands.choices(scope=[
-        app_commands.Choice(name="This Guild (Instant)", value="guild"),
-        app_commands.Choice(name="Global (All Servers, ~1h)", value="global"),
-    ])
-    async def sync_commands(
-        self,
-        interaction: discord.Interaction,
-        scope: str = "guild",
-        clear: bool = False,
-    ) -> None:
+    async def sync_commands(self, interaction: discord.Interaction) -> None:
         if not await interaction.client.is_owner(interaction.user):
             await interaction.response.send_message(
                 "Only the bot owner can sync commands.", ephemeral=True
             )
             return
-
         await interaction.response.defer(ephemeral=True)
-        tree = interaction.client.tree
-        messages: list[str] = []
+        synced = await interaction.client.tree.sync()
+        await interaction.followup.send(f"Synced {len(synced)} commands globally.")
 
-        if scope == "guild":
-            if not interaction.guild_id:
-                await interaction.followup.send(
-                    "Guild sync must be run inside a server."
-                )
+    # The rescue channel. Mention-prefixed text command, so it works with ZERO
+    # slash commands registered (a wiped registration cannot take it down) and
+    # no message-content intent (mentions are the content carve-out).
+    #   @<bot> sync         -> global re-register
+    #   @<bot> sync purge   -> clear THIS guild's guild-scoped registrations
+    #                          (de-dupes leftovers from the old guild-scope era)
+    @commands.command(name="sync", help="@<bot> sync [purge] — registration rescue (owner)")
+    @commands.is_owner()
+    async def sync_rescue(self, ctx: commands.Context, action: str | None = None) -> None:
+        tree = ctx.bot.tree
+        if action == "purge":
+            if ctx.guild is None:
+                await ctx.reply("purge runs inside a server.")
                 return
-            target = discord.Object(id=interaction.guild_id)
-            tree.copy_global_to(guild=target)
-            synced = await tree.sync(guild=target)
-            messages.append(f"Synced {len(synced)} commands to this guild.")
-            if clear:
-                # clear_commands(guild=None) empties the tree's global set for the
-                # whole process, not just at Discord; save/re-add it or the next
-                # /sync global pushes an empty set and wipes commands everywhere
-                saved = list(tree.get_commands(guild=None))
-                tree.clear_commands(guild=None)
-                await tree.sync()  # empty global at Discord = drops the duplicates
-                for cmd in saved:
-                    tree.add_command(cmd)
-                messages.append("Cleared duplicate global commands.")
-        else:  # global
-            if clear and interaction.guild_id:
-                guild_target = discord.Object(id=interaction.guild_id)
-                tree.clear_commands(guild=guild_target)
-                await tree.sync(guild=guild_target)
-                messages.append("Cleared this guild's commands (de-duplicated).")
-            synced = await tree.sync()
-            messages.append(
-                f"Synced {len(synced)} commands globally (may take up to 1 hour)."
+            tree.clear_commands(guild=ctx.guild)
+            await tree.sync(guild=ctx.guild)
+            await ctx.reply(
+                "Cleared this server's guild-scoped commands (global set untouched)."
             )
-
-        await interaction.followup.send(" ".join(messages))
+            return
+        synced = await tree.sync()
+        await ctx.reply(f"Synced {len(synced)} commands globally.")
 
     @app_commands.command(name="status", description="Bot Status and Diagnostics")
     async def status(self, interaction: discord.Interaction) -> None:

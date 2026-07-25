@@ -30,8 +30,9 @@
    uv run python -m gurps_bot
    ```
 
-4. **Sync commands:**
-   Use `/sync` (bot owner only) to register slash commands.
+4. **Command registration:** automatic. Commands register globally at startup
+   when the command set changed. `/sync` (owner) forces a re-register;
+   `@<bot> sync` is the mention-prefix rescue if registrations are ever gone.
 
 ## Commands
 
@@ -130,7 +131,7 @@
 | `/support` | Ways to support the bot (donation links + how to help) |
 | `/donate` | Donation links to support the bot's hosting |
 | `/status` | Bot diagnostics |
-| `/sync` | Sync slash commands (owner) |
+| `/sync` | Force a global command re-register (owner) |
 
 ## Reference data
 

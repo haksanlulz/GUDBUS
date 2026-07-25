@@ -11,7 +11,8 @@ import discord
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from gurps_bot.config import DEV_GUILD_ID, DISCORD_TOKEN, SYNC_ON_START
+from gurps_bot.command_sync import auto_sync
+from gurps_bot.config import AUTO_SYNC, COMMAND_FINGERPRINT_PATH, DISCORD_TOKEN
 from gurps_bot.db.engine import dispose_engine, init_db, init_engine
 
 if TYPE_CHECKING:
@@ -49,7 +50,11 @@ class GURPSBot(commands.Bot):
         intents = discord.Intents.default()
         # user text (macro/npc/note names) is echoed into public replies; never let it ping
         super().__init__(
-            command_prefix="",
+            # Mention prefix, deliberately: message-content intent is off, and
+            # @-mentions are the carve-out Discord still delivers content for.
+            # That makes "@<bot> sync" a rescue channel that works with ZERO
+            # slash commands registered and zero privileged intents.
+            command_prefix=commands.when_mentioned,
             intents=intents,
             allowed_mentions=discord.AllowedMentions.none(),
         )
@@ -93,11 +98,10 @@ class GURPSBot(commands.Bot):
                 "the SJG Online Policy. Set it in .env before any public use."
             )
 
-        if DEV_GUILD_ID and SYNC_ON_START:
-            guild = discord.Object(id=DEV_GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("Dev-synced %d commands to guild %s", len(synced), DEV_GUILD_ID)
+        if AUTO_SYNC:
+            await auto_sync(self.tree, COMMAND_FINGERPRINT_PATH)
+        else:
+            log.info("AUTO_SYNC=0 — slash commands will not be registered at startup.")
 
         log.info("Bot is ready.")
 

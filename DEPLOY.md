@@ -24,8 +24,8 @@ docker compose up -d --build
 docker compose logs -f
 ```
 
-Then once, in Discord as the bot owner: `/sync clear:true` (global sync takes up
-to an hour; instant if you set `DEV_GUILD_ID`).
+Slash commands register themselves on first boot (globally, fingerprint-gated —
+nothing to run). If registrations are ever missing, mention the bot: `@<bot> sync`.
 
 **Updating:**
 
@@ -35,8 +35,8 @@ cd /opt/gurps-bot && git pull && docker compose up -d --build
 
 The bootstrap step (`gurps_bot.db.bootstrap`) runs automatically on each start, so
 schema migrations apply themselves. Re-vendoring the GCS data happens at build
-time, so a rebuild picks up any pin bump. Run `/sync clear:true` only if commands
-changed.
+time, so a rebuild picks up any pin bump. Command changes re-register themselves
+on the next start.
 
 **Prebuilt image:** pushes to `main` publish `ghcr.io/haksanlulz/gudbus:latest`
 (see `.github/workflows/docker-publish.yml`). The same workflow also pushes to
@@ -100,8 +100,8 @@ sudo systemctl enable --now gurps-bot
 journalctl -u gurps-bot -f
 ```
 
-Then once, in Discord as the bot owner: `/sync clear:true`. Global sync takes up
-to an hour; instant if you set `DEV_GUILD_ID`.
+Slash commands register themselves on first boot (globally, fingerprint-gated —
+nothing to run). If registrations are ever missing, mention the bot: `@<bot> sync`.
 
 ## .env
 
@@ -110,8 +110,7 @@ to an hour; instant if you set `DEV_GUILD_ID`.
 | `DISCORD_TOKEN` | yes | From the Discord Developer Portal. |
 | `DATABASE_URL` | no | Defaults to `sqlite+aiosqlite:///data/gurps_bot.db`. |
 | `BOT_AUTHOR_LEGAL_NAME` | for `/legal` | Name in the SJG game-aid notice. A handle is fine. Warns at startup if unset. |
-| `DEV_GUILD_ID` | no | Test server ID for instant command sync. |
-| `SYNC_ON_START` | no | `true` auto-syncs to `DEV_GUILD_ID` on boot. |
+| `AUTO_SYNC` | no | Default on: global command registration at startup, only when the command set changed. `0` disables. |
 | `BOT_INVITE_URL` | no | OAuth2 invite link. |
 | `BOT_SUPPORT_URL` | no | Support/contact link for `/legal`. |
 | `KOFI_URL`, `BUYMEACOFFEE_URL`, `PATREON_URL`, `GITHUB_SPONSORS_URL`, `PAYPAL_URL`, `LIBERAPAY_URL` | no | Donation links for `/support` + `/donate`. Unset = the commands show a "share the bot" message. |
@@ -123,7 +122,7 @@ to an hour; instant if you set `DEV_GUILD_ID`.
   in the description is fine.
 - Public Bot on, default intents. No message-content intent, so no
   privileged-intent review.
-- Your account must own the app — `/sync` is owner-gated.
+- Your account must own the app — `/sync` and `@<bot> sync` are owner-gated.
 
 ## Updating
 
@@ -140,7 +139,7 @@ bootstrap existed (tables present, no `alembic_version`): confirm the bot
 ran fine on the code that built it, then `uv run python -m alembic stamp head`
 once — the bootstrap refuses to guess and will tell you the same thing.
 
-Run `/sync clear:true` only if commands changed. Never overwrite
+Command changes re-register themselves on the next start. Never overwrite
 `data/gurps_bot.db` — if you rsync instead of pull, exclude it.
 
 ## Backups
