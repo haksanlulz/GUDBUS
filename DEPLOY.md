@@ -82,6 +82,22 @@ git clone https://github.com/haksanlulz/GUDBUS.git /opt/gurps-bot
    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
    ```
 
+## Pre-flight: is the vendoring source still there?
+
+```sh
+uv run python tools/sync_gcs_library.py --verify-upstream
+```
+
+Exit 0 means upstream still serves the pinned commit. Exit 1 means it does not,
+and every deploy and image build that re-vendors the catalog is broken until
+`PINNED_REF` is bumped — so check this *before* a deploy rather than discovering
+it mid-build. Cheap by design (blob-filtered fetch, ~1 MB), touches the network,
+never writes to the vendored tree.
+
+This exists because upstream deleted its `master` branch on 2026-07-21 and broke
+every deploy at once with no detector. Vendoring is keyed on a pinned SHA now, so
+a rename is survivable, but a force-push upstream can still orphan the pin.
+
 ## Setup
 
 ```sh

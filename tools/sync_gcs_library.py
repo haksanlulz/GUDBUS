@@ -41,13 +41,18 @@ def _utc_now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _run_git(args: list[str], *, cwd: Path | None = None) -> None:
-    proc = subprocess.run(
+def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """Run git and hand back the result. Callers decide what a failure means."""
+    return subprocess.run(
         ["git", *args],
         cwd=str(cwd) if cwd else None,
         capture_output=True,
         text=True,
     )
+
+
+def _run_git(args: list[str], *, cwd: Path | None = None) -> None:
+    proc = _git(args, cwd=cwd)
     if proc.returncode != 0:
         cmd = " ".join(["git", *args])
         raise RuntimeError(
@@ -194,6 +199,85 @@ def _book_folders() -> list[str]:
     return sorted(p.name for p in VENDOR_LIBRARY.iterdir() if p.is_dir())
 
 
+def _remote_head_sha(branch: str) -> str | None:
+    """Tip SHA of ``branch`` upstream, or None if that head is not there.
+
+    ``ls-remote`` exits 0 with empty output for an absent ref, so a clean exit
+    is not by itself evidence the branch exists.
+    """
+    proc = _git(["ls-remote", "--heads", REPO_URL, branch])
+    if proc.returncode != 0:
+        return None
+    first = proc.stdout.strip().split("\n")[0].strip()
+    if not first:
+        return None
+    return first.split("\t")[0].split()[0]
+
+
+def _pinned_ref_is_fetchable() -> bool:
+    """Can upstream still serve the exact commit we vendor from?
+
+    A branch rename can no longer break vendoring, but an upstream force-push
+    can orphan the pinned commit and GC it — and that failure would surface at
+    deploy time, which is the escape this rung exists to prevent.
+
+    Blob-filtered so the probe stays affordable as a standing check: fetching
+    this commit whole is ~201 MB, without blobs it is ~1 MB. Reachability of the
+    commit is the question; the blobs are not in doubt if the commit resolves.
+    """
+    with tempfile.TemporaryDirectory(prefix="gcs_pin_probe_") as tmp:
+        probe = Path(tmp) / "probe"
+        probe.mkdir(parents=True, exist_ok=True)
+        if _git(["init", "-q", "."], cwd=probe).returncode != 0:
+            return False
+        if _git(["remote", "add", "origin", REPO_URL], cwd=probe).returncode != 0:
+            return False
+        fetched = _git(
+            ["fetch", "--depth", "1", "--filter=blob:none", "origin", PINNED_REF],
+            cwd=probe,
+        )
+        return fetched.returncode == 0
+
+
+def cmd_verify_upstream() -> int:
+    """Standing live rung: is the vendoring source still there?
+
+    Exit 0 = the pin is fetchable (a branch rename is reported as drift but does
+    not fail). Exit 1 = the pin is gone, and vendoring is broken for every
+    deploy and container build until the pin is bumped.
+    """
+    print(f"Upstream:       {REPO_URL}")
+    print(f"Pinned ref:     {PINNED_REF}")
+
+    head = _remote_head_sha(BRANCH)
+    if head is None:
+        # Exactly the 2026-07-21 shape (master -> main), now harmless to the
+        # fetch but it silently rots the branch line in PROVENANCE.md.
+        print(
+            f"Branch:         DRIFT - upstream has no head named {BRANCH!r}. "
+            f"The fetch is keyed on the pinned SHA so vendoring still works, "
+            f"but PROVENANCE.md claims this branch. Bump BRANCH when you next "
+            f"move the pin."
+        )
+    else:
+        print(f"Branch:         {BRANCH} @ {head}")
+        if head != PINNED_REF:
+            print("                (pin is behind the branch tip - expected)")
+
+    if not _pinned_ref_is_fetchable():
+        print(
+            f"Pin:            UNREACHABLE - upstream no longer serves "
+            f"{PINNED_REF}.\n"
+            f"                Vendoring is broken for every deploy and image "
+            f"build until PINNED_REF is bumped to a commit upstream still has.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("Pin:            fetchable")
+    return 0
+
+
 def cmd_sync() -> int:
     with tempfile.TemporaryDirectory(prefix="gcs_master_library_") as tmp:
         clone_dir = Path(tmp) / "repo"
@@ -258,9 +342,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Dry run: verify vendored dir + print per-category counts (no network).",
     )
+    parser.add_argument(
+        "--verify-upstream",
+        action="store_true",
+        help=(
+            "Live smoke: confirm upstream still serves the pinned commit. "
+            "Touches the network, never writes to the vendored tree."
+        ),
+    )
     args = parser.parse_args(argv)
 
     try:
+        if args.verify_upstream:
+            return cmd_verify_upstream()
         if args.check:
             return cmd_check()
         return cmd_sync()
