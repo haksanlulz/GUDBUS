@@ -20,14 +20,19 @@ from gurps_bot.mechanics.damage import (
 )
 from gurps_bot.mechanics.dice import parse_dice, roll, roll_3d6
 from gurps_bot.mechanics.traits import (
+    FEARFULNESS_WILL_FLOOR,
     INJURY_TOLERANCE_LABELS,
+    fright_will_modifier,
+    is_unfazeable,
     parse_injury_tolerance,
 )
 from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_effect
+from gurps_bot.services.campaign import CampaignRules, get_campaign_rules
 from gurps_bot.services.characters import (
     get_active_character,
     get_character_attrs,
     get_character_skills,
+    get_character_traits,
 )
 from gurps_bot.ui import embeds
 from gurps_bot.ui.formatters import format_modifier_suffix
@@ -253,12 +258,16 @@ class RollingCog(commands.Cog):
         modifier: int = 0,
         hidden: bool = False,
     ) -> None:
+        trait_names: list[str] = []
+        rules = CampaignRules()  # RAW defaults outside a guild
         if interaction.guild_id:
             async with interaction.client.db() as session:
+                rules = await get_campaign_rules(session, interaction.guild_id)
                 char = await get_active_character(session, interaction.user.id, interaction.guild_id)
                 if char:
                     attrs = await get_character_attrs(session, char.id)
                     will_value = int(attrs.get("will", attrs.get("iq", 10)))
+                    trait_names = [t.name for t in await get_character_traits(session, char.id)]
                     label = f"{char.name} — Fright Check"
                 else:
                     will_value = 10
@@ -267,15 +276,40 @@ class RollingCog(commands.Cog):
             will_value = 10
             label = "Fright Check (Will 10)"
 
+        # B95 Unfazeable: "You are exempt from Fright Checks." No roll happens —
+        # rolling and reporting a success would be a different rule.
+        if is_unfazeable(trait_names):
+            await interaction.response.send_message(
+                embed=embeds.fright_exempt_embed(label.split(" — ")[0]),
+                ephemeral=hidden,
+            )
+            return
+
         label += format_modifier_suffix(modifier)
 
+        # Fearlessness adds its level to Will on a Fright Check; Fearfulness
+        # subtracts. Both land BEFORE the Rule of 14, which is why a Will-13+
+        # character gets nothing out of Fearlessness under RAW.
+        trait_mod = fright_will_modifier(trait_names)
+        if trait_mod:
+            name = "Fearlessness" if trait_mod > 0 else "Fearfulness"
+            label += f" · {name} {trait_mod:+d}"
+
         # Rule of 14 (B360): modified Will above 13 counts as 13 for a Fright
-        # Check, so a roll of 14+ always fails. Fold the modifier in first —
+        # Check, so a roll of 14+ always fails. Fold the modifiers in first —
         # the cap applies to the FINAL modified Will, not the base attribute.
-        effective = will_value + modifier
-        if effective > FRIGHT_WILL_CAP:
-            effective = FRIGHT_WILL_CAP
-            label += " · Rule of 14"
+        # Tables routinely soften or drop Rule-of-X caps, so it is switchable
+        # per campaign; RAW is the default and the bot always says which mode
+        # it used, because the same roll means different things either way.
+        effective = will_value + modifier + trait_mod
+        # Fearfulness "may not reduce your Will roll below 3"
+        effective = max(FEARFULNESS_WILL_FLOOR, effective)
+        if rules.rule_of_14:
+            if effective > FRIGHT_WILL_CAP:
+                effective = FRIGHT_WILL_CAP
+                label += " · Rule of 14"
+        elif effective > FRIGHT_WILL_CAP:
+            label += " · Rule of 14 OFF (house rule)"
 
         result = check(effective, 0)
         effect = ""

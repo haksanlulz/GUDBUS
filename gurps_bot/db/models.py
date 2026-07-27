@@ -159,6 +159,25 @@ class Trait(Base):
     character: Mapped[Character] = relationship(back_populates="traits")
 
 
+class CampaignSettings(Base):
+    """Per-guild house rules.
+
+    GURPS tables routinely soften or drop Rule-of-X caps, so a bot that hardcodes
+    RAW is wrong for those tables and a bot that drops them is wrong for the
+    rest. One row per guild, created lazily on first change; absence means
+    "all defaults", so an untouched guild needs no row.
+    """
+
+    __tablename__ = "campaign_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    guild_id: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, unique=True, index=True
+    )
+    #: B360 Rule of 14 — modified Will capped at 13 for Fright Checks. RAW is on.
+    rule_of_14: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
 class Combat(Base):
     __tablename__ = "combats"
     __table_args__ = (

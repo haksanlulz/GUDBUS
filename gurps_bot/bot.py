@@ -37,6 +37,7 @@ EXTENSIONS = [
     "gurps_bot.cogs.support",
     "gurps_bot.cogs.reference",
     "gurps_bot.cogs.macros",
+    "gurps_bot.cogs.campaign",
 ]
 
 

@@ -175,6 +175,21 @@ def contest_embed(
     return embed
 
 
+def fright_exempt_embed(who: str) -> discord.Embed:
+    """B95 Unfazeable exempts a character from Fright Checks outright.
+
+    No dice are shown because none are rolled — reporting a successful roll
+    would be a different rule, and a GM reading the embed must be able to tell
+    "did not have to roll" from "rolled and made it".
+    """
+    embed = discord.Embed(
+        title=f"{who} — Fright Check"[:256],
+        description="**Exempt.** Unfazeable — no Fright Check is rolled (B95).",
+        color=discord.Color.green(),
+    )
+    return embed
+
+
 def fright_check_embed(
     result: CheckResult, effect: str, label: str | None = None,
 ) -> discord.Embed:
