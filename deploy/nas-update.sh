@@ -15,6 +15,16 @@
 #   GUDBUS_REPO          owner/repo, for the CI status check
 #   GUDBUS_SKIP_CI_CHECK=1   deploy a tag whose tests are red/missing (asks first)
 #   GUDBUS_SKIP_BACKUP=1     skip the pre-deploy DB copy
+#   GUDBUS_IMAGE_REPO    registry repo to prune within (never anything else)
+#   GUDBUS_KEEP_IMAGES   old images to keep besides the running one (default 1)
+#   GUDBUS_KEEP_BACKUPS  in-volume DB backups to keep (default 7)
+#
+# Pass --no-prune to keep every old image and backup.
+#
+# Each deploy leaves behind the image it replaced and one more DB backup, and
+# neither was ever cleaned up, so both grew without bound on a box with other
+# people's services on it. Pruning runs only AFTER the new container is verified
+# healthy, and keeps one previous image so a rollback does not need the network.
 #
 # Pass --dry-run to run every check and stop before anything is modified. Worth
 # doing once on a new host: it proves the container really is the one this
@@ -26,14 +36,76 @@ PROJECT_DIR=${GUDBUS_PROJECT_DIR:-/boot/config/plugins/compose.manager/projects/
 CONTAINER=${GUDBUS_CONTAINER:-gudbus}
 REPO=${GUDBUS_REPO:-haksanlulz/GUDBUS}
 COMPOSE="$PROJECT_DIR/docker-compose.yml"
+IMAGE_REPO=${GUDBUS_IMAGE_REPO:-ghcr.io/haksanlulz/gudbus}
+KEEP_IMAGES=${GUDBUS_KEEP_IMAGES:-1}
+KEEP_BACKUPS=${GUDBUS_KEEP_BACKUPS:-7}
 
 die() { printf '\nFAILED: %s\n' "$1" >&2; exit 1; }
 step() { printf '\n== %s\n' "$1"; }
 
 DRY_RUN=0
-case "${1:-}" in
-  --dry-run) DRY_RUN=1; shift ;;
-esac
+PRUNE=1
+while :; do
+  case "${1:-}" in
+    --dry-run)  DRY_RUN=1; shift ;;
+    --no-prune) PRUNE=0; shift ;;
+    *) break ;;
+  esac
+done
+
+# Remove superseded images for OUR repo only, newest-first, keeping the running
+# one plus $KEEP_IMAGES previous.
+#
+# The reference filter is the whole safety story: this host runs 60+ containers
+# belonging to other people, so `docker image prune -a` — the obvious thing —
+# would delete their images too. `docker rmi` is deliberately called WITHOUT
+# -f, so an image another container still references refuses to be removed
+# rather than being torn out from under it.
+prune_images() {
+  [ "$PRUNE" = "1" ] || return 0
+  step "Old images"
+  RUNNING_IMG=$(docker inspect -f '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
+  # One image can carry several tags; de-duplicate so a keep-slot is an image,
+  # not a tag. docker images lists newest first.
+  IMG_IDS=$(docker images --no-trunc --filter=reference="$IMAGE_REPO" \
+            --format '{{.ID}}' 2>/dev/null | awk '!seen[$0]++')
+  [ -n "$IMG_IDS" ] || { printf '  none found for %s\n' "$IMAGE_REPO"; return 0; }
+  kept=0
+  for id in $IMG_IDS; do
+    if [ "$id" = "$RUNNING_IMG" ]; then
+      printf '  running  %s\n' "$(echo "$id" | cut -c8-19)"
+      continue
+    fi
+    kept=$((kept + 1))
+    if [ "$kept" -le "$KEEP_IMAGES" ]; then
+      printf '  rollback %s\n' "$(echo "$id" | cut -c8-19)"
+      continue
+    fi
+    if [ "$DRY_RUN" = "1" ]; then
+      printf '  would rm %s\n' "$(echo "$id" | cut -c8-19)"
+    elif docker rmi "$id" >/dev/null 2>&1; then
+      printf '  removed  %s\n' "$(echo "$id" | cut -c8-19)"
+    else
+      printf '  in use, kept %s\n' "$(echo "$id" | cut -c8-19)"
+    fi
+  done
+}
+
+# The backup step below writes one file per deploy into the data volume and
+# nothing ever removed them.
+prune_backups() {
+  [ "$PRUNE" = "1" ] || return 0
+  step "Old database backups"
+  docker exec "$CONTAINER" sh -c '
+    keep=$1
+    total=$(ls -1 /app/data/gurps_bot-*.db 2>/dev/null | wc -l)
+    [ "$total" -gt "$keep" ] || { echo "  $total backup(s), keeping all"; exit 0; }
+    ls -1t /app/data/gurps_bot-*.db | tail -n +$((keep + 1)) | while read -r f; do
+      rm -f "$f" && echo "  removed $(basename "$f")"
+    done
+    echo "  kept newest $keep of $total"
+  ' sh "$KEEP_BACKUPS" 2>/dev/null || printf '  WARNING: could not prune backups\n'
+}
 
 TAG=${1:-}
 [ -n "$TAG" ] || die "usage: $0 [--dry-run] <image-tag>   e.g. $0 sha-ef30b62
@@ -132,12 +204,18 @@ Re-run with GUDBUS_SKIP_CI_CHECK=1 only if you know why it is red."
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
+  # Preview the prune against the images actually on this host. Reads only.
+  prune_images
   step "Dry run"
   printf '  All checks passed. Would now:\n'
   printf '    1. back up /app/data/gurps_bot.db inside the container\n'
   printf '    2. pin %s in %s\n' "$TAG" "$COMPOSE"
   printf '    3. docker compose up -d --force-recreate --no-deps %s\n' "$SERVICE"
   printf '    4. verify the container id changed and the image matches\n'
+  if [ "$PRUNE" = "1" ]; then
+    printf '    5. remove the superseded images listed above, and all but the\n'
+    printf '       newest %s database backup(s)\n' "$KEEP_BACKUPS"
+  fi
   printf '\n  Nothing was modified. Re-run without --dry-run to deploy.\n'
   exit 0
 fi
@@ -206,6 +284,11 @@ RUNNING=$(docker inspect -f '{{.State.Running}}' "$CONTAINER")
 
 printf '  image  : %s\n  id     : %s -> %s\n  running: yes\n' \
   "$NEW_IMAGE" "$(echo "$CURRENT_ID" | cut -c1-12)" "$(echo "$NEW_ID" | cut -c1-12)"
+
+# Only now — a prune before this point could delete the image a failed deploy
+# needs to roll back to.
+prune_images
+prune_backups
 
 step "Done. Following logs (Ctrl+C to stop)"
 printf '  expect: migrations apply, all cogs load, a command re-sync if the\n'
