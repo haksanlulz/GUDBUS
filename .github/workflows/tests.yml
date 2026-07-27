@@ -16,7 +16,13 @@ on:
   workflow_call:
 
 concurrency:
-  group: tests-${{ github.ref }}
+  # Namespaced by workflow, not just ref. docker-publish.yml calls this as a
+  # gating job, so on a push to main it runs twice — once standalone, once
+  # called. With a shared group the two collide and one cancels the other,
+  # which left the commit showing a CANCELLED "Tests" check even though the
+  # matrix had passed inside the publish run. An ambiguous check is worse than
+  # a duplicated one, and the duplicate costs about 45 seconds.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions: {}
