@@ -135,13 +135,17 @@ class DamageResult:
     wounding_multiplier: float
     wound: int
     location: str | None
+    injury_tolerance: InjuryTolerance | None = None
 
     def __str__(self) -> str:
         loc = f" to {self.location}" if self.location else ""
+        # Diffuse caps finished injury rather than scaling it, so the multiplier
+        # alone would not explain the number — name the tolerance when set.
+        tol = f" [{self.injury_tolerance.value}]" if self.injury_tolerance else ""
         return (
             f"{self.roll_result.spec} {self.damage_type} = "
             f"{self.raw_damage} raw (x{self.wounding_multiplier}) = "
-            f"{self.wound} wound{loc}"
+            f"{self.wound} wound{loc}{tol}"
         )
 
 
@@ -240,6 +244,7 @@ def roll_damage(
         wounding_multiplier=mult,
         wound=wound,
         location=location,
+        injury_tolerance=injury_tolerance,
     )
 
 

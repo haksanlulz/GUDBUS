@@ -26,6 +26,7 @@ from gurps_bot.mechanics.injury import (
     knockdown_statuses,
     resolve_knockdown,
 )
+from gurps_bot.mechanics.traits import pain_threshold_knockdown_modifier
 from gurps_bot.services.characters import (
     NoActiveCharacter,
     get_active_character,
@@ -39,6 +40,7 @@ from gurps_bot.services.combat import (
     cleanup_stale_combats,
     end_combat,
     get_combat,
+    get_combatant_trait_names,
     modify_fp,
     modify_hp,
     record_defense,
@@ -459,9 +461,11 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 StatusEffect.DEAD.value, StatusEffect.UNCONSCIOUS.value,
             } & set(combatant.status_effects or [])
             if is_major_wound(injury, combatant.hp_max) and not already_down:
-                # B420: roll vs higher of HT/Will, minus location penalty
+                # B420: roll vs higher of HT/Will, minus location penalty and
+                # plus/minus the target's pain threshold (+3 High, -4 Low)
                 base_target = max(combatant.ht, combatant.will)
-                mod = knockdown_modifier(location)
+                trait_names = await get_combatant_trait_names(ctx.session, combatant)
+                mod = knockdown_modifier(location, trait_names)
                 roll = check(base_target, mod)
                 outcome = resolve_knockdown(
                     succeeded=roll.outcome.succeeded,
@@ -471,7 +475,16 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 applied = knockdown_statuses(outcome)
                 for status in applied:
                     await add_status(ctx.session, c.id, status)
-                loc_note = f", {location} {mod}" if mod else ""
+                # mod is now location + pain threshold, so don't attribute the
+                # whole thing to the location
+                mod_parts = []
+                if location and knockdown_modifier(location):
+                    mod_parts.append(f"{location} {knockdown_modifier(location):+d}")
+                pain_mod = pain_threshold_knockdown_modifier(trait_names)
+                if pain_mod:
+                    label = "High" if pain_mod > 0 else "Low"
+                    mod_parts.append(f"{label} Pain Threshold {pain_mod:+d}")
+                loc_note = f", {', '.join(mod_parts)}" if mod_parts else ""
                 knockdown_line = (
                     f"\nKnockdown & stunning (HT/Will {base_target}{loc_note}): rolled "
                     f"{roll.rolled} vs {roll.target} \u2014 {knockdown_label(outcome)}"

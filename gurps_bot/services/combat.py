@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from gurps_bot.db.models import Attribute, Combat, Combatant
+from gurps_bot.db.models import Attribute, Combat, Combatant, Trait
 from gurps_bot.mechanics.checks import check
 from gurps_bot.mechanics.combat_constants import StatusEffect
 
@@ -399,6 +399,23 @@ def previous_turn(combat: Combat) -> None:
     combat.current_index = pos
     combat.current_combatant_id = ordered[pos].id
     combat.updated_at = datetime.now(timezone.utc)
+
+
+async def get_combatant_trait_names(
+    session: AsyncSession, combatant: Combatant
+) -> list[str]:
+    """Trait names for the character behind a combatant, or [] for an NPC.
+
+    Mechanics rules that read traits (B420 pain threshold, B380 Injury
+    Tolerance, Fright Check modifiers) need names, not ORM rows. NPCs carry no
+    character_id, so they return empty and every such rule degrades to its
+    no-trait behaviour rather than erroring.
+    """
+    if combatant.character_id is None:
+        return []
+    stmt = select(Trait.name).where(Trait.character_id == combatant.character_id)
+    result = await session.execute(stmt)
+    return [name for name in result.scalars().all()]
 
 
 async def modify_hp(

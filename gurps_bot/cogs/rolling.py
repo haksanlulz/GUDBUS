@@ -19,6 +19,10 @@ from gurps_bot.mechanics.damage import (
     roll_damage,
 )
 from gurps_bot.mechanics.dice import parse_dice, roll, roll_3d6
+from gurps_bot.mechanics.traits import (
+    INJURY_TOLERANCE_LABELS,
+    parse_injury_tolerance,
+)
 from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_effect
 from gurps_bot.services.characters import (
     get_active_character,
@@ -49,6 +53,12 @@ DAMAGE_TYPE_CHOICES = [
 LOCATION_CHOICES = [
     app_commands.Choice(name=loc, value=loc.lower())
     for loc in HIT_LOCATION_NAMES
+]
+
+# B380 sidebar; labels owned by mechanics/traits so this can't drift from the enum
+INJURY_TOLERANCE_CHOICES = [
+    app_commands.Choice(name=label, value=variant.value)
+    for variant, label in INJURY_TOLERANCE_LABELS.items()
 ]
 
 async def _skill_attr_autocomplete(
@@ -289,9 +299,14 @@ class RollingCog(commands.Cog):
         damage_type="Damage type (cr, cut, imp, pi, burn, etc.)",
         dr="Damage resistance to subtract",
         location="Hit location for wounding modifier",
+        injury_tolerance="Target's Injury Tolerance, if any (B380): machines, undead, swarms",
         hidden="Roll in secret (GM blind roll): only you see the result",
     )
-    @app_commands.choices(damage_type=DAMAGE_TYPE_CHOICES, location=LOCATION_CHOICES)
+    @app_commands.choices(
+        damage_type=DAMAGE_TYPE_CHOICES,
+        location=LOCATION_CHOICES,
+        injury_tolerance=INJURY_TOLERANCE_CHOICES,
+    )
     @app_commands.checks.cooldown(2, 5.0)
     async def damage_roll(
         self,
@@ -300,10 +315,15 @@ class RollingCog(commands.Cog):
         damage_type: str = "cr",
         dr: app_commands.Range[int, 0, 100000] = 0,
         location: str | None = None,
+        injury_tolerance: str | None = None,
         hidden: bool = False,
     ) -> None:
+        tolerance = parse_injury_tolerance(injury_tolerance)
         try:
-            result = roll_damage(dice, damage_type, dr=dr, location=location)
+            result = roll_damage(
+                dice, damage_type, dr=dr, location=location,
+                injury_tolerance=tolerance,
+            )
         except ValueError as e:
             await interaction.response.send_message(f"Invalid dice: {e}", ephemeral=True)
             return

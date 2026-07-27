@@ -143,6 +143,27 @@ def injury_tolerance(names: list[str]) -> InjuryTolerance | None:
     return None
 
 
+#: display labels for the three wounding-relevant variants, so a command surface
+#: does not re-type the list and drift from the enum
+INJURY_TOLERANCE_LABELS: dict[InjuryTolerance, str] = {
+    InjuryTolerance.UNLIVING: "Unliving (machines, most corporeal undead)",
+    InjuryTolerance.HOMOGENOUS: "Homogenous (statues, blobs, solid objects)",
+    InjuryTolerance.DIFFUSE: "Diffuse (swarms, air elementals, nets)",
+}
+
+
+def parse_injury_tolerance(value: str | None) -> InjuryTolerance | None:
+    """Enum for a command-surface value, or None. Unknown input is None, never
+    a guess — a wrong tolerance silently changes every wound."""
+    if not value:
+        return None
+    wanted = value.strip().casefold()
+    for variant in InjuryTolerance:
+        if wanted == variant.value.casefold():
+            return variant
+    return None
+
+
 def has_reduced_parry(names: list[str]) -> bool:
     """B376: the -2 parry step is granted by Trained By A Master or Weapon
     Master. (A fencing weapon also grants it, but that is equipment, not a
