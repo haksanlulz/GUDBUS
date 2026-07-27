@@ -1,13 +1,15 @@
 name: Tests
 
-# Runs the pytest suite on every PR and on pushes to main, across the min and a
-# current supported Python. No GCS data is vendored here (that would clone a
-# third-party repo on every run), so the ~18 vendored-data tests skip; deploy.sh
-# exercises them at deploy time.
+# Runs the pytest suite on every PR and on pushes to trunk and to the release
+# branch, across the min and a current supported Python. No GCS data is
+# vendored here (that would clone a third-party repo on every run), so the ~18
+# vendored-data tests skip; deploy.sh exercises them at deploy time.
 on:
   pull_request:
+  # dev is trunk, main is the release branch. Both run the suite: a split where
+  # trunk is untested hides breakage rather than isolating it.
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
   # Callable so docker-publish.yml can gate on it. Publishing used to be
   # completely independent of this workflow, which meant a commit with a red

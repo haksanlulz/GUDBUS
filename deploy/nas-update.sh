@@ -105,6 +105,30 @@ Re-run with GUDBUS_SKIP_CI_CHECK=1 only if you know why it is red."
   else
     printf '  WARNING: could not reach the GitHub API; CI status UNVERIFIED\n'
   fi
+
+  # ----------------------------------------------------------- which channel
+  # dev is trunk and main is the release branch, and both publish sha- tags, so
+  # a tag alone does not say which one you are about to put on the box. This
+  # reports rather than refuses: deploying a nightly to try it is a legitimate
+  # thing to do, and the failure mode worth preventing is doing it without
+  # knowing. `behind` and `identical` mean the commit is an ancestor of main.
+  step "Release channel"
+  CMP="https://api.github.com/repos/$REPO/compare/main...${TAG#sha-}"
+  if OUT=$(curl -fsSL -H 'Accept: application/vnd.github+json' "$CMP" 2>/dev/null); then
+    # Anchored on the adjacent "ahead_by" key, not on "status" alone: an
+    # `ahead` comparison also carries a files[] array whose entries each have
+    # their own "status", and a greedy match takes the LAST one. That would
+    # have misread exactly the nightly case this check exists to catch, while
+    # looking correct on every release tag it was tried against.
+    STATUS=$(printf '%s' "$OUT" | tr -d ' \n' | sed -n 's/.*"status":"\([a-z]*\)","ahead_by".*/\1/p')
+    case "$STATUS" in
+      identical|behind) printf '  RELEASE — this commit is on main\n' ;;
+      ahead|diverged)   printf '  NIGHTLY — this commit is NOT on main (trunk build)\n' ;;
+      *)                printf '  WARNING: could not read the channel (status=%s)\n' "${STATUS:-none}" ;;
+    esac
+  else
+    printf '  WARNING: could not reach the GitHub API; channel UNVERIFIED\n'
+  fi
 fi
 
 if [ "$DRY_RUN" = "1" ]; then

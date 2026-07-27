@@ -38,12 +38,27 @@ schema migrations apply themselves. Re-vendoring the GCS data happens at build
 time, so a rebuild picks up any pin bump. Command changes re-register themselves
 on the next start.
 
-**Prebuilt image:** pushes to `main` publish `ghcr.io/haksanlulz/gudbus:latest`
-(see `.github/workflows/docker-publish.yml`). The same workflow also pushes to
-Docker Hub (`docker.io/<user>/gudbus`) when the `DOCKERHUB_USERNAME` and
-`DOCKERHUB_TOKEN` repo secrets are set — without them it publishes to GHCR only.
-To pull instead of build, swap the `build:`/`image:` lines in
-`docker-compose.yml` as noted there, then `docker compose pull && docker compose up -d`.
+**Prebuilt image:** two channels on `ghcr.io/haksanlulz/gudbus`
+(see `.github/workflows/docker-publish.yml`):
+
+| Tag | Branch | What it is |
+|---|---|---|
+| `:latest` | `main` | Release. What you want unless you have a reason. |
+| `:nightly` | `dev` | Trunk. Tests pass, but it has not been released. |
+| `:sha-<commit>` | either | An exact build. What `deploy/nas-update.sh` pins. |
+
+Every published tag comes from a commit whose test matrix passed — the publish
+job depends on the test workflow, so a red commit produces no image at all.
+Verified by dispatching the publish workflow at a branch carrying a deliberate
+failure: both matrix legs failed, the build job was skipped, and no `sha-` tag
+appeared for that commit. `nas-update.sh` re-checks anyway, since a workflow
+edit could remove the gate.
+
+The same workflow also pushes to Docker Hub (`docker.io/<user>/gudbus`) when the
+`DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repo secrets are set — without them it
+publishes to GHCR only. To pull instead of build, swap the `build:`/`image:`
+lines in `docker-compose.yml` as noted there, then
+`docker compose pull && docker compose up -d`.
 
 **Data & backups:** the DB is in the `gurps-data` named volume. Back it up with
 

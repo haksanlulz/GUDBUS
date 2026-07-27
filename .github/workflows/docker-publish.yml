@@ -2,7 +2,18 @@ name: Publish Docker image
 
 # Builds the bot image and publishes it to GitHub Container Registry
 # (ghcr.io/haksanlulz/gudbus), and to Docker Hub when its credentials are set.
-# Runs on pushes to main, on version tags, and on demand.
+# Runs on pushes to trunk and the release branch, on version tags, and on demand.
+#
+# Two channels, so "what is in flight" and "what is deployed" are different
+# things you can pull by name:
+#
+#   dev  (trunk)   -> :nightly, :dev, :sha-<commit>
+#   main (release) -> :latest,  :main, :sha-<commit>
+#
+# Both channels publish a sha- tag, and deploy/nas-update.sh deploys by sha, so
+# a nightly can be put on the box deliberately. It says which channel the tag
+# came from rather than refusing, because trying a build before releasing it is
+# the point of having a nightly at all.
 #
 # GHCR needs no setup (uses the built-in GITHUB_TOKEN). To also publish to
 # Docker Hub, add two repository secrets:
@@ -12,7 +23,7 @@ name: Publish Docker image
 # secrets the Docker Hub steps are skipped and GHCR publishing still runs.
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     tags: ["v*"]
   workflow_dispatch:
 
@@ -88,7 +99,12 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=sha
+            # `latest` follows the release branch only. is_default_branch is
+            # what keeps a trunk push from moving the tag anyone pulling
+            # unqualified gets; `nightly` is trunk's equivalent pointer, so
+            # following trunk is possible but never accidental.
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/dev' }}
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6

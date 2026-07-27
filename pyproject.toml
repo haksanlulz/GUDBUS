@@ -26,6 +26,10 @@ dev = [
     # skips itself for a missing dependency is a rung that never fires. The
     # image builds with --no-dev, so this does not ship.
     "pillow>=10",
+    # tests/test_ci_workflows.py reads the workflow files as structure rather
+    # than text, so the publish gate is asserted rather than grepped. Same
+    # no-skipping argument as pillow above; also does not ship.
+    "pyyaml>=6",
 ]
 
 [project.optional-dependencies]
@@ -34,6 +38,7 @@ dev = [
     "pytest-asyncio>=0.21",
     "pyright>=1.1",
     "pillow>=10",
+    "pyyaml>=6",
 ]
 
 [tool.setuptools.packages.find]
