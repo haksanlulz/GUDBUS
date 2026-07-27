@@ -15,6 +15,7 @@ PAGE = "B462-470"
 _YPS_TO_MPH = 2.0  # "double yards/second to get mph" (B462)
 _CRASH_HP_MULTIPLIER = 2  # immovable object = hard surface, 2x HP (B430/B431)
 _SKID_FRACTION = 3  # a ground crash skids 1/3 of its velocity (B469)
+_SOFT_HP_MULTIPLIER = 1  # B430 Soft Objects: "damage is normal"
 _ROAD_BOUND_OFFROAD_ACCEL_FACTOR = 4  # off-road cap = min(top, 4 x Accel) (B466)
 _DECEL_WHEELED = 5  # powered wheeled decel per turn (B468)
 _DECEL_HEAVY = 10  # animal / tracked / walking decel per turn (B468)
@@ -86,24 +87,45 @@ _CRUISING_MULT: dict[Terrain, dict[Locomotion, float]] = {
 _DAMAGE_SCALE_DIVISORS = {"D": 10, "C": 100}
 
 
+class CrashSurface(str, enum.Enum):
+    """B430 Immovable Objects, the two damage branches.
+
+    HARD — "clay, concrete, ordinary soil, and sand ... a building, mountain, or
+    similar obstacle": use twice the mover's HP. This is the road-and-ground
+    case and stays the default.
+    SOFT — "forest litter, hay, swamp, or water": damage is normal. Ditching
+    into water is the case that made this worth modelling; the module used to
+    double it.
+    """
+
+    HARD = "hard"
+    SOFT = "soft"
+
+
 @dataclass(frozen=True, slots=True)
 class VehicleCrashResult:
-    """A vehicle crash / ram / bail-out: impact damage + ground skid (B468/430)."""
+    """A vehicle crash / ram / bail-out: impact damage + ground skid (B468/430).
+
+    ``surface`` records which B430 branch produced the damage, because hard and
+    soft crashes differ by a factor of two and the dice alone don't say which.
+    """
 
     velocity: int
     hp: int
-    dice_float: float  # canonical fractional figure, (2 x HP x velocity)/100
+    dice_float: float  # canonical fractional figure, (mult x HP x velocity)/100
     dice: DiceSpec  # whole crushing dice (rounded up)
     damage_type: str  # always 'cr'
     skid_yards: int  # ground crash skids 1/3 of velocity before stopping
-    dr: int
+    dr: int  # supplied DR plus any elastic DR from the surface
     flying: bool  # if True, add falling damage from altitude separately (B467)
+    surface: CrashSurface = CrashSurface.HARD
 
     def __str__(self) -> str:
         note = " +altitude fall" if self.flying else ""
+        soft = "" if self.surface is CrashSurface.HARD else f" [{self.surface.value}]"
         return (
             f"crash @ {self.velocity} yd/s -> {self.dice_float:g}d ({self.dice})"
-            f" {self.damage_type}, skid {self.skid_yards} yd{note}"
+            f" {self.damage_type}, skid {self.skid_yards} yd{soft}{note}"
         )
 
 
@@ -182,16 +204,39 @@ def deceleration(handling: int, kind: VehicleKind = VehicleKind.WHEELED_POWERED)
     return max(1, _DECEL_AIR_WATER_BASE + handling)
 
 
-def crash(velocity: int, hp: int, *, dr: int = 0, flying: bool = False) -> VehicleCrashResult:
-    """Crash = fall at velocity onto a hard surface, 2x HP (B468/430), via fall.fall_damage_dice; skid velocity//3 (B469)."""
+def crash(
+    velocity: int,
+    hp: int,
+    *,
+    dr: int = 0,
+    flying: bool = False,
+    surface: CrashSurface = CrashSurface.HARD,
+    elastic_dr: int = 0,
+) -> VehicleCrashResult:
+    """Crash = fall at velocity via fall.fall_damage_dice; skid velocity//3 (B469).
+
+    B430 splits the impact by what was hit: a hard obstacle uses twice the
+    mover's HP, a soft one (forest litter, hay, swamp, water) does normal
+    damage. HARD is the default because road and ground are the usual case, but
+    ditching into water is common enough that doubling it was simply wrong.
+
+    ``elastic_dr`` is B430's separate allowance for mattresses, nets and
+    airbags — "DR 2 for a feather bed to DR 10 for a safety net, trampoline, or
+    airbag" — and adds to whatever DR the vehicle already has.
+    """
     if velocity < 0:
         raise ValueError("velocity must be non-negative")
     if hp <= 0:
         raise ValueError("hp must be positive")
     if dr < 0:
         raise ValueError("dr must be non-negative")
+    if elastic_dr < 0:
+        raise ValueError("elastic_dr must be non-negative")
 
-    dice_float, spec = fall_damage_dice(hp, velocity, _CRASH_HP_MULTIPLIER)
+    multiplier = (
+        _CRASH_HP_MULTIPLIER if surface is CrashSurface.HARD else _SOFT_HP_MULTIPLIER
+    )
+    dice_float, spec = fall_damage_dice(hp, velocity, multiplier)
     return VehicleCrashResult(
         velocity=velocity,
         hp=hp,
@@ -199,8 +244,9 @@ def crash(velocity: int, hp: int, *, dr: int = 0, flying: bool = False) -> Vehic
         dice=spec,
         damage_type="cr",
         skid_yards=velocity // _SKID_FRACTION,
-        dr=dr,
+        dr=dr + elastic_dr,
         flying=flying,
+        surface=surface,
     )
 
 
