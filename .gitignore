@@ -34,3 +34,10 @@ htmlcov/
 
 # Local env / tooling
 .venv/
+
+# Brand art is generated, not shipped. The icon and banner are Discord app
+# assets uploaded by hand in the dev portal — they are not part of what the bot
+# runs, so the PNGs stay out of the repo. The generators in tools/ are tracked,
+# which is what makes the marks reproducible.
+/icon.png
+/banner.png

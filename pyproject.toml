@@ -21,6 +21,11 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pyright>=1.1",
+    # tools/make_icon.py and make_banner.py declare this themselves via PEP 723,
+    # but tests/test_brand_art.py has to import them, and a smoke test that
+    # skips itself for a missing dependency is a rung that never fires. The
+    # image builds with --no-dev, so this does not ship.
+    "pillow>=10",
 ]
 
 [project.optional-dependencies]
@@ -28,6 +33,7 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pyright>=1.1",
+    "pillow>=10",
 ]
 
 [tool.setuptools.packages.find]
