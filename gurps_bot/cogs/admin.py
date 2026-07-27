@@ -115,7 +115,11 @@ class AdminCog(commands.Cog):
                 "SJG Online Policy."
             )
         )
-        await interaction.response.send_message(embed=embed)
+        # Ephemeral: /status is a diagnostic the caller runs for themselves, and
+        # it reports uptime, latency, guild count and an invite link. None of
+        # that is table content, so posting it publicly only adds noise to a
+        # play channel (operator ruling 2026-07-27).
+        await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild) -> None:
