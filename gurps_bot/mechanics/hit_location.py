@@ -1,18 +1,41 @@
-"""hit-location to-hit penalties, single owner (B552; deliberate targeting B398-B400) — damage.py sources penalties from here, wounding numbers stay in damage.LOCATION_MULTIPLIERS; effect notes are original summaries, no SJG prose"""
+"""hit-location to-hit penalties, single owner (B552; deliberate targeting B398-B400) — damage.py sources penalties from here, wounding numbers stay in damage.LOCATION_MULTIPLIERS; effect notes are original summaries, no SJG prose
+
+Four locations are NOT Basic Set content and are marked as such: Jaw, Spine and
+the two Vein/Artery entries come from GURPS Martial Arts p.137 "New Hit
+Locations". They shipped under a Basic Set cite until 2026-07-27; the penalties
+were right, the provenance was not. All four verified against the printed
+Martial Arts text. Operator ruling: keep them, cite the book, mark optional.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+#: Cite for locations outside the Basic Set. A GM reading /target must be able
+#: to tell core rules from a supplement they may not use at their table.
+MARTIAL_ARTS_SOURCE = "GURPS Martial Arts p.137"
+
 
 @dataclass(frozen=True, slots=True)
 class HitLocation:
-    """penalty = to-hit modifier (Torso 0, rest <= 0); deliberate_only = never rolled on the random table"""
+    """penalty = to-hit modifier (Torso 0, rest <= 0); deliberate_only = never rolled on the random table
+
+    ``source`` is None for Basic Set locations and names the book otherwise.
+    ``deliberate_only`` and ``is_optional`` are orthogonal: Eye and Vitals are
+    deliberate-only but core (B552 prints "—" for their roll), while the
+    Martial Arts four are both.
+    """
 
     name: str
     penalty: int
     effect: str
     deliberate_only: bool = False
+    source: str | None = None
+
+    @property
+    def is_optional(self) -> bool:
+        """True when this location comes from a supplement, not the Basic Set."""
+        return self.source is not None
 
 
 # random-table locations first (MUST match what damage.HIT_LOCATION_TABLE can
@@ -30,7 +53,7 @@ LOCATIONS: tuple[HitLocation, ...] = (
     HitLocation("Left Leg", -2, "pi/imp wound as if pi; >1/2 HP in one blow cripples."),
     HitLocation("Hand", -4, "Reduced large-piercing/impaling; >1/3 HP cripples it."),
     HitLocation("Foot", -4, "Reduced large-piercing/impaling; >1/3 HP cripples it."),
-    # deliberate-only (B552 / B398-400)
+    # deliberate-only, Basic Set (B552 / B398-400)
     HitLocation(
         "Eye",
         -9,
@@ -43,29 +66,71 @@ LOCATIONS: tuple[HitLocation, ...] = (
         "x3 from impaling/any piercing, x2 from a tight-beam burn.",
         deliberate_only=True,
     ),
+    # deliberate-only, GURPS Martial Arts p.137 "New Hit Locations" — optional,
+    # not Basic Set. Every penalty verified against the printed text.
+    HitLocation(
+        "Ear",
+        -7,
+        "Resolves as a face hit unless a cutting blow is aimed to slice it off; "
+        "losing an ear costs a level of Appearance.",
+        deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
+    ),
     HitLocation(
         "Jaw",
         -6,
-        "A face hit that can also stun; treated harshly by crushing blows.",
+        "Targetable only from the front; resolves as a face hit, but a crushing "
+        "blow adds -1 to the knockdown roll.",
         deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
+    ),
+    HitLocation(
+        "Nose",
+        -7,
+        "Front only; a face hit that breaks past HP/4, costing smell and taste "
+        "until it heals.",
+        deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
+    ),
+    HitLocation(
+        "Limb Joint",
+        -5,
+        "Arm or leg joint; crushing, cutting, piercing or tight-beam burning "
+        "only. Cripples past HP/3 rather than HP/2.",
+        deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
+    ),
+    HitLocation(
+        "Extremity Joint",
+        -7,
+        "Hand or foot joint; same attack types. Cripples past HP/4 rather than "
+        "HP/3, and recovery rolls are at -2.",
+        deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
     ),
     HitLocation(
         "Spine",
         -8,
-        "A neck/torso hit that can cripple the body below the wound.",
+        "Narrow and buried in the torso, with DR 3 over the torso's; injury "
+        "past HP cripples it.",
         deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
     ),
     HitLocation(
         "Limb Vein/Artery",
         -5,
-        "A limb hit that bleeds; cutting/impaling threaten heavy blood loss.",
+        "Brachial or femoral vessel; cutting, impaling, piercing or tight-beam "
+        "burning only. Bleeds hard.",
         deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
     ),
     HitLocation(
         "Neck Vein/Artery",
         -8,
-        "A neck hit with severe bleeding risk from cutting/impaling.",
+        "Jugular or carotid; cutting, impaling, piercing or tight-beam burning "
+        "only. Fastest bleed on the table.",
         deliberate_only=True,
+        source=MARTIAL_ARTS_SOURCE,
     ),
 )
 

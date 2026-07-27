@@ -77,10 +77,18 @@ def build_target_embed(name: str) -> discord.Embed:
         e.set_footer(text=_FOOTER)
         return e
 
-    e = discord.Embed(title=f"Targeting - {loc.name} (B552)", color=_TARGET_COLOR)
+    cite = loc.source or "B552"
+    e = discord.Embed(title=f"Targeting - {loc.name} ({cite})", color=_TARGET_COLOR)
     e.add_field(name="To-hit penalty", value=str(loc.penalty), inline=True)
     kind = "Deliberate only" if loc.deliberate_only else "Also on random table"
     e.add_field(name="Availability", value=kind, inline=True)
+    if loc.is_optional:
+        # a GM whose table runs Basic Set only needs to see this before ruling
+        e.add_field(
+            name="Source",
+            value=f"Optional - {loc.source}, not the Basic Set.",
+            inline=False,
+        )
     e.add_field(name="Effect", value=loc.effect, inline=False)
     e.set_footer(text=_FOOTER)
     return e

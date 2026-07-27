@@ -143,9 +143,16 @@ def posture_reference() -> list[dict]:
 
 
 def targeting_reference() -> list[dict]:
-    """Deliberate-only hit locations the random 3d6 table omits (B552)."""
+    """Deliberate-only hit locations the random 3d6 table omits (B552), plus the
+    optional Martial Arts additions, each carrying its own source."""
     return [
-        {"name": loc.name, "penalty": loc.penalty, "effect": loc.effect}
+        {
+            "name": loc.name,
+            "penalty": loc.penalty,
+            "effect": loc.effect,
+            "source": loc.source,
+            "optional": loc.is_optional,
+        }
         for loc in deliberate_locations()
     ]
 
@@ -310,13 +317,28 @@ def body_page() -> discord.Embed:
         inline=False,
     )
 
-    target_lines = [
+    # Core rows carry their effect; the optional Martial Arts rows are listed
+    # compactly, because carrying eight more effect notes overflows Discord's
+    # 1024-char field cap (caught by test_no_page_field_is_silently_truncated).
+    # Full detail for any single location lives in /target.
+    rows = targeting_reference()
+    core_lines = [
         f"`{r['penalty']:>3}` **{r['name']}** — {r['effect']}"
-        for r in targeting_reference()
+        for r in rows
+        if not r["optional"]
     ]
+    optional_names = [f"{r['name']} `{r['penalty']:+d}`" for r in rows if r["optional"]]
+    value = "\n".join(core_lines)
+    if optional_names:
+        sources = sorted({r["source"] for r in rows if r["source"]})
+        value += (
+            f"\n\n*Optional ({', '.join(sources)}):* "
+            + " · ".join(optional_names)
+            + "\n*Use `/target <name>` for the full effect.*"
+        )
     e.add_field(
         name="Deliberate targeting (B552)",
-        value=_cap("\n".join(target_lines)),
+        value=_cap(value),
         inline=False,
     )
 
