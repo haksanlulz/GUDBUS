@@ -93,13 +93,14 @@ class TestSpecTestCases:
         assert r.eligible is False
         assert r.fall_check_triggered is False
 
-    def test_double_knockback_halves_denom(self):
-        # Double Knockback halves the denom (8->4) => doubles distance (1->2).
+    def test_double_knockback_doubles_the_yardage(self):
+        # B104 dkb: "twice as much knockback as usual" — the RESULT doubles, so
+        # the ST-2 divisor is untouched. 8 // 8 = 1 yard, doubled = 2.
         r = calc_knockback(
             basic_damage=8, damage_type="cr", target_st=10, double_knockback=True
         )
         assert r.yards == 2
-        assert r.effective_denom == 4
+        assert r.effective_denom == 8
         assert r.fall_check_triggered is True
         assert r.fall_check_modifier == -1
 
@@ -167,15 +168,18 @@ class TestEdgeCases:
         assert r.fall_check_modifier == 4
 
     def test_double_knockback_odd_denominator(self):
-        # denom 7 (ST 9) -> max(1, 7//2) = 3.
+        # ST 9 -> denom 7, untouched by dkb. 9 // 7 = 1 yard, doubled = 2.
+        # The old halved-divisor form gave 9 // 3 = 3 here, over-reporting by a
+        # full yard because a halved divisor captures partial multiples that
+        # doubling-after-flooring discards.
         r = calc_knockback(
             basic_damage=9, damage_type="cr", target_st=9, double_knockback=True
         )
-        assert r.effective_denom == 3
-        assert r.yards == 3
+        assert r.effective_denom == 7
+        assert r.yards == 2
 
-    def test_double_knockback_with_low_st_stays_one(self):
-        # denom already 1 (ST<=3) -> halving floors to 1; 1 yd/point unchanged.
+    def test_double_knockback_with_low_st(self):
+        # ST <= 3 is already 1 yard per point; dkb doubles that to 2 per point.
         r = calc_knockback(
             basic_damage=5,
             damage_type="cr",
@@ -183,7 +187,7 @@ class TestEdgeCases:
             double_knockback=True,
         )
         assert r.effective_denom == 1
-        assert r.yards == 5
+        assert r.yards == 10
 
     def test_wall_unliving_target_uses_hp_as_st(self):
         # Caller passes object HP as target_st; same formula. HP 20 -> denom 18.

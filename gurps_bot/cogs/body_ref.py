@@ -10,7 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from gurps_bot.mechanics.hit_location import deliberate_locations, hit_location
-from gurps_bot.mechanics.posture import posture, posture_names
+from gurps_bot.mechanics.posture import move_label, posture, posture_names
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
@@ -30,17 +30,9 @@ _TARGET_CHOICES = [
 ]
 
 
-def _move_label(fraction: float) -> str:
-    """Render a Move fraction compactly (mirrors the GM-screen label)."""
-    if fraction >= 1.0:
-        return "full"
-    if fraction <= 0.0:
-        return "none (cannot move)"
-    if abs(fraction - 2 / 3) < 1e-6:
-        return "×2/3"
-    if abs(fraction - 1 / 3) < 1e-6:
-        return "×1/3"
-    return f"×{fraction:.2g}"
+# Move rendering is owned by mechanics/posture.move_label — this used to be a
+# second copy of the same logic, and it could not express Lying Down's flat
+# "1 yard/second" (B551) at all.
 
 
 def build_posture_embed(name: str) -> discord.Embed:
@@ -59,7 +51,7 @@ def build_posture_embed(name: str) -> discord.Embed:
     e = discord.Embed(title=f"Posture - {p.name} (B551)", color=_POSTURE_COLOR)
     e.add_field(name="Your melee attack", value=f"{p.attack_penalty:+d}", inline=True)
     e.add_field(name="Your active defense", value=f"{p.defense_modifier:+d}", inline=True)
-    e.add_field(name="Your Move", value=_move_label(p.move_fraction), inline=True)
+    e.add_field(name="Your Move", value=move_label(p), inline=True)
     e.add_field(
         name="To hit YOU (ranged)", value=f"{p.ranged_to_hit_you:+d}", inline=True
     )

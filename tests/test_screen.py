@@ -135,7 +135,7 @@ class TestCritsAndFrightPages:
 
 from gurps_bot.mechanics import damage
 from gurps_bot.mechanics.hit_location import deliberate_locations
-from gurps_bot.mechanics.posture import POSTURES
+from gurps_bot.mechanics.posture import POSTURES, move_label
 
 
 class TestBodySourcing:
@@ -149,7 +149,10 @@ class TestBodySourcing:
             assert r["defense"] == p.defense_modifier
             assert r["ranged"] == p.ranged_to_hit_you
             assert r["melee"] == p.melee_to_hit_you
-            assert r["move"] == p.move_fraction
+            # Move arrives pre-formatted, but still from the owner: the label
+            # rule lives in mechanics/posture.move_label, not in the renderer.
+            # Lying Down is a flat "1 yard/second" (B551) and has no fraction.
+            assert r["move"] == move_label(p)
             assert r["effect"] == p.effect
 
     def test_targeting_reference_reflects_owner_and_is_deliberate_only(self):

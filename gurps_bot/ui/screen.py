@@ -9,7 +9,7 @@ from gurps_bot.mechanics import hiking
 from gurps_bot.mechanics import speed_range as sr
 from gurps_bot.mechanics.combat_constants import STATUS_ICONS, Maneuver, StatusEffect
 from gurps_bot.mechanics.hit_location import deliberate_locations, gross_targeting_reference
-from gurps_bot.mechanics.posture import POSTURES
+from gurps_bot.mechanics.posture import POSTURES, move_label
 from gurps_bot.mechanics.reaction import REACTION_BANDS
 from gurps_bot.mechanics.tables import (
     CRITICAL_HEAD_BLOW_TABLE,
@@ -135,7 +135,7 @@ def posture_reference() -> list[dict]:
             "defense": p.defense_modifier,
             "ranged": p.ranged_to_hit_you,
             "melee": p.melee_to_hit_you,
-            "move": p.move_fraction,
+            "move": move_label(p),
             "effect": p.effect,
         }
         for p in POSTURES
@@ -282,18 +282,10 @@ def fright_page() -> discord.Embed:
     return e
 
 
-def _move_label(fraction: float) -> str:
-    """Render a Move fraction compactly: 1.0 -> 'full', 0 -> 'none', else 'x2/3'."""
-    if fraction >= 1.0:
-        return "full"
-    if fraction <= 0.0:
-        return "none"
-    # recognise the canonical thirds; round anything else
-    if abs(fraction - 2 / 3) < 1e-6:
-        return "×2/3"
-    if abs(fraction - 1 / 3) < 1e-6:
-        return "×1/3"
-    return f"×{fraction:.2g}"
+# Move rendering is owned by mechanics/posture.move_label and arrives already
+# formatted in posture_reference()["move"]. There were three copies of this
+# helper (here, body_ref.py, posture.py's caller) and none could express Lying
+# Down's flat "1 yard/second" (B551), because they all took a float fraction.
 
 
 def body_page() -> discord.Embed:
@@ -307,7 +299,7 @@ def body_page() -> discord.Embed:
     for p in posture_reference():
         posture_lines.append(
             f"**{p['name']}** Att {p['attack']:+d} · Def {p['defense']:+d} · "
-            f"Rngd {p['ranged']:+d} · Mle {p['melee']:+d} · Move {_move_label(p['move'])}"
+            f"Rngd {p['ranged']:+d} · Mle {p['melee']:+d} · Move {p['move']}"
         )
     e.add_field(name="Posture (B551)", value=_cap("\n".join(posture_lines)), inline=False)
 

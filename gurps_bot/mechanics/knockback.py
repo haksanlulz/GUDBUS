@@ -46,8 +46,12 @@ def calc_knockback(
     # B378: denom = ST - 2, floored at 1 (ST <= 3 collapses to a yard per point)
     denom = max(1, target_st - 2)
 
-    # double knockback halves the denom after the low-ST collapse, still floored at 1
-    effective_denom = max(1, denom // 2) if double_knockback else denom
+    # Double Knockback (dkb, B104) doubles the RESULT — "twice as much knockback
+    # as usual" — so the divisor is untouched. Halving it instead is a different
+    # operation once the floor division lands: at ST 10 with 12 points of basic
+    # damage the book gives 12//8 = 1 yard doubled to 2, while a halved divisor
+    # gives 12//4 = 3. They agree only on exact multiples of ST-2.
+    effective_denom = denom
 
     if not eligible:
         return KnockbackResult(
@@ -60,6 +64,8 @@ def calc_knockback(
         )
 
     yards = max(0, basic_damage) // effective_denom
+    if double_knockback:
+        yards *= 2
 
     fall_check_triggered = yards >= 1
     if fall_check_triggered:

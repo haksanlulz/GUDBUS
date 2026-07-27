@@ -101,12 +101,20 @@ def effective_move(basic_move: int, level: int) -> int:
 
 
 def full_dodge(basic_speed: float, level: int) -> int:
-    """dodge = floor(Basic Speed) + 3 - level (B17)"""
+    """dodge = floor(Basic Speed) + 3 - level, never below 1 (B17)
+
+    B17: "Encumbrance can never reduce Move or Dodge below 1." `effective_move`
+    already clamps; without the matching clamp here a low-Speed encumbered
+    character was handed an unrollable Dodge (Basic Speed 1.0 at Extra-Heavy
+    gave 0, Basic Speed 0 gave -1). Level 5 is this module's own Overloaded
+    sentinel rather than a book level, and it clamps the same way — the book
+    describes no encumbrance state in which Dodge falls below 1.
+    """
     if basic_speed < 0:
         raise ValueError("basic_speed must be non-negative")
     if level not in _MOVE_MULTIPLIERS:
         raise ValueError("level must be in 0..5")
-    return math.floor(basic_speed) + 3 - level
+    return max(1, math.floor(basic_speed) + 3 - level)
 
 
 def encumbrance_thresholds(bl: float) -> tuple[EncumbranceThreshold, ...]:

@@ -72,21 +72,26 @@ class TestSignInvariants:
             assert p.defense_modifier <= 0, p.name
 
     def test_attacker_modifiers_never_help_the_defender(self):
-        # sign convention: < 0 on the attacker's roll helps YOU. lower postures
-        # penalize a ranged attacker (smaller profile) so ranged <= 0; melee is
-        # never penalized — a downed defender is easier to hit — so melee >= 0
+        # sign convention: < 0 on the attacker's roll helps YOU. Lower postures
+        # penalize a ranged attacker (smaller profile) so ranged <= 0. The melee
+        # column is a flat 0 everywhere — B551's Target column is ranged-only and
+        # the book defines no target-posture melee modifier at all (pinned in
+        # test_book_pins_s4.py).
         for p in POSTURES:
             assert p.ranged_to_hit_you <= 0, p.name
-            assert p.melee_to_hit_you >= 0, p.name
+            assert p.melee_to_hit_you == 0, p.name
 
     def test_move_fraction_in_unit_range(self):
         for p in POSTURES:
+            if p.move_fraction is None:
+                continue  # Lying Down is an absolute rate, not a fraction
             assert 0.0 <= p.move_fraction <= 1.0, p.name
 
     def test_only_standing_keeps_full_move(self):
         for p in POSTURES:
-            if p.name != "Standing":
-                assert p.move_fraction < 1.0, p.name
+            if p.name == "Standing" or p.move_fraction is None:
+                continue
+            assert p.move_fraction < 1.0, p.name
 
     def test_non_standing_postures_cost_something(self):
         for p in POSTURES:
@@ -95,8 +100,9 @@ class TestSignInvariants:
             drawback = (
                 p.attack_penalty < 0
                 or p.defense_modifier < 0
-                or p.move_fraction < 1.0
-                or p.melee_to_hit_you > 0
+                or (p.move_fraction is not None and p.move_fraction < 1.0)
+                # an absolute yards/second rate is itself a restriction on Move
+                or p.move_yards_per_second is not None
             )
             assert drawback, p.name
 
@@ -122,36 +128,30 @@ class TestCanonicalValues:
         assert k.defense_modifier == -2
         assert k.ranged_to_hit_you == -2
 
-    def test_lying_down_is_worst_for_defense_and_easiest_to_hit_in_melee(self):
+    def test_lying_down_is_worst_for_defense(self):
         ld = posture(P.LYING_DOWN_NAME)
         assert ld.attack_penalty == -4
         assert ld.defense_modifier == -3
         assert ld.ranged_to_hit_you == -2
-        assert ld.melee_to_hit_you == +4  # prone → easy point-blank target
+        # No melee bonus: B551's Target column is ranged-only by its own legend,
+        # and B547's melee table has no target-posture row. The prone
+        # disadvantage the book actually grants is the -3 to active defenses.
+        assert ld.melee_to_hit_you == 0
 
 
-# regression: an over-strict "every modifier <= 0" normalization once zeroed
-# the whole melee_to_hit_you column — prone is +4 to a melee attacker
-# (B551/B399), and an all-zero column passes every sign test. pin values.
-class TestPostureMeleeBonusRegression:
-    def test_melee_column_is_not_degenerate_all_zero(self):
-        # the column must carry information; all-zero is the erased-bonus bug
-        melee = [p.melee_to_hit_you for p in POSTURES]
-        assert any(v > 0 for v in melee), (
-            "melee_to_hit_you is all-zero — the prone melee BONUS was erased "
-            "(the jam/idio liability); a downed defender must be easier to hit"
-        )
-
-    def test_prone_confers_the_canonical_plus_four_melee_bonus(self):
-        # B551: prone gives a melee attacker +4. pinned by value so a
-        # sign-normalization or transcription flip can't zero it
-        prone = posture(P.LYING_DOWN_NAME)
-        assert prone.melee_to_hit_you == +4
-
-    def test_only_prone_eases_the_melee_hit(self):
-        # the bonus must not leak onto any non-prone posture
-        for p in POSTURES:
-            if p.name == P.LYING_DOWN_NAME:
-                assert p.melee_to_hit_you == +4, p.name
-            else:
-                assert p.melee_to_hit_you == 0, p.name
+# The former TestPostureMeleeBonusRegression was DELETED 2026-07-27 by the S4
+# book-check. It pinned melee_to_hit_you == +4 for Lying Down, citing
+# "(B551/B399)" — but B551's Target column is explicitly "the modifier to hit
+# your torso, groin, or legs with a RANGED attack", B399 is hit-location
+# wounding, B547's melee table carries only the attacker's posture, and a sweep
+# of both volumes finds no prone-target melee bonus anywhere. B104's Overhead
+# enhancement is confirmatory: it negates attack *penalties* against prone
+# targets.
+#
+# That class was added after a dev-jam build zeroed the column and the zeroing
+# was recorded as its "worst liability". The zero was correct; the regression
+# test enshrined the fabrication and defended it for a month.
+#
+# Replacement pins live in tests/test_book_pins_s4.py, which asserts the column
+# is zero everywhere AND that the real posture effects (ranged -2, defense -3)
+# survive — so this cannot be "fixed" by flattening everything to zero either.
