@@ -17,7 +17,6 @@ from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
 from gurps_bot.mechanics.dice import DiceSpec, RollResult
 
 _REFRESH = "gurps_bot.services.combat_session.CombatContext.refresh_tracker"
-_CHECK = "gurps_bot.cogs.combat.check"
 
 
 @pytest_asyncio.fixture
@@ -94,67 +93,97 @@ def _cog():
     return CombatTrackerGroup(bot=MagicMock())
 
 
-async def _run_major_wound(session_factory, mock_check, **kwargs):
+def _sent_text(interaction) -> str:
+    """Everything the command sent back, embeds included."""
+    parts = []
+    for mock in (interaction.response.send_message, interaction.followup.send):
+        for call in mock.call_args_list:
+            parts += [str(a) for a in call.args]
+            for key, val in call.kwargs.items():
+                if key == "embed" and val is not None:
+                    parts += [val.title or "", val.description or ""]
+                    parts += [f"{f.name} {f.value}" for f in val.fields]
+                else:
+                    parts.append(f"{key}={val}")
+    return "\n".join(parts)
+
+
+async def _run_major_wound(session_factory, **kwargs):
+    """Apply a major wound and return what the bot said.
+
+    The dice are NOT patched. `check` is left real because the modifier is
+    deterministic even when the roll is not, and the knockdown line states the
+    modifier verbatim — so asserting on the rendered text pins the thing that
+    matters (did the trait reach the roll) without depending on intercepting a
+    module-level name. An earlier version of this file patched
+    `gurps_bot.cogs.combat.check` and asserted on call args; that passed alone
+    and on 3.12 but failed under the full suite on 3.10, and the root cause of
+    the patch interaction was never found. Reading the output avoids the
+    question entirely and tests the GM-visible contract instead.
+    """
     interaction = _interaction(session_factory)
-    with patch(_REFRESH, new_callable=AsyncMock, return_value=True), \
-            patch(_CHECK, mock_check):
-        # -6 on a 10 HP target is a major wound (over half HP)
+    with patch(_REFRESH, new_callable=AsyncMock, return_value=True):
+        # -6 on a 10 HP target is a major wound (over half HP), so the B420
+        # knockdown roll always fires
         await _cog().hp_cmd.callback(
             _cog(), interaction, target="Hero", amount=-6, **kwargs
         )
-    return interaction
+    text = _sent_text(interaction)
+    # CombatContext suppresses CombatPermissionError/CombatTargetNotFound and
+    # returns early on "No active combat" — without this, a setup problem reads
+    # like a logic failure.
+    for bad in ("No active combat", "not in this combat", "Combat error"):
+        assert bad not in text, f"command returned early: {text}"
+    assert "Knockdown & stunning" in text, f"knockdown never rolled: {text}"
+    return text
 
 
 class TestPainThresholdReachesTheRoll:
     async def test_high_pain_threshold_adds_three(self, session, session_factory):
         await _seed(session, trait_names=["High Pain Threshold"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        await _run_major_wound(session_factory, mock)
-        mock.assert_called_once()
-        assert mock.call_args.args[1] == 3
+        text = await _run_major_wound(session_factory)
+        assert "High Pain Threshold +3" in text
 
     async def test_low_pain_threshold_subtracts_four(self, session, session_factory):
         await _seed(session, trait_names=["Low Pain Threshold"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        await _run_major_wound(session_factory, mock)
-        assert mock.call_args.args[1] == -4
+        text = await _run_major_wound(session_factory)
+        assert "Low Pain Threshold -4" in text
 
     async def test_no_relevant_trait_is_unmodified(self, session, session_factory):
         await _seed(session, trait_names=["Combat Reflexes"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        await _run_major_wound(session_factory, mock)
-        assert mock.call_args.args[1] == 0
+        text = await _run_major_wound(session_factory)
+        assert "Pain Threshold" not in text
+        # HT/Will 10 with no modifier at all
+        assert "(HT/Will 10)" in text
 
     async def test_npc_without_a_character_still_works(self, session, session_factory):
         """No character_id: degrade to no-trait behaviour, never error."""
         await _seed(session, link=False)
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        await _run_major_wound(session_factory, mock)
-        assert mock.call_args.args[1] == 0
+        text = await _run_major_wound(session_factory)
+        assert "Pain Threshold" not in text
+        assert "(HT/Will 10)" in text
 
-    async def test_location_and_trait_sum_through_the_cog(self, session, session_factory):
-        """Skull -10 with High Pain Threshold +3 = -7."""
+    async def test_location_and_trait_both_reach_the_roll(
+        self, session, session_factory
+    ):
+        """Skull and the trait are listed separately, not merged."""
         await _seed(session, trait_names=["High Pain Threshold"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        await _run_major_wound(session_factory, mock, location="skull")
-        assert mock.call_args.args[1] == -7
+        text = await _run_major_wound(session_factory, location="skull")
+        assert "skull -10" in text
+        assert "High Pain Threshold +3" in text
 
 
 class TestModifierIsAttributedHonestly:
-    async def test_message_names_the_pain_threshold(self, session, session_factory):
-        await _seed(session, trait_names=["High Pain Threshold"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        interaction = await _run_major_wound(session_factory, mock)
-        sent = interaction.response.send_message.call_args
-        text = str(sent)
-        assert "High Pain Threshold" in text
-
-    async def test_message_does_not_blame_the_location_for_the_trait(
+    async def test_location_is_not_blamed_for_the_trait(
         self, session, session_factory
     ):
-        """The note used to label the whole modifier as the location."""
+        """The note used to label the whole modifier as the hit location."""
         await _seed(session, trait_names=["Low Pain Threshold"])
-        mock = MagicMock(return_value=_fixed_check(8, 10))
-        interaction = await _run_major_wound(session_factory, mock)
-        text = str(interaction.response.send_message.call_args)
-        assert "Low Pain Threshold" in text
+        text = await _run_major_wound(session_factory)
+        assert "Low Pain Threshold -4" in text
+
+    async def test_trait_only_case_names_no_location(self, session, session_factory):
+        await _seed(session, trait_names=["High Pain Threshold"])
+        text = await _run_major_wound(session_factory)
+        assert "High Pain Threshold +3" in text
+        assert "skull" not in text and "face" not in text
