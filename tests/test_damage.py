@@ -147,7 +147,11 @@ class TestHitLocation:
 
 class TestWoundingMultipliers:
     def test_all_types_present(self):
-        expected = {"pi-", "cr", "burn", "pi", "tox", "cor", "cut", "pi+", "imp", "pi++"}
+        # "fat" added 2026-07-27: B379 lists fatigue alongside burn/cor/cr/pi/tox
+        # in the x1 group, and it was the only printed type the table lacked.
+        expected = {
+            "pi-", "cr", "burn", "pi", "tox", "cor", "fat", "cut", "pi+", "imp", "pi++",
+        }
         assert set(WOUNDING_MULTIPLIERS.keys()) == expected
 
 

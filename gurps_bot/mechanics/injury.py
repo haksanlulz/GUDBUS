@@ -5,6 +5,7 @@ from __future__ import annotations
 from enum import Enum
 
 from gurps_bot.mechanics.combat_constants import StatusEffect
+from gurps_bot.mechanics.traits import pain_threshold_knockdown_modifier
 
 # B380: the cap is -4 at ANY HP total. High HP doesn't raise it — it raises how
 # much injury each point of shock costs (see shock_penalty).
@@ -108,7 +109,19 @@ _KNOCKDOWN_LOCATION_MODIFIERS: dict[str, int] = {
 }
 
 
-def knockdown_modifier(location: str | None) -> int:
-    if not location:
-        return 0
-    return _KNOCKDOWN_LOCATION_MODIFIERS.get(location.lower().strip(), 0)
+def knockdown_modifier(
+    location: str | None, trait_names: list[str] | None = None
+) -> int:
+    """Total modifier to the B420 knockdown-and-stunning roll.
+
+    B420 lists these in one breath — "-5 for a major wound to the face or vitals
+    (or to the groin, on a humanoid male); -10 for a major wound to the skull or
+    eye; +3 for High Pain Threshold, or -4 for Low Pain Threshold" — so they are
+    summed by one owner rather than by each caller.
+    """
+    total = 0
+    if location:
+        total += _KNOCKDOWN_LOCATION_MODIFIERS.get(location.lower().strip(), 0)
+    if trait_names:
+        total += pain_threshold_knockdown_modifier(trait_names)
+    return total

@@ -10,6 +10,10 @@ from gurps_bot.mechanics.hit_location import hit_location_names
 from gurps_bot.mechanics.hit_location import penalty_for as _loc_penalty
 
 # wounding multipliers by damage type (B378-379)
+# B379 lists every type in one sentence: "Small piercing (pi-): x0.5. Burning
+# (burn), corrosion (cor), crushing (cr), fatigue (fat), piercing (pi), and
+# toxic (tox): x1. Cutting (cut) and large piercing (pi+): x1.5. Impaling (imp)
+# and huge piercing (pi++): x2."
 WOUNDING_MULTIPLIERS: dict[str, float] = {
     "pi-": 0.5,
     "cr": 1.0,
@@ -17,11 +21,17 @@ WOUNDING_MULTIPLIERS: dict[str, float] = {
     "pi": 1.0,
     "tox": 1.0,
     "cor": 1.0,
+    "fat": 1.0,
     "cut": 1.5,
     "pi+": 1.5,
     "imp": 2.0,
     "pi++": 2.0,
 }
+
+#: fatigue damage costs FP, not HP. The multiplier above is the wounding maths;
+#: routing the result to FP is the caller's job, and `/combat fp` is where it
+#: lands. Flagged here so a caller cannot subtract it from HP by omission.
+FATIGUE_DAMAGE_TYPE = "fat"
 
 # per-location wounding overrides (B398-400) — replace the base multiplier.
 # type-specific keys beat "all" (B399: skull/eye x4 excludes toxic).
@@ -86,6 +96,7 @@ DAMAGE_TYPE_DISPLAY: dict[str, str] = {
     "burn": "Burning (burn)",
     "tox": "Toxic (tox)",
     "cor": "Corrosion (cor)",
+    "fat": "Fatigue (fat) - costs FP",
 }
 
 # 3d6 -> location (B552); this owns the roll ranges only, penalties come from
