@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from gurps_bot.mechanics.traits import InjuryTolerance
 from gurps_bot.mechanics.dice import RollResult, roll
 from gurps_bot.mechanics.hit_location import hit_location_names
 from gurps_bot.mechanics.hit_location import penalty_for as _loc_penalty
@@ -28,6 +29,32 @@ WOUNDING_MULTIPLIERS: dict[str, float] = {
 
 # B399: pi+/pi++/imp all drop to x1 against a limb or extremity. Typed once.
 _LIMB_REDUCTION: dict[str, float] = {"pi+": 1.0, "pi++": 1.0, "imp": 1.0}
+
+#: the impaling/piercing family, which B380's Diffuse rule caps at 1 HP
+_PIERCING_FAMILY: frozenset[str] = frozenset({"imp", "pi++", "pi+", "pi", "pi-"})
+
+#: B380 sidebar. Diffuse is absent because it caps finished injury rather than
+#: scaling it, and so cannot be expressed as a multiplier.
+_INJURY_TOLERANCE_MULTIPLIERS: dict[InjuryTolerance, dict[str, float]] = {
+    # "impaling and huge piercing a wounding modifier of x1; large piercing,
+    # x1/2; piercing, x1/3; and small piercing, x1/5"
+    InjuryTolerance.UNLIVING: {
+        "imp": 1.0,
+        "pi++": 1.0,
+        "pi+": 0.5,
+        "pi": 1 / 3,
+        "pi-": 0.2,
+    },
+    # "Impaling and huge piercing have a wounding modifier of x1/2; large
+    # piercing, x1/3; piercing, x1/5; and small piercing, x1/10"
+    InjuryTolerance.HOMOGENOUS: {
+        "imp": 0.5,
+        "pi++": 0.5,
+        "pi+": 1 / 3,
+        "pi": 0.2,
+        "pi-": 0.1,
+    },
+}
 
 LOCATION_MULTIPLIERS: dict[str, dict[str, float]] = {
     "skull": {"all": 4.0, "tox": 1.0},
@@ -124,13 +151,65 @@ def parse_gcs_damage(damage_str: str) -> tuple[str, str]:
     return damage_str, "cr"
 
 
+def wound_from_penetrating(
+    raw: int,
+    damage_type: str,
+    *,
+    location: str | None = None,
+    injury_tolerance: InjuryTolerance | None = None,
+) -> tuple[float, int]:
+    """(wounding multiplier, injury) for ``raw`` points that already beat DR.
+
+    Split out of roll_damage so the wounding rules can be checked against the
+    book without a die roll in the way — the dice notation has no zero-dice
+    form, so every multiplier test through roll_damage would be stochastic.
+    """
+    damage_type = damage_type.lower().strip() or "cr"
+    raw = max(0, raw)
+
+    mult = WOUNDING_MULTIPLIERS.get(damage_type, 1.0)
+    if location:
+        loc_overrides = LOCATION_MULTIPLIERS.get(location.lower(), {})
+        if damage_type in loc_overrides:
+            mult = loc_overrides[damage_type]
+        elif "all" in loc_overrides:
+            mult = loc_overrides["all"]
+
+    # B380: Unliving/Homogenous replace the type multiplier. Both this and the
+    # location override are damage-reducing, and the book does not say which
+    # wins when a limb hit lands on an undead; take the more protective, so
+    # neither can be bypassed by invoking the other. Diffuse is a cap on the
+    # finished injury, not a multiplier, so it lands after the floor below.
+    if injury_tolerance is not None:
+        tolerance_mult = _INJURY_TOLERANCE_MULTIPLIERS.get(injury_tolerance, {}).get(
+            damage_type
+        )
+        if tolerance_mult is not None:
+            mult = min(mult, tolerance_mult)
+
+    # B379: any attack that penetrates DR inflicts at least 1 HP
+    wound = max(1, int(raw * mult)) if raw > 0 else 0
+
+    if injury_tolerance is InjuryTolerance.DIFFUSE and wound > 0:
+        # "Impaling and piercing attacks (of any size) never do more than 1 HP
+        # of injury ... Other attacks can never do more than 2 HP of injury."
+        wound = min(wound, 1 if damage_type in _PIERCING_FAMILY else 2)
+
+    return mult, wound
+
+
 def roll_damage(
     dice_expr: str,
     damage_type: str,
     dr: int = 0,
     location: str | None = None,
+    injury_tolerance: InjuryTolerance | None = None,
 ) -> DamageResult:
-    """roll dice_expr (pure dice, no type suffix) against DR with the wounding multiplier for type/location"""
+    """roll dice_expr (pure dice, no type suffix) against DR with the wounding multiplier for type/location
+
+    ``injury_tolerance`` applies the B380 sidebar for Unliving, Homogenous and
+    Diffuse targets — machines, corporeal undead, swarms.
+    """
     damage_type = damage_type.lower().strip()
     if not damage_type:
         damage_type = "cr"
@@ -139,17 +218,9 @@ def roll_damage(
     result = roll(dice_expr)
     raw = max(0, result.total - dr)
 
-    mult = WOUNDING_MULTIPLIERS.get(damage_type, 1.0)
-    if location:
-        loc_key = location.lower()
-        loc_overrides = LOCATION_MULTIPLIERS.get(loc_key, {})
-        if damage_type in loc_overrides:
-            mult = loc_overrides[damage_type]
-        elif "all" in loc_overrides:
-            mult = loc_overrides["all"]
-
-    # B379: any attack that penetrates DR inflicts at least 1 HP
-    wound = max(1, int(raw * mult)) if raw > 0 else 0
+    mult, wound = wound_from_penetrating(
+        raw, damage_type, location=location, injury_tolerance=injury_tolerance
+    )
 
     return DamageResult(
         roll_result=result,
