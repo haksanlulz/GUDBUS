@@ -15,6 +15,10 @@
 #   GUDBUS_REPO          owner/repo, for the CI status check
 #   GUDBUS_SKIP_CI_CHECK=1   deploy a tag whose tests are red/missing (asks first)
 #   GUDBUS_SKIP_BACKUP=1     skip the pre-deploy DB copy
+#
+# Pass --dry-run to run every check and stop before anything is modified. Worth
+# doing once on a new host: it proves the container really is the one this
+# script thinks it is, on a box that may be running other people's services.
 
 set -eu
 
@@ -26,11 +30,16 @@ COMPOSE="$PROJECT_DIR/docker-compose.yml"
 die() { printf '\nFAILED: %s\n' "$1" >&2; exit 1; }
 step() { printf '\n== %s\n' "$1"; }
 
+DRY_RUN=0
+case "${1:-}" in
+  --dry-run) DRY_RUN=1; shift ;;
+esac
+
 TAG=${1:-}
-[ -n "$TAG" ] || die "usage: $0 <image-tag>   e.g. $0 sha-ef30b62
+[ -n "$TAG" ] || die "usage: $0 [--dry-run] <image-tag>   e.g. $0 sha-ef30b62
 
 Find the tag: it is 'sha-' plus the short commit sha of what you want deployed.
-Check that commit's Tests run is green first — publishing does not depend on it."
+This script checks that commit's CI itself and refuses a red one."
 
 # ---------------------------------------------------------------- preflight
 step "Preflight"
@@ -75,9 +84,11 @@ case "$CURRENT_IMAGE" in
 esac
 
 # ------------------------------------------------------------- CI gate
-# The publish workflow has no `needs:` on the test workflow, so an image
-# existing proves only that it built. A commit with a red matrix still ships a
-# pullable tag. Refuse it unless explicitly overridden.
+# docker-publish.yml now gates on the test matrix, so a red commit should no
+# longer produce an image at all. This check stays as the belt to that braces:
+# images published before the gate landed still exist and are still pullable
+# (sha-56422b8 is one), and a workflow edit could remove the gate again without
+# anything here noticing. Cheap to keep, and it fails closed.
 if [ "${GUDBUS_SKIP_CI_CHECK:-0}" != "1" ]; then
   step "CI status for ${TAG#sha-}"
   API="https://api.github.com/repos/$REPO/commits/${TAG#sha-}/check-runs"
@@ -94,6 +105,17 @@ Re-run with GUDBUS_SKIP_CI_CHECK=1 only if you know why it is red."
   else
     printf '  WARNING: could not reach the GitHub API; CI status UNVERIFIED\n'
   fi
+fi
+
+if [ "$DRY_RUN" = "1" ]; then
+  step "Dry run"
+  printf '  All checks passed. Would now:\n'
+  printf '    1. back up /app/data/gurps_bot.db inside the container\n'
+  printf '    2. pin %s in %s\n' "$TAG" "$COMPOSE"
+  printf '    3. docker compose up -d --force-recreate --no-deps %s\n' "$SERVICE"
+  printf '    4. verify the container id changed and the image matches\n'
+  printf '\n  Nothing was modified. Re-run without --dry-run to deploy.\n'
+  exit 0
 fi
 
 # ------------------------------------------------------------- backup
