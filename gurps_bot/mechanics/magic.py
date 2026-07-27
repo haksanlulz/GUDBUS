@@ -57,8 +57,17 @@ def _effective_skill(skill: int, low_mana: bool) -> int:
     return skill - (_LOW_MANA_PENALTY if low_mana else 0)
 
 
-def spell_energy_reduction(skill: int, *, low_mana: bool = False) -> int:
-    """High-skill energy reduction (B236); applies to casting and maintenance alike."""
+def spell_energy_reduction(
+    skill: int, *, low_mana: bool = False, blocking: bool = False
+) -> int:
+    """High-skill energy reduction (B236); applies to casting and maintenance alike.
+
+    ``blocking`` is B236's stated exception — "Never reduce the cost of a
+    Blocking spell" — restated at B237: "high skill has no effect on the cost to
+    cast Blocking spells."
+    """
+    if blocking:
+        return 0
     effective_skill = _effective_skill(skill, low_mana)
     if effective_skill < _REDUCTION_FIRST_TIER:
         return 0
@@ -98,8 +107,11 @@ def effective_spell_cost(
     size_modifier: int = 0,
     area_radius: int = 0,
     low_mana: bool = False,
+    blocking: bool = False,
 ) -> SpellCostResult:
-    """Casting cost (B236-240): scale for SM or area first, then subtract the high-skill reduction."""
+    """Casting cost (B236-240): scale for SM or area first, then subtract the
+    high-skill reduction. ``blocking`` suppresses the reduction only (B236) —
+    the size/area multiplier still applies."""
     if size_modifier > 0 and area_radius > 0:
         raise ValueError("A spell is Regular (size_modifier) xor Area (area_radius), not both")
     if base_cost < 0:
@@ -116,7 +128,7 @@ def effective_spell_cost(
     # int >= 1, so ceil of a positive product is already >= 1
     scaled = math.ceil(base_cost * multiplier)
 
-    reduction = spell_energy_reduction(skill, low_mana=low_mana)
+    reduction = spell_energy_reduction(skill, low_mana=low_mana, blocking=blocking)
     final = max(0, scaled - reduction)
     return SpellCostResult(
         base_cost=base_cost,
@@ -129,9 +141,15 @@ def effective_spell_cost(
     )
 
 
-def maintenance_cost(base_maintain: int, skill: int, *, low_mana: bool = False) -> int:
+def maintenance_cost(
+    base_maintain: int, skill: int, *, low_mana: bool = False, blocking: bool = False
+) -> int:
     """Maintenance cost (B237): same high-skill reduction as casting; 0 = maintainable forever."""
-    return max(0, base_maintain - spell_energy_reduction(skill, low_mana=low_mana))
+    return max(
+        0,
+        base_maintain
+        - spell_energy_reduction(skill, low_mana=low_mana, blocking=blocking),
+    )
 
 
 def casting_time(
@@ -140,8 +158,15 @@ def casting_time(
     *,
     low_mana: bool = False,
     ceremonial: bool = False,
+    missile: bool = False,
 ) -> int:
-    """Casting seconds (B236-238): skill <= 9 doubles, 20+ halves per 5 levels; ceremonial = x10, no reduction."""
+    """Casting seconds (B236-238): skill <= 9 doubles, 20+ halves per 5 levels; ceremonial = x10, no reduction.
+
+    ``missile`` is B237's stated exception — "high skill has no effect on ...
+    the time to cast Missile spells." Note it exempts the *reduction* only: the
+    skill-9-or-less doubling is a penalty, not a reduction, and still applies,
+    as does the ceremonial x10.
+    """
     if base_seconds < 1:
         raise ValueError("base_seconds must be at least 1")
     if ceremonial:
@@ -150,7 +175,7 @@ def casting_time(
     effective_skill = _effective_skill(skill, low_mana)
     if effective_skill <= _TIME_DOUBLE_AT_OR_BELOW:
         return base_seconds * 2
-    if effective_skill < _TIME_HALVE_FROM:
+    if missile or effective_skill < _TIME_HALVE_FROM:
         return base_seconds
     divisor = 2 ** ((effective_skill - _TIME_HALVE_FROM) // 5 + 1)
     return max(1, math.ceil(base_seconds / divisor))
