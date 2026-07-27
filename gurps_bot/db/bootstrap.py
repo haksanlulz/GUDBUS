@@ -248,9 +248,18 @@ def main(url: str | None = None) -> int:
         print("In-memory database URL — nothing to bootstrap.")
         return 0
 
-    create_and_stamp(url)
+    # create_and_stamp runs create_all, so it is ONLY correct on a database
+    # with no tables. On an existing one create_all cannot ALTER a table, but it
+    # will happily create a table that is new in the models — behind Alembic's
+    # back and without a stamp — and the migration that creates the same table
+    # then dies with "table ... already exists". That crash-looped the hosted
+    # bot on 2026-07-27. Every migration before that one added columns, which
+    # create_all ignores, which is why this survived so long.
+    has_tables, stamped = asyncio.run(_inspect_db(url))
+    if not has_tables:
+        create_and_stamp(url)
+        _, stamped = asyncio.run(_inspect_db(url))
 
-    _, stamped = asyncio.run(_inspect_db(url))
     if not stamped:
         print(_legacy_refusal(url), file=sys.stderr)
         return 2
