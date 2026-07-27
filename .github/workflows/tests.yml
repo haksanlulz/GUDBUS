@@ -9,6 +9,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  # Callable so docker-publish.yml can gate on it. Publishing used to be
+  # completely independent of this workflow, which meant a commit with a red
+  # matrix still produced a pullable image — and the deploy runsheet reads the
+  # tag, not the test result.
+  workflow_call:
 
 concurrency:
   group: tests-${{ github.ref }}

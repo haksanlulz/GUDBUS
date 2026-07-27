@@ -24,7 +24,16 @@ concurrency:
 permissions: {}
 
 jobs:
+  # Gate: publish only what passes. This job runs the same matrix Tests runs,
+  # by calling that workflow rather than duplicating it. Without it the two
+  # workflows fire independently on the same push and a commit with a failing
+  # matrix still publishes a pullable image — which happened, and the tag was
+  # nearly deployed because an image existing looks like success.
+  test:
+    uses: ./.github/workflows/tests.yml
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read

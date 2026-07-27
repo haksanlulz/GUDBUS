@@ -42,8 +42,33 @@ CURRENT_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null) 
   || die "container '$CONTAINER' not found. Running containers:
 $(docker ps --format '  {{.Names}}')"
 CURRENT_ID=$(docker inspect -f '{{.Id}}' "$CONTAINER")
-printf '  container : %s\n  image now : %s\n  target    : %s\n' \
-  "$CONTAINER" "$CURRENT_IMAGE" "$TAG"
+
+# --- ownership: prove this container is ours before touching anything -------
+# This host runs 60+ containers belonging to other people. Everything below
+# acts on $CONTAINER and $PROJECT_DIR, but those are defaults, and a default is
+# not a guarantee. Refuse unless the container's own Compose labels say it
+# belongs to the project directory we were pointed at.
+EXPECT_PROJECT=$(cat "$PROJECT_DIR/name" 2>/dev/null || basename "$PROJECT_DIR")
+EXPECT_PROJECT=$(printf '%s' "$EXPECT_PROJECT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+GOT_PROJECT=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$CONTAINER" 2>/dev/null || true)
+SERVICE=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)
+
+[ -n "$GOT_PROJECT" ] || die "container '$CONTAINER' carries no Compose project
+label, so it is not managed by this project dir. Refusing to touch it."
+[ -n "$SERVICE" ] || die "container '$CONTAINER' carries no Compose service label."
+[ "$GOT_PROJECT" = "$EXPECT_PROJECT" ] || die "container '$CONTAINER' belongs to
+Compose project '$GOT_PROJECT', but $PROJECT_DIR is project '$EXPECT_PROJECT'.
+Refusing to act on another project's container."
+
+# The service is named explicitly on every compose call below, so a project
+# that grew a second service cannot have it recreated as a side effect.
+SERVICES=$(cd "$PROJECT_DIR" && docker compose config --services 2>/dev/null || true)
+printf '%s\n' "$SERVICES" | grep -qx "$SERVICE" \
+  || die "service '$SERVICE' is not defined in $COMPOSE. Defined:
+$(printf '%s' "$SERVICES" | sed 's/^/  /')"
+
+printf '  container : %s\n  project   : %s\n  service   : %s\n  image now : %s\n  target    : %s\n' \
+  "$CONTAINER" "$GOT_PROJECT" "$SERVICE" "$CURRENT_IMAGE" "$TAG"
 
 case "$CURRENT_IMAGE" in
   *":$TAG") die "already running $TAG — nothing to do" ;;
@@ -108,7 +133,11 @@ printf '  %s\n' "$(grep 'image:' "$COMPOSE" | head -1 | sed 's/^ *//')"
 # the 2026-07-27 deploy silently failed.
 step "Recreating"
 cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
-docker compose up -d --force-recreate || die "compose up failed"
+# Named service, and --no-deps: an unqualified `up` recreates every service in
+# the project and can start ones someone deliberately stopped. Nothing here
+# uses `down` or --remove-orphans, both of which reach past this service.
+docker compose up -d --force-recreate --no-deps "$SERVICE" \
+  || die "compose up failed for service '$SERVICE'"
 
 # ------------------------------------------------------------- verify
 # Verify against the running container, not against compose's exit code.
