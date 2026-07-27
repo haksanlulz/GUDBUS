@@ -28,6 +28,12 @@ WORKFLOWS = Path(__file__).resolve().parent.parent / ".github" / "workflows"
 # the nightly channel. Adding a branch here is a deliberate act.
 PUBLISHING_BRANCHES = {"main", "dev"}
 
+# What DEPLOY.md tells people they can deploy on. Kept here so the promise and
+# the build are asserted against one another rather than drifting apart, which
+# is how the published index spent months carrying amd64 alone under a
+# "multi-arch" heading.
+DOCUMENTED_ARCHITECTURES = {"linux/amd64", "linux/arm64"}
+
 
 def _load(name):
     with (WORKFLOWS / name).open(encoding="utf-8") as fh:
@@ -121,3 +127,45 @@ class TestChannels:
             f"{sorted(PUBLISHING_BRANCHES)}. dev is trunk — if it does not "
             "run tests, the split hides breakage instead of isolating it."
         )
+
+
+class TestArchitectures:
+    """DEPLOY.md offers ARM hosts. The workflow has to actually build for them.
+
+    For months it did not: no `platforms:` meant the runner's architecture and
+    nothing else, so the published index was amd64-only while the docs
+    recommended Oracle A1 and Raspberry Pi. Nothing connected the promise to
+    the build, so nothing noticed. This is that connection.
+    """
+
+    def test_publishes_every_documented_architecture(self, publish):
+        step = next(
+            s
+            for s in publish["jobs"]["build-and-push"]["steps"]
+            if str(s.get("uses", "")).startswith("docker/build-push-action")
+        )
+        built = {p.strip() for p in step["with"]["platforms"].split(",")}
+        assert built == DOCUMENTED_ARCHITECTURES, (
+            f"builds {sorted(built)}, DEPLOY.md promises "
+            f"{sorted(DOCUMENTED_ARCHITECTURES)}. Change both together, or the "
+            "docs recommend a host the registry cannot serve."
+        )
+
+    def test_deploy_doc_names_the_same_architectures(self):
+        # Reads the doc, not a copy of it — a table edited to drop arm64 fails
+        # here rather than silently disagreeing with the workflow.
+        doc = (WORKFLOWS.parent.parent / "DEPLOY.md").read_text(encoding="utf-8")
+        for platform in DOCUMENTED_ARCHITECTURES:
+            arch = platform.split("/")[1]
+            assert arch in doc, f"DEPLOY.md never mentions {arch}"
+
+    def test_cross_build_emulation_is_set_up(self, publish):
+        # arm64 on an amd64 runner needs QEMU registered before buildx runs.
+        # Without it the arm64 leg fails; the failure is loud, but the job
+        # ordering is the thing that is easy to break in a reshuffle.
+        names = [
+            str(s.get("uses", "")) for s in publish["jobs"]["build-and-push"]["steps"]
+        ]
+        qemu = next(i for i, u in enumerate(names) if "setup-qemu-action" in u)
+        buildx = next(i for i, u in enumerate(names) if "setup-buildx-action" in u)
+        assert qemu < buildx, "QEMU must be set up before buildx"

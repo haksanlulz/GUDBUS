@@ -47,11 +47,15 @@ on the next start.
 | `:nightly` | `dev` | Trunk. Tests pass, but it has not been released. |
 | `:sha-<commit>` | either | An exact build. What `deploy/nas-update.sh` pins. |
 
-⚠️ **Published images are `linux/amd64` only** — the publish job passes no
-`platforms:`, so it builds the runner's architecture and nothing else. On ARM
-(Oracle A1, Raspberry Pi) use the `docker compose up -d --build` path above,
-which builds natively, or add `platforms: linux/amd64,linux/arm64` to the build
-step and accept a slower CI build.
+Published for **`linux/amd64` and `linux/arm64`**, so the ARM hosts above
+(Oracle A1, Raspberry Pi) can pull rather than build. `docker pull` picks the
+right one; nothing to specify.
+
+This was not true until 2026-07-27: the publish job passed no `platforms:`, so
+it built the runner's architecture alone and the index carried amd64 only,
+while this document recommended ARM hosts. `tests/test_ci_workflows.py` now
+asserts the built platforms against the ones named here, so the promise and the
+build cannot drift apart again.
 
 At a release both branches sit on the same commit and both publish its `sha-`
 tag, so that tag belongs to whichever run finished last. The two images are
