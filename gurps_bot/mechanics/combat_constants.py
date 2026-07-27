@@ -41,6 +41,12 @@ MANEUVER_CHOICES: list[tuple[str, str]] = [
 
 
 def hp_status_label(hp_current: int, hp_max: int) -> str:
+    """B419 ladder. Reeling is "Less than 1/3 your HP left" — strictly less
+    than, so the comparison is `hp_current * 3 < hp_max` (integer, no float
+    rounding). `hp_current <= hp_max // 3` fired one HP early at every HP
+    divisible by 3: at HP 12 it called 4 HP Reeling, which halves Move and
+    Dodge, when 4 is exactly a third and not below it.
+    """
     if hp_max <= 0:
         return ""
     if hp_current <= -5 * hp_max:
@@ -49,7 +55,7 @@ def hp_status_label(hp_current: int, hp_max: int) -> str:
         return "Dying"
     if hp_current <= 0:
         return "Collapsing"
-    if hp_current <= hp_max // 3:
+    if hp_current * 3 < hp_max:
         return "Reeling"
     return ""
 

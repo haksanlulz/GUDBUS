@@ -587,6 +587,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         modifier="Extra modifier — e.g. +3 for a retreat",
         target="Combatant defending (GM only; defaults to your own)",
         hidden="Roll in secret (GM blind roll): only you see the result",
+        fencing_or_master="Fencing weapon, Trained By A Master, or Weapon Master: parry step -2 not -4 (B376)",
     )
     @app_commands.choices(defense_type=[
         app_commands.Choice(name="Dodge", value="dodge"),
@@ -602,6 +603,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         modifier: int = 0,
         target: str | None = None,
         hidden: bool = False,
+        fencing_or_master: bool = False,
     ) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
@@ -621,7 +623,10 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             combatant_name = combatant.name
             combatant_id = combatant.id
             penalty, note = defense_penalty(
-                defense_type, combatant.parries_this_turn, combatant.blocks_this_turn,
+                defense_type,
+                combatant.parries_this_turn,
+                combatant.blocks_this_turn,
+                reduced_parry=fencing_or_master,
             )
             result = check(value, penalty + modifier)
 
