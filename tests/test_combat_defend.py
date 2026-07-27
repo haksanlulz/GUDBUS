@@ -40,6 +40,10 @@ async def _seed(session, *, parries=0, blocks=0, user_id=42):
         combat_id=combat.id, discord_user_id=user_id, name="Hero",
         basic_speed=5.0, hp_max=10, hp_current=10, fp_max=10, fp_current=10,
         slot=0, parries_this_turn=parries, blocks_this_turn=blocks,
+        # B376 scopes the penalty per weapon, so a combatant who has parried
+        # carries both the turn total and the per-weapon count. "" is the
+        # unnamed-weapon key /defend uses when no weapon is given.
+        parries_by_weapon={"": parries} if parries else {},
     )
     session.add(c)
     await session.commit()

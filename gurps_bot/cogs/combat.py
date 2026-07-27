@@ -42,6 +42,7 @@ from gurps_bot.services.combat import (
     get_combat,
     get_combatant_trait_names,
     modify_fp,
+    parry_key,
     modify_hp,
     record_defense,
     remove_combatant,
@@ -601,6 +602,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         target="Combatant defending (GM only; defaults to your own)",
         hidden="Roll in secret (GM blind roll): only you see the result",
         fencing_or_master="Fencing weapon, Trained By A Master, or Weapon Master: parry step -2 not -4 (B376)",
+        weapon="Which weapon or hand is parrying — the -4 accrues per weapon (B376)",
     )
     @app_commands.choices(defense_type=[
         app_commands.Choice(name="Dodge", value="dodge"),
@@ -617,6 +619,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         target: str | None = None,
         hidden: bool = False,
         fencing_or_master: bool = False,
+        weapon: str | None = None,
     ) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
@@ -635,9 +638,14 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
             combatant_name = combatant.name
             combatant_id = combatant.id
+            # B376: the cumulative -4 accrues per weapon or hand, not per turn,
+            # so a two-weapon fighter is not penalised for the other hand's work
+            prior_parries = (combatant.parries_by_weapon or {}).get(
+                parry_key(weapon), 0
+            )
             penalty, note = defense_penalty(
                 defense_type,
-                combatant.parries_this_turn,
+                prior_parries,
                 combatant.blocks_this_turn,
                 reduced_parry=fencing_or_master,
             )
@@ -645,7 +653,9 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
             # dodge is unlimited; parry/block accrue and reset via advance_turn
             if defense_type in ("parry", "block"):
-                await record_defense(ctx.session, combatant_id, defense_type)
+                await record_defense(
+                    ctx.session, combatant_id, defense_type, weapon=weapon
+                )
                 await ctx.commit()
 
             label = (

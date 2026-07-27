@@ -310,6 +310,7 @@ def advance_turn(combat: Combat) -> str | None:
     current = ordered[pos]
     current.maneuver = None
     current.parries_this_turn = 0
+    current.parries_by_weapon = {}
     current.blocks_this_turn = 0
 
     # scan bounded to n steps so the wrap fires at most once per call — an n+1
@@ -518,10 +519,30 @@ async def set_message_id(
     combat.message_id = message_id
 
 
+#: key used when no weapon is named — a table that never names one keeps the
+#: single-counter behaviour it always had
+DEFAULT_WEAPON_KEY = ""
+
+
+def parry_key(weapon: str | None) -> str:
+    """Normalise a weapon name to its per-weapon counter key (B376)."""
+    return (weapon or "").strip().casefold()
+
+
 async def record_defense(
-    session: AsyncSession, combatant_id: int, defense_type: str,
+    session: AsyncSession,
+    combatant_id: int,
+    defense_type: str,
+    weapon: str | None = None,
 ) -> Combatant:
-    """Bump this turn's parry/block counter (atomic — same race shape as modify_hp)."""
+    """Bump this turn's parry/block counter (atomic — same race shape as modify_hp).
+
+    B376 scopes the parry penalty to "that weapon or hand", so parries are
+    counted per weapon as well as in the turn total. The per-weapon map is
+    read-modify-written rather than incremented in SQL because JSON member
+    update is not portable; the row is re-read under the same session, and the
+    turn total keeps the atomic increment that the concurrency tests pin.
+    """
     if defense_type == "parry":
         column = Combatant.parries_this_turn
         update_stmt = (
@@ -544,7 +565,17 @@ async def record_defense(
     await session.execute(update_stmt)
     stmt = select(Combatant).where(Combatant.id == combatant_id)
     result = await session.execute(stmt)
-    return result.scalar_one()
+    combatant = result.scalar_one()
+
+    if defense_type == "parry":
+        key = parry_key(weapon)
+        # rebind rather than mutate in place: SQLAlchemy only sees a JSON column
+        # change if the attribute itself is reassigned
+        counts = dict(combatant.parries_by_weapon or {})
+        counts[key] = counts.get(key, 0) + 1
+        combatant.parries_by_weapon = counts
+
+    return combatant
 
 
 async def cleanup_stale_combats(

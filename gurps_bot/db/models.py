@@ -242,6 +242,12 @@ class Combatant(Base):
     maneuver: Mapped[str | None] = mapped_column(String(30), nullable=True)
     status_effects: Mapped[list] = mapped_column(JSON, default=list)
     parries_this_turn: Mapped[int] = mapped_column(Integer, default=0)
+    #: B376 scopes the cumulative parry penalty to "that weapon or hand", so the
+    #: count that drives the penalty is per weapon. `parries_this_turn` stays as
+    #: the turn total (informational); this is what the penalty reads. Key "" is
+    #: the unnamed default weapon, so a table that never names one behaves as
+    #: it always did.
+    parries_by_weapon: Mapped[dict] = mapped_column(JSON, default=dict)
     blocks_this_turn: Mapped[int] = mapped_column(Integer, default=0)
     slot: Mapped[int] = mapped_column(Integer, nullable=False)
 
