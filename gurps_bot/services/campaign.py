@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.models import CampaignSettings
@@ -53,3 +53,18 @@ async def set_rule_of_14(
     else:
         row.rule_of_14 = enabled
     return CampaignRules(rule_of_14=enabled)
+
+
+async def purge_guild_campaign_settings(
+    session: AsyncSession, guild_id: int
+) -> None:
+    """Drop a guild's house rules when the bot leaves it. Caller commits.
+
+    House rules are guild-scoped, so they are the guild's data and go with it.
+    Without this a kick and re-invite silently restores a setting the new
+    occupants never chose — and the bot has already been kicked and re-invited
+    once, during the 2026-07-25 rename.
+    """
+    await session.execute(
+        delete(CampaignSettings).where(CampaignSettings.guild_id == guild_id)
+    )
