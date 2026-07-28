@@ -62,7 +62,15 @@ case "$1" in
     case "$3" in
       '{{.Config.Image}}')  printf '%s\n' "$_img" ;;
       '{{.Id}}')            printf '%s\n' "$_id" ;;
-      '{{.Image}}')         printf '%s\n' "$STUB_RUNNING_IMAGE" ;;
+      '{{.Image}}')
+        # Called two ways: for our container by name, and for every container
+        # id at once when collecting in-use images.
+        if [ "$4" = "$STUB_CONTAINER_NAME" ]; then
+          printf '%s\n' "$STUB_RUNNING_IMAGE"
+        else
+          printf '%s\n' $STUB_IN_USE_IMAGES
+        fi
+        ;;
       '{{.State.Running}}') printf 'true\n' ;;
       *project*)            printf 'gudbus\n' ;;
       *service*)            printf 'gudbus\n' ;;
@@ -78,6 +86,7 @@ case "$1" in
       *) printf 'STUB-REFUSED-UNSCOPED-LISTING\n' >&2; exit 1 ;;
     esac
     ;;
+  ps)   printf '%s\n' $STUB_ALL_CONTAINERS; exit 0 ;;
   rmi)  exit "${STUB_RMI_RC:-0}" ;;
   exec) exit 0 ;;
 esac
@@ -135,6 +144,10 @@ def run(env, *args, **overrides):
             "STUB_CURRENT_IMAGE": f"{IMAGE_REPO}:sha-old",
             "STUB_RUNNING_IMAGE": RUNNING_IMG,
             "STUB_NEW_TAG": "sha-new",
+            "STUB_CONTAINER_NAME": "gudbus",
+            # By default only our own container exists on the host.
+            "STUB_ALL_CONTAINERS": "c-prod",
+            "STUB_IN_USE_IMAGES": RUNNING_IMG,
         }
     )
     e.update(overrides)
@@ -199,6 +212,41 @@ class TestPruneSafety:
         # -f would tear an image out from under a container still using it.
         _, calls = run(env, "sha-new")
         assert not [c for c in calls if c.startswith("rmi ") and " -f" in c]
+
+    def test_never_removes_an_image_another_container_is_using(self, env):
+        """The dev instance runs :nightly from this same repo.
+
+        Both instances' images show up in one `docker images` listing, so a
+        production deploy would otherwise treat the dev container's image as a
+        deletion candidate. `docker rmi` would refuse it, but that makes the
+        protection an accident of an error path rather than a decision.
+        """
+        _, calls = run(
+            env,
+            "sha-new",
+            STUB_ALL_CONTAINERS="c-prod c-dev",
+            STUB_IN_USE_IMAGES=f"{RUNNING_IMG} {OLD_IMG}",
+        )
+        assert OLD_IMG not in _rmi_targets(calls)
+
+    def test_an_in_use_image_does_not_consume_the_rollback_slot(self, env):
+        """It is spoken for, not spare capacity.
+
+        If it counted as the kept image, the genuine rollback target would be
+        deleted instead — the failure would be invisible until a rollback.
+        """
+        _, calls = run(
+            env,
+            "sha-new",
+            STUB_ALL_CONTAINERS="c-prod c-dev",
+            STUB_IN_USE_IMAGES=f"{RUNNING_IMG} {PREV_IMG}",
+        )
+        assert PREV_IMG not in _rmi_targets(calls)
+        assert OLD_IMG not in _rmi_targets(calls), (
+            "the in-use image ate the keep slot, so the real rollback target "
+            "was pruned"
+        )
+        assert OLDER_IMG in _rmi_targets(calls)
 
     def test_an_image_still_in_use_is_reported_not_fatal(self, env):
         result, _ = run(env, "sha-new", STUB_RMI_RC="1")

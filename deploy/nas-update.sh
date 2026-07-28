@@ -65,6 +65,24 @@ prune_images() {
   [ "$PRUNE" = "1" ] || return 0
   step "Old images"
   RUNNING_IMG=$(docker inspect -f '{{.Image}}' "$CONTAINER" 2>/dev/null || true)
+
+  # Every image any container is built on, running or stopped. A second
+  # instance of this bot (the :nightly dev container) is built from the SAME
+  # repo, so it shows up in the listing below and would otherwise be a
+  # deletion candidate the moment prod is deployed. `docker rmi` would refuse
+  # it, but relying on that means the protection is a side effect of an error
+  # path rather than something this script decided. One inspect call, not one
+  # per container: this host has 60+ of them.
+  ALL_C=$(docker ps -aq 2>/dev/null | tr '\n' ' ')
+  IN_USE=""
+  # Flattened to a space-separated list because the membership test below is a
+  # `case` glob on " $IN_USE ", and a newline is not a space — the ids would
+  # never match and every in-use image would silently stay a deletion
+  # candidate. That is precisely how this went in first.
+  # shellcheck disable=SC2086
+  [ -n "$ALL_C" ] && IN_USE=$(docker inspect -f '{{.Image}}' $ALL_C 2>/dev/null \
+                              | tr '\n' ' ')
+
   # One image can carry several tags; de-duplicate so a keep-slot is an image,
   # not a tag. docker images lists newest first.
   IMG_IDS=$(docker images --no-trunc --filter=reference="$IMAGE_REPO" \
@@ -76,6 +94,14 @@ prune_images() {
       printf '  running  %s\n' "$(echo "$id" | cut -c8-19)"
       continue
     fi
+    # In use by some other container — another instance of this bot, most
+    # likely. Not a rollback slot: it is not spare capacity, it is spoken for.
+    case " $IN_USE " in
+      *" $id "*)
+        printf '  in use   %s (another container)\n' "$(echo "$id" | cut -c8-19)"
+        continue
+        ;;
+    esac
     kept=$((kept + 1))
     if [ "$kept" -le "$KEEP_IMAGES" ]; then
       printf '  rollback %s\n' "$(echo "$id" | cut -c8-19)"

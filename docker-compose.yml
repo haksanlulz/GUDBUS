@@ -46,8 +46,15 @@ services:
       BOT_INVITE_URL: ${BOT_INVITE_URL:-}
       BOT_SUPPORT_URL: ${BOT_SUPPORT_URL:-}
       # --- Command sync (optional) -----------------------------------------
-      DEV_GUILD_ID: ${DEV_GUILD_ID:-}
-      SYNC_ON_START: ${SYNC_ON_START:-}
+      # Registration is startup behaviour: global, and only when the command
+      # set actually changed. 0 disables it.
+      #
+      # This block used to pass DEV_GUILD_ID and SYNC_ON_START, which the 2025
+      # sync redesign deleted — they appear nowhere in the source any more —
+      # while AUTO_SYNC, the variable that replaced them, was never added. It
+      # reached the bot anyway via env_file, so nothing broke and nothing
+      # complained; the block simply stopped describing reality.
+      AUTO_SYNC: ${AUTO_SYNC:-}
       # --- Donation links (optional, /support + /donate) -------------------
       KOFI_URL: ${KOFI_URL:-}
       BUYMEACOFFEE_URL: ${BUYMEACOFFEE_URL:-}

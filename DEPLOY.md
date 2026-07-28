@@ -79,6 +79,24 @@ publishes to GHCR only. To pull instead of build, swap the `build:`/`image:`
 lines in `docker-compose.yml` as noted there, then
 `docker compose pull && docker compose up -d`.
 
+**Running a second instance on trunk:** `deploy/nightly-compose.yml` stands up
+a `:nightly` container alongside production — same host, same image repo, its
+own container, volume and env file. Copy it into its own Compose project
+directory as `docker-compose.yml` and `docker compose pull && docker compose up -d`
+to refresh it.
+
+It needs **its own Discord application and token**. Two processes signed in on
+one token both hold a gateway session and both answer every interaction, so you
+get duplicate replies; that is the one mistake here that does not correct
+itself. Its slash commands register globally like production's, but global
+registration is per-application, so they only appear in guilds that second bot
+is actually in — keep it out of the real guild and they never meet.
+
+`tests/test_deploy_compose.py` asserts the two composes share no container
+name, volume or env file, and that the nightly one carries the same hardening;
+a dev instance running with more privilege than production is not testing
+production.
+
 **Data & backups:** the DB is in the `gurps-data` named volume. Back it up with
 
 ```sh
