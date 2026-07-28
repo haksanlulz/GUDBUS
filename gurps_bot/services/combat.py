@@ -581,13 +581,39 @@ async def record_defense(
 async def cleanup_stale_combats(
     session: AsyncSession, max_age_hours: int = 24,
 ) -> int:
+    """Delete combats untouched for `max_age_hours`. Returns how many. Caller commits.
+
+    Bulk DML rather than loading every stale Combat and deleting it row by row.
+    This runs hourly across all guilds, so it is the only write whose lock
+    duration grows with guild count — and SQLite serialises writers, so a live
+    command lands behind the whole sweep, not part of it. Measured on the old
+    row-by-row version: ~1 ms per stale combat, with the waiting command paying
+    essentially the full sweep (0.888 s against a 0.852 s sweep at 900 stale).
+
+    Combatants are deleted explicitly first, exactly as `purge_guild_combats`
+    does and for the same reason: bulk `delete(Combat)` fires no ORM cascade,
+    and whether the DB-level ON DELETE CASCADE fires depends on the deployed
+    schema's FK clause — which for a database created before that clause
+    existed is not guaranteed. Doing it in two statements depends on neither.
+    Combat has exactly one child table, so two statements is the whole job.
+
+    `synchronize_session=False` because the caller's session is discarded right
+    after; there is no in-memory state left to keep consistent, and the default
+    would spend a SELECT keeping it that way.
+    """
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-    stmt = select(Combat).where(Combat.updated_at < cutoff)
-    result = await session.execute(stmt)
-    stale = result.scalars().all()
-    for c in stale:
-        await session.delete(c)
-    return len(stale)
+    stale_ids = select(Combat.id).where(Combat.updated_at < cutoff)
+    await session.execute(
+        delete(Combatant)
+        .where(Combatant.combat_id.in_(stale_ids))
+        .execution_options(synchronize_session=False)
+    )
+    result = await session.execute(
+        delete(Combat)
+        .where(Combat.updated_at < cutoff)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount
 
 
 async def count_combats(session: AsyncSession) -> int:
