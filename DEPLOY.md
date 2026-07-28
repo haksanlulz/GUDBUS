@@ -41,21 +41,25 @@ on the next start.
 **Prebuilt image:** two channels on `ghcr.io/haksanlulz/gudbus`
 (see `.github/workflows/docker-publish.yml`):
 
-| Tag | Branch | What it is |
-|---|---|---|
-| `:latest` | `main` | Release. What you want unless you have a reason. |
-| `:nightly` | `dev` | Trunk. Tests pass, but it has not been released. |
-| `:sha-<commit>` | either | An exact build. What `deploy/nas-update.sh` pins. |
+| Tag | Branch | Architectures | What it is |
+|---|---|---|---|
+| `:latest` | `main` | amd64 + arm64 | Release. What you want unless you have a reason. |
+| `:nightly` | `dev` | amd64 | Trunk. Tests pass, but it has not been released. |
+| `:sha-<commit>` | either | as its branch | An exact build. What `deploy/nas-update.sh` pins. |
 
-Published for **`linux/amd64` and `linux/arm64`**, so the ARM hosts above
+Releases carry **`linux/amd64` and `linux/arm64`**, so the ARM hosts above
 (Oracle A1, Raspberry Pi) can pull rather than build. `docker pull` picks the
 right one; nothing to specify.
 
-This was not true until 2026-07-27: the publish job passed no `platforms:`, so
-it built the runner's architecture alone and the index carried amd64 only,
-while this document recommended ARM hosts. `tests/test_ci_workflows.py` now
-asserts the built platforms against the ones named here, so the promise and the
-build cannot drift apart again.
+Trunk is amd64 only, deliberately: arm64 is emulated on the build runner and
+roughly doubles it, and nothing pulls an arm64 nightly — the ARM advice is for
+strangers deploying a release, and they take `:latest`.
+
+Releases were amd64-only until 2026-07-27, while this document recommended ARM
+hosts: the publish job passed no `platforms:` at all, so it built the runner's
+architecture and nothing else. `tests/test_ci_workflows.py` now asserts the
+built platforms against the ones named here, so the promise and the build
+cannot drift apart again.
 
 At a release both branches sit on the same commit and both publish its `sha-`
 tag, so that tag belongs to whichever run finished last. The two images are

@@ -119,12 +119,22 @@ jobs:
         with:
           context: .
           push: true
-          # The architectures DEPLOY.md tells people to deploy on. arm64 is
-          # emulated here, so it is the slow leg; the gha cache absorbs most of
-          # it on repeat builds. If this ever gets painful the honest options
-          # are a native arm64 runner or dropping the ARM advice — not quietly
-          # publishing amd64 under a multi-arch claim, which is what happened.
-          platforms: linux/amd64,linux/arm64
+          # Releases carry every architecture DEPLOY.md tells people to deploy
+          # on; trunk carries only the one that gets pulled.
+          #
+          # arm64 is emulated on an amd64 runner, so it roughly doubles the
+          # build. Nothing pulls an arm64 nightly: the ARM advice is aimed at
+          # strangers deploying a release on an Oracle A1 or a Pi, and they
+          # take :latest. The NAS dev instance tracks :nightly on x86.
+          #
+          # If the ARM legs ever need to be dropped from releases too, drop the
+          # advice in DEPLOY.md in the same commit — tests/test_ci_workflows.py
+          # asserts the two against each other precisely so publishing amd64
+          # under a multi-arch claim cannot happen again.
+          platforms: >-
+            ${{ (github.ref == 'refs/heads/main'
+                 || startsWith(github.ref, 'refs/tags/v'))
+                && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

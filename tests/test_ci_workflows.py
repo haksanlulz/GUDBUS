@@ -138,18 +138,35 @@ class TestArchitectures:
     the build, so nothing noticed. This is that connection.
     """
 
-    def test_publishes_every_documented_architecture(self, publish):
+    def _platforms(self, publish):
         step = next(
             s
             for s in publish["jobs"]["build-and-push"]["steps"]
             if str(s.get("uses", "")).startswith("docker/build-push-action")
         )
-        built = {p.strip() for p in step["with"]["platforms"].split(",")}
-        assert built == DOCUMENTED_ARCHITECTURES, (
-            f"builds {sorted(built)}, DEPLOY.md promises "
-            f"{sorted(DOCUMENTED_ARCHITECTURES)}. Change both together, or the "
-            "docs recommend a host the registry cannot serve."
+        return " ".join(step["with"]["platforms"].split())
+
+    def test_releases_publish_every_documented_architecture(self, publish):
+        # The value is a ref-conditional expression, so this asserts the arches
+        # it can select rather than a flat list. Both documented platforms have
+        # to appear together in the release branch of that expression.
+        expr = self._platforms(publish)
+        release_arm = "'linux/amd64,linux/arm64'"
+        assert release_arm in expr, (
+            f"release build does not select {sorted(DOCUMENTED_ARCHITECTURES)}; "
+            f"platforms reads: {expr}"
         )
+        for platform in DOCUMENTED_ARCHITECTURES:
+            assert platform in expr, f"{platform} is never built"
+
+    def test_the_multi_arch_leg_is_gated_on_release_refs(self, publish):
+        """Trunk must not pay for an architecture nobody pulls from it."""
+        expr = self._platforms(publish)
+        assert "refs/heads/main" in expr and "refs/tags/v" in expr, (
+            "the multi-arch leg should be selected by release refs (main and "
+            f"version tags); platforms reads: {expr}"
+        )
+        assert "'linux/amd64'" in expr, "no single-arch fallback for trunk"
 
     def test_deploy_doc_names_the_same_architectures(self):
         # Reads the doc, not a copy of it — a table edited to drop arm64 fails
