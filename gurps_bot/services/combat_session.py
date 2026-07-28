@@ -91,12 +91,15 @@ class CombatSession:
 class CombatContext:
     """Session + combat acquisition for subcommands; check ctx.ok, combat errors go out ephemeral."""
 
-    def __init__(self, interaction: discord.Interaction) -> None:
+    def __init__(
+        self, interaction: discord.Interaction, *, defer: bool = True,
+    ) -> None:
         self.interaction = interaction
         self.session: AsyncSession | None = None
         self.combat: Combat | None = None
         self.cs: CombatSession | None = None
         self._session_ctx = None
+        self._defer = defer
 
     @property
     def ok(self) -> bool:
@@ -104,6 +107,14 @@ class CombatContext:
         return self.combat is not None
 
     async def __aenter__(self) -> CombatContext:
+        # Acknowledge before touching the database. Discord invalidates an
+        # un-deferred token after 3 seconds; SQLite waits up to busy_timeout
+        # (5s) for a write lock, so a contended write can still be succeeding
+        # when the interaction is already dead. Deferring moves the ceiling to
+        # 15 minutes. Mirrors CharacterContext, which already did this.
+        if self._defer and not self.interaction.response.is_done():
+            await self.interaction.response.defer()
+
         self._session_ctx = self.interaction.client.db()
         self.session = await self._session_ctx.__aenter__()
         self.combat = await get_combat(

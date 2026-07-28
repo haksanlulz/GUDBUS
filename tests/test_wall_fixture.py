@@ -385,6 +385,7 @@ class TestNoTemplateTokenLeaks:
         interaction = MagicMock()
         interaction.guild_id = 123
         interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
         for command in CATEGORIES:
             for current in ("", "a", "e"):
                 choices = await cog._suggest(interaction, command, current)

@@ -188,6 +188,7 @@ def _make_interaction(guild_id: int | None = 12345, service=None) -> MagicMock:
     interaction.guild_id = guild_id
     interaction.user.id = 99
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.client.reference = service or StubReferenceService()
     return interaction
 

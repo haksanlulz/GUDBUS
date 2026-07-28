@@ -26,6 +26,7 @@ def _interaction(session_factory, user_id=42, guild_id=7):
     i.guild_id = guild_id
     i.client.db = session_factory
     i.response.send_message = AsyncMock()
+    i.response.defer = AsyncMock()
     return i
 
 

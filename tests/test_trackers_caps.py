@@ -70,6 +70,7 @@ def _interaction(session_factory):
 
     interaction.client.db = fake_db
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.response.is_done.return_value = False
     interaction.followup.send = AsyncMock()
     return interaction

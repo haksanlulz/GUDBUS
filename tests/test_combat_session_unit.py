@@ -154,6 +154,7 @@ class TestRespondAndRefresh:
 
         interaction = MagicMock()
         interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
 
         ctx = CombatContext(interaction)

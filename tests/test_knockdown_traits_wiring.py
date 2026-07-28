@@ -81,6 +81,7 @@ def _interaction(session_factory):
     interaction.channel_id = 200
     interaction.user.id = 999  # GM
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.response.is_done.return_value = False
     interaction.followup.send = AsyncMock()
     interaction.client.db = session_factory

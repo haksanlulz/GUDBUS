@@ -31,6 +31,7 @@ def _interaction(user_id: int):
     interaction.guild_id = 100
     interaction.channel_id = 200
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.response.edit_message = AsyncMock()
     return interaction
 

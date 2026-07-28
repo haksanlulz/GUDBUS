@@ -62,6 +62,7 @@ def _interaction(session_factory, *, guild_id=100, channel_id=200, user_id=42):
     interaction.channel_id = channel_id
     interaction.user.id = user_id
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.response.is_done.return_value = False
     interaction.followup.send = AsyncMock()
     interaction.client.db = session_factory

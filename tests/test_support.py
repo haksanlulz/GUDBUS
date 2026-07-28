@@ -97,6 +97,7 @@ class TestCog:
     def _interaction(self):
         interaction = MagicMock()
         interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
         return interaction
 
     async def test_support_sends_embed(self):

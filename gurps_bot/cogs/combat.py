@@ -52,6 +52,7 @@ from gurps_bot.services.combat import (
 )
 from gurps_bot.services.combat_session import CombatContext, CombatPermissionError, CombatSession
 from gurps_bot.ui import embeds
+from gurps_bot.ui.respond import respond
 from gurps_bot.ui.formatters import _md_escape, format_modifier_suffix
 from gurps_bot.ui.tracker import TrackerManager, get_tracker_view
 from gurps_bot.ui.views import RollDamageView
@@ -149,7 +150,7 @@ class CombatCog(commands.Cog):
             try:
                 char = await require_active_character(session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await interaction.response.send_message("No active character.", ephemeral=True)
+                await respond(interaction, "No active character.", ephemeral=True)
                 return
 
             traits = await get_character_traits(session, char.id)
@@ -159,7 +160,7 @@ class CombatCog(commands.Cog):
         weapon_names = [_weapon_display_name(w) for w in weapons]
         matches = fuzzy_match(weapon, weapon_names, limit=1, score_cutoff=40)
         if not matches:
-            await interaction.response.send_message(
+            await respond(interaction, 
                 f"No weapon matching **{weapon}**.", ephemeral=True
             )
             return
@@ -180,7 +181,7 @@ class CombatCog(commands.Cog):
             embed.add_field(name="Reach", value=_md_escape(w["reach"]), inline=True)
 
         view = RollDamageView(damage_str, hidden=hidden) if damage_str and damage_str != "?" else None
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=hidden)
+        await respond(interaction, embed=embed, view=view, ephemeral=hidden)
         if view:
             try:
                 view.message = await interaction.original_response()
@@ -211,7 +212,7 @@ class CombatCog(commands.Cog):
             try:
                 char = await require_active_character(session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await interaction.response.send_message("No active character.", ephemeral=True)
+                await respond(interaction, "No active character.", ephemeral=True)
                 return
 
             calc = char.calc_json
@@ -238,7 +239,7 @@ class CombatCog(commands.Cog):
                     target = _resolve_defense_value(w.get("parry", ""), w.get("level", 10))
                     label = f"{char_name} — Parry ({w.get('source', 'Unknown')})"
                 else:
-                    await interaction.response.send_message(
+                    await respond(interaction, 
                         f"No weapon matching **{weapon}**.", ephemeral=True
                     )
                     return
@@ -260,7 +261,7 @@ class CombatCog(commands.Cog):
                 target = _resolve_defense_value(w.get("block", ""), w.get("level", 10))
                 label = f"{char_name} — Block ({w.get('source', 'Unknown')})"
             else:
-                await interaction.response.send_message(
+                await respond(interaction, 
                     "No shield found for blocking.", ephemeral=True
                 )
                 return
@@ -269,14 +270,14 @@ class CombatCog(commands.Cog):
 
         result = check(target, modifier)
         embed = embeds.check_embed(result, label)
-        await interaction.response.send_message(embed=embed)
+        await respond(interaction, embed=embed)
 
     @app_commands.checks.cooldown(2, 5.0)
     @app_commands.command(name="hit-location", description="Roll a Random Hit Location (3d6)")
     async def hit_location(self, interaction: discord.Interaction) -> None:
         result = roll_hit_location()
         embed = embeds.hit_location_embed(result)
-        await interaction.response.send_message(embed=embed)
+        await respond(interaction, embed=embed)
 
 
 # --------------------------------------------------------------------------- #
@@ -321,12 +322,12 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                     session, interaction.guild_id, interaction.channel_id, interaction.user.id,
                 )
             except ValueError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
+                await respond(interaction, str(e), ephemeral=True)
                 return
 
             embed = embeds.combat_tracker_embed(combat)
             view = get_tracker_view()
-            await interaction.response.send_message(embed=embed, view=view)
+            await respond(interaction, embed=embed, view=view)
 
             # commit even if the message-id fetch fails; losing message_id only
             # costs tracker auto-refresh, rolling back would lose the combat
@@ -346,13 +347,13 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             try:
                 char = await require_active_character(ctx.session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await interaction.response.send_message("No active character. Use `/import` first.", ephemeral=True)
+                await respond(interaction, "No active character. Use `/import` first.", ephemeral=True)
                 return
 
             try:
                 pc = await add_pc_combatant(ctx.session, ctx.combat, char.id, char.name, interaction.user.id)
             except ValueError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
+                await respond(interaction, str(e), ephemeral=True)
                 return
 
             await ctx.commit()
@@ -381,7 +382,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     ) -> None:
         name = sanitize_name(name)
         if not name:
-            await interaction.response.send_message(
+            await respond(interaction, 
                 "NPC name is empty after removing special characters.", ephemeral=True,
             )
             return
@@ -403,7 +404,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 return
             my_combatant = ctx.cs.find_own_combatant()
             if not my_combatant:
-                await interaction.response.send_message("You're not in this combat.", ephemeral=True)
+                await respond(interaction, "You're not in this combat.", ephemeral=True)
                 return
 
             combatant_name = my_combatant.name
@@ -557,7 +558,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                     await remove_status(ctx.session, c.id, effect)
                     verb = "removed from"
             except ValueError as e:
-                await interaction.response.send_message(str(e), ephemeral=True)
+                await respond(interaction, str(e), ephemeral=True)
                 return
 
             await ctx.commit()
@@ -580,12 +581,12 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
             current = ctx.cs.current_combatant
             if not current:
-                await interaction.response.send_message("No combatants.", ephemeral=True)
+                await respond(interaction, "No combatants.", ephemeral=True)
                 return
 
             effects = set(current.status_effects or [])
             if StatusEffect.STUNNED in effects and maneuver != Maneuver.DO_NOTHING.value:
-                await interaction.response.send_message(
+                await respond(interaction, 
                     f"**{current.name}** is Stunned and must Do Nothing.", ephemeral=True
                 )
                 return
@@ -631,7 +632,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             else:
                 combatant = ctx.cs.find_own_combatant()
                 if combatant is None:
-                    await interaction.response.send_message(
+                    await respond(interaction, 
                         "You're not in this combat. (GMs: pass a `target`.)", ephemeral=True,
                     )
                     return
@@ -665,7 +666,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             embed = embeds.check_embed(result, label)
             if note:
                 embed.add_field(name="Note", value=note, inline=False)
-            await interaction.response.send_message(embed=embed, ephemeral=hidden)
+            await respond(interaction, embed=embed, ephemeral=hidden)
 
     @app_commands.checks.cooldown(1, 5.0)
     @app_commands.command(name="end", description="End the Current Combat (GM Only)")
@@ -678,7 +679,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await end_combat(ctx.session, interaction.guild_id, interaction.channel_id)
             await ctx.commit()
             # ack before the tracker-clear edit so the interaction doesn't expire
-            await interaction.response.send_message("Combat ended.")
+            await respond(interaction, "Combat ended.")
             await tracker.end()
 
 

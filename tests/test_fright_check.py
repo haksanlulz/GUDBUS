@@ -25,6 +25,7 @@ def _interaction():
     interaction = MagicMock()
     interaction.guild_id = None
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     return interaction
 
 

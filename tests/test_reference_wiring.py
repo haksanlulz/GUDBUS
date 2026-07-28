@@ -243,6 +243,7 @@ def _interaction(guild_id: int | None = 123) -> MagicMock:
     interaction = MagicMock()
     interaction.guild_id = guild_id
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     return interaction
 
 

@@ -23,6 +23,7 @@ class TestRollDamageViewHidden:
     def _interaction(self):
         interaction = MagicMock()
         interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
         return interaction
 
     async def test_hidden_button_is_ephemeral(self):
@@ -90,6 +91,13 @@ def _attack_interaction(session_factory, *, guild_id=100, user_id=42):
     interaction.guild_id = guild_id
     interaction.user.id = user_id
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    # Unset, is_done() returns a truthy MagicMock, which sends every reply down
+    # the followup branch and asserts nothing about the path /attack actually
+    # takes. /attack opens its own session and does not defer, so False is the
+    # faithful value.
+    interaction.response.is_done.return_value = False
+    interaction.followup.send = AsyncMock()
     interaction.original_response = AsyncMock(return_value=MagicMock())
     interaction.client.db = session_factory
     return interaction

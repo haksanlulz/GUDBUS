@@ -24,6 +24,7 @@ def _interaction(*, response_done: bool):
     interaction.data = {"options": [{"name": "dice", "value": "3d6"}]}
     interaction.response.is_done.return_value = response_done
     interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
     interaction.followup.send = AsyncMock()
     return interaction
 
