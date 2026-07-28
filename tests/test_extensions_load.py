@@ -26,6 +26,13 @@ from discord.ext import commands
 from gurps_bot.bot import EXTENSIONS, GURPSBot
 
 
+#: Captured at import, before any fixture closes a bot — these are the module
+#: objects the rest of the suite already holds references into.
+_PRESERVED: dict[str, object] = {
+    ext: sys.modules[ext] for ext in EXTENSIONS if ext in sys.modules
+}
+
+
 def _restore_extension_modules() -> None:
     """Put the cog modules back into sys.modules after closing a bot.
 
@@ -46,11 +53,23 @@ def _restore_extension_modules() -> None:
 
     That cost a session: it presented as a knockdown wiring bug, was declared
     root-cause-unknown, and was worked around by asserting on rendered output.
-    Re-importing here restores both the cache and the parent attribute, so a
-    patch and a call refer to the same module again.
+
+    ⚠️ This used to re-import, which restores the NAMES but builds NEW module
+    objects. That is a weaker fix than it looks: it works only while everything
+    downstream consistently uses the new objects, and it breaks the moment a
+    second fixture does the same thing — a test that imported a class at
+    collection time and then patches by string ends up patching a different
+    module than the code runs in. `test_cold_guild` reproduced exactly that in
+    nine error-handler tests. Restoring the ORIGINAL objects preserves identity
+    and has no such window.
     """
+    for ext, module in _PRESERVED.items():
+        sys.modules[ext] = module
+    # Anything not captured (first call in a process, or a genuinely new
+    # extension) still needs an import to exist at all.
     for ext in EXTENSIONS:
-        importlib.import_module(ext)
+        if ext not in sys.modules:
+            importlib.import_module(ext)
 
 
 class TestMentionDefaults:

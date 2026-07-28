@@ -61,7 +61,18 @@ async def empty_db():
 
 @pytest_asyncio.fixture
 async def tree():
+    import sys
+
     bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
+    # Capture the module OBJECTS, not just the names. Bot.close() unloads every
+    # extension and unload_extension pops them from sys.modules; re-importing
+    # afterwards restores the names but builds NEW module objects, so anything
+    # that already holds the old ones — a test that imported a class at
+    # collection time, then patches "gurps_bot.cogs.x.log" by string — ends up
+    # patching a different module than the code runs in. That is the knockdown
+    # bug from earlier today, and this fixture reproduced it in nine
+    # error-handler tests. Putting the same objects back avoids it entirely.
+    preserved = {ext: sys.modules[ext] for ext in EXTENSIONS if ext in sys.modules}
     try:
         for ext in EXTENSIONS:
             await bot.load_extension(ext)
@@ -74,10 +85,7 @@ async def tree():
         yield bot
     finally:
         await bot.close()
-        import importlib
-
-        for ext in EXTENSIONS:
-            importlib.import_module(ext)
+        sys.modules.update(preserved)
 
 
 def _all_commands(bot) -> list[tuple[str, app_commands.Command]]:

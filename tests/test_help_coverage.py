@@ -32,11 +32,13 @@ async def tree():
     finally:
         await bot.close()
         # Bot.close() unloads every extension, which pops the cog modules out
-        # of sys.modules — see test_extensions_load._restore_extension_modules.
-        import importlib
+        # of sys.modules. Restore the same OBJECTS rather than re-importing —
+        # re-importing restores the names but builds new modules, which is how
+        # a patch and a call end up in two different ones (see
+        # test_extensions_load._restore_extension_modules for the full story).
+        from tests.test_extensions_load import _restore_extension_modules
 
-        for ext in EXTENSIONS:
-            importlib.import_module(ext)
+        _restore_extension_modules()
 
 
 def _topiced() -> set[str]:
