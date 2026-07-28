@@ -72,8 +72,9 @@ case "$1" in
         fi
         ;;
       '{{.State.Running}}') printf 'true\n' ;;
-      *project*)            printf 'gudbus\n' ;;
-      *service*)            printf 'gudbus\n' ;;
+      *compose.project*)    printf '%s\n' "$STUB_COMPOSE_PROJECT" ;;
+      *compose.service*)    printf '%s\n' "$STUB_COMPOSE_SERVICE" ;;
+      *unraid*)             printf '%s\n' "$STUB_UNRAID_MANAGED" ;;
       *)                    printf '\n' ;;
     esac
     exit 0
@@ -145,6 +146,10 @@ def run(env, *args, **overrides):
             "STUB_RUNNING_IMAGE": RUNNING_IMG,
             "STUB_NEW_TAG": "sha-new",
             "STUB_CONTAINER_NAME": "gudbus",
+            # Compose-managed by default; the template tests blank these.
+            "STUB_COMPOSE_PROJECT": "gudbus",
+            "STUB_COMPOSE_SERVICE": "gudbus",
+            "STUB_UNRAID_MANAGED": "",
             # By default only our own container exists on the host.
             "STUB_ALL_CONTAINERS": "c-prod",
             "STUB_IN_USE_IMAGES": RUNNING_IMG,
@@ -293,6 +298,64 @@ class TestDryRun:
         b, _ = run(env, "--no-prune", "--dry-run", "sha-new")
         assert a.returncode == 0 and b.returncode == 0
         assert "Old images" not in a.stdout and "Old images" not in b.stdout
+
+
+TEMPLATE = {
+    "STUB_COMPOSE_PROJECT": "",
+    "STUB_COMPOSE_SERVICE": "",
+    "STUB_UNRAID_MANAGED": "dockerman",
+}
+
+
+class TestTemplateManagedContainer:
+    """Production moved to an unRAID Docker template on 2026-07-28.
+
+    Such a container has no `com.docker.compose.*` labels and no compose file,
+    so the recreate path cannot drive it — and must not pretend to. What was
+    actually lost was the checking around the update, not the update, so
+    `--preflight` restores the checks and stops.
+    """
+
+    def test_it_refuses_to_recreate_a_label_less_container(self, env):
+        result, calls = run(env, "sha-new", **TEMPLATE)
+        assert result.returncode != 0
+        assert "compose up" not in " ".join(calls)
+        assert "--preflight" in result.stdout + result.stderr, (
+            "refusing is right, but it should name the mode that does work"
+        )
+
+    def test_preflight_accepts_it_and_reports_how_it_is_managed(self, env):
+        result, _ = run(env, "--preflight", "sha-new", **TEMPLATE)
+        assert result.returncode == 0
+        assert "unRAID Docker template" in result.stdout
+
+    def test_preflight_still_reports_compose_when_that_is_the_truth(self, env):
+        result, _ = run(env, "--preflight", "sha-new")
+        assert result.returncode == 0
+        assert "Compose" in result.stdout
+
+    def test_preflight_modifies_nothing(self, env):
+        """The whole basis for shipping this untested against the real box."""
+        result, calls = run(env, "--preflight", "sha-new", **TEMPLATE)
+        assert result.returncode == 0
+        for forbidden in ("compose up", "rmi ", "compose down", "stop ", "rm "):
+            assert not [c for c in calls if c.startswith(forbidden)], (
+                f"preflight ran a mutating command: {forbidden}"
+            )
+
+    def test_preflight_does_not_error_when_already_on_the_target(self, env):
+        """Run after updating, to confirm the box is where you think it is."""
+        result, _ = run(
+            env, "--preflight", "sha-old", **TEMPLATE
+        )  # stub's current image is :sha-old
+        assert result.returncode == 0
+        assert "Already running" in result.stdout
+
+    def test_preflight_tells_you_how_to_verify_afterwards(self, env):
+        result, _ = run(env, "--preflight", "sha-new", **TEMPLATE)
+        assert "image.revision" in result.stdout, (
+            "should point at the running artifact, not the template form"
+        )
 
 
 class TestOrdering:

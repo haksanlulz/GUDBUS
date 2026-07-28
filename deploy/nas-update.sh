@@ -45,13 +45,31 @@ step() { printf '\n== %s\n' "$1"; }
 
 DRY_RUN=0
 PRUNE=1
+PREFLIGHT=0
 while :; do
   case "${1:-}" in
-    --dry-run)  DRY_RUN=1; shift ;;
-    --no-prune) PRUNE=0; shift ;;
+    --dry-run)   DRY_RUN=1; shift ;;
+    --no-prune)  PRUNE=0; shift ;;
+    --preflight) PREFLIGHT=1; shift ;;
     *) break ;;
   esac
 done
+
+# --preflight runs the checks worth having and then stops, without requiring a
+# Compose project or touching the container.
+#
+# Production moved to an unRAID Docker *template* on 2026-07-28. A template
+# container carries no `com.docker.compose.*` labels and has no compose file to
+# rewrite, so the recreate below cannot drive it and the ownership check
+# correctly refuses it. What was lost with it was not the recreate — the unRAID
+# UI does that well — but the things around it: nobody checks whether the
+# commit's tests passed, and nobody takes a backup first.
+#
+# So this mode does exactly those, and mutates nothing except writing a backup.
+# That restriction is deliberate: this script cannot be tested against the real
+# box from a development machine, and a session that has already found a stale
+# copy of it and two shadow data directories there should not be writing an
+# untested recreate path for someone else's production container.
 
 # Remove superseded images for OUR repo only, newest-first, keeping the running
 # one plus $KEEP_IMAGES previous.
@@ -134,16 +152,21 @@ prune_backups() {
 }
 
 TAG=${1:-}
-[ -n "$TAG" ] || die "usage: $0 [--dry-run] <image-tag>   e.g. $0 sha-ef30b62
+[ -n "$TAG" ] || die "usage: $0 [--dry-run] [--no-prune] [--preflight] <image-tag>
+       e.g. $0 sha-ef30b62
 
 Find the tag: it is 'sha-' plus the short commit sha of what you want deployed.
 This script checks that commit's CI itself and refuses a red one."
 
 # ---------------------------------------------------------------- preflight
 step "Preflight"
-[ -f "$COMPOSE" ] || die "no compose file at $COMPOSE (set GUDBUS_PROJECT_DIR)"
 command -v docker >/dev/null 2>&1 || die "docker not on PATH"
-docker compose version >/dev/null 2>&1 || die "'docker compose' (v2) unavailable"
+if [ "$PREFLIGHT" = "0" ]; then
+  [ -f "$COMPOSE" ] || die "no compose file at $COMPOSE (set GUDBUS_PROJECT_DIR).
+If this container is managed by the unRAID Docker template rather than Compose,
+run with --preflight: it performs the checks and leaves the update to the UI."
+  docker compose version >/dev/null 2>&1 || die "'docker compose' (v2) unavailable"
+fi
 
 CURRENT_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null) \
   || die "container '$CONTAINER' not found. Running containers:
@@ -159,26 +182,54 @@ EXPECT_PROJECT=$(cat "$PROJECT_DIR/name" 2>/dev/null || basename "$PROJECT_DIR")
 EXPECT_PROJECT=$(printf '%s' "$EXPECT_PROJECT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
 GOT_PROJECT=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "$CONTAINER" 2>/dev/null || true)
 SERVICE=$(docker inspect -f '{{index .Config.Labels "com.docker.compose.service"}}' "$CONTAINER" 2>/dev/null || true)
+MANAGED_BY=$(docker inspect -f '{{index .Config.Labels "net.unraid.docker.managed"}}' "$CONTAINER" 2>/dev/null || true)
 
-[ -n "$GOT_PROJECT" ] || die "container '$CONTAINER' carries no Compose project
-label, so it is not managed by this project dir. Refusing to touch it."
-[ -n "$SERVICE" ] || die "container '$CONTAINER' carries no Compose service label."
-[ "$GOT_PROJECT" = "$EXPECT_PROJECT" ] || die "container '$CONTAINER' belongs to
+if [ "$PREFLIGHT" = "1" ]; then
+  # Nothing below this mode modifies the container, so the Compose-label proof
+  # is not load-bearing here — report what manages it instead, because that is
+  # what decides how the operator applies the update.
+  if [ -n "$GOT_PROJECT" ]; then
+    printf '  managed by: Compose (project %s, service %s)\n' "$GOT_PROJECT" "$SERVICE"
+  elif [ -n "$MANAGED_BY" ]; then
+    printf '  managed by: unRAID Docker template (%s)\n' "$MANAGED_BY"
+  else
+    printf '  managed by: unknown — neither Compose nor unRAID labels present\n'
+  fi
+  printf '  container : %s\n  image now : %s\n  target    : %s\n' \
+    "$CONTAINER" "$CURRENT_IMAGE" "$TAG"
+fi
+
+[ -n "$GOT_PROJECT" ] || [ "$PREFLIGHT" = "1" ] || die "container '$CONTAINER' carries no Compose project
+label, so it is not managed by this project dir. Refusing to touch it.
+If it is an unRAID Docker template container, use --preflight: it runs the CI
+check and takes a backup, then leaves the update itself to the UI."
+if [ "$PREFLIGHT" = "0" ]; then
+  [ -n "$SERVICE" ] || die "container '$CONTAINER' carries no Compose service label."
+  [ "$GOT_PROJECT" = "$EXPECT_PROJECT" ] || die "container '$CONTAINER' belongs to
 Compose project '$GOT_PROJECT', but $PROJECT_DIR is project '$EXPECT_PROJECT'.
 Refusing to act on another project's container."
 
-# The service is named explicitly on every compose call below, so a project
-# that grew a second service cannot have it recreated as a side effect.
-SERVICES=$(cd "$PROJECT_DIR" && docker compose config --services 2>/dev/null || true)
-printf '%s\n' "$SERVICES" | grep -qx "$SERVICE" \
-  || die "service '$SERVICE' is not defined in $COMPOSE. Defined:
+  # The service is named explicitly on every compose call below, so a project
+  # that grew a second service cannot have it recreated as a side effect.
+  SERVICES=$(cd "$PROJECT_DIR" && docker compose config --services 2>/dev/null || true)
+  printf '%s\n' "$SERVICES" | grep -qx "$SERVICE" \
+    || die "service '$SERVICE' is not defined in $COMPOSE. Defined:
 $(printf '%s' "$SERVICES" | sed 's/^/  /')"
 
-printf '  container : %s\n  project   : %s\n  service   : %s\n  image now : %s\n  target    : %s\n' \
-  "$CONTAINER" "$GOT_PROJECT" "$SERVICE" "$CURRENT_IMAGE" "$TAG"
+  printf '  container : %s\n  project   : %s\n  service   : %s\n  image now : %s\n  target    : %s\n' \
+    "$CONTAINER" "$GOT_PROJECT" "$SERVICE" "$CURRENT_IMAGE" "$TAG"
+fi
 
 case "$CURRENT_IMAGE" in
-  *":$TAG") die "already running $TAG — nothing to do" ;;
+  *":$TAG")
+    if [ "$PREFLIGHT" = "1" ]; then
+      # Not an error here: on the template path the operator often runs this
+      # AFTER updating, to confirm the box is where they think it is.
+      printf '\n  Already running %s.\n' "$TAG"
+    else
+      die "already running $TAG — nothing to do"
+    fi
+    ;;
 esac
 
 # ------------------------------------------------------------- CI gate
@@ -227,6 +278,36 @@ Re-run with GUDBUS_SKIP_CI_CHECK=1 only if you know why it is red."
   else
     printf '  WARNING: could not reach the GitHub API; channel UNVERIFIED\n'
   fi
+fi
+
+if [ "$PREFLIGHT" = "1" ]; then
+  if [ "${GUDBUS_SKIP_BACKUP:-0}" != "1" ] && [ "$DRY_RUN" != "1" ]; then
+    step "Backing up the database"
+    STAMP=$(date -u +%Y%m%d-%H%M%S)
+    if docker exec "$CONTAINER" python -c "
+import sqlite3
+src = sqlite3.connect('/app/data/gurps_bot.db')
+dst = sqlite3.connect('/app/data/gurps_bot-$STAMP.db')
+src.backup(dst); dst.close(); src.close()
+" 2>/dev/null; then
+      printf '  wrote /app/data/gurps_bot-%s.db\n' "$STAMP"
+      printf '  ⚠ that is INSIDE the data volume — copy it off the volume if\n'
+      printf '    what you are guarding against is losing the volume itself\n'
+    else
+      printf '  WARNING: backup failed (no DB yet?)\n'
+    fi
+  fi
+
+  step "Preflight complete — nothing was modified"
+  printf '  The checks are done; the update itself is not this script'"'"'s to make\n'
+  printf '  on a template-managed container. Apply it the way the box is\n'
+  printf '  managed:\n\n'
+  printf '    unRAID template : set the tag in the container template, Apply\n'
+  printf '    Compose project : re-run this script WITHOUT --preflight\n\n'
+  printf '  Afterwards, confirm the box is actually where you think it is —\n'
+  printf '  the running artifact, not the form that describes it:\n\n'
+  printf '    docker inspect -f '"'"'{{index .Config.Labels "org.opencontainers.image.revision"}}'"'"' %s\n\n' "$CONTAINER"
+  exit 0
 fi
 
 if [ "$DRY_RUN" = "1" ]; then
