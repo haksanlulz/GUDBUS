@@ -99,6 +99,50 @@ class TestEveryCommandIsAccountedFor:
         )
 
 
+class TestTheLandingPageMatchesThePicker:
+    """The overview must name topics the way Discord's dropdown does.
+
+    Discord shows a choice's NAME; the embed used to list its VALUE, so the page
+    said "/help start" while the picker offered "Getting started" — two
+    vocabularies for one thing, and the one the embed taught never appeared on
+    screen. Operator caught it on the deployed bot.
+    """
+
+    async def test_the_choice_names_are_the_topic_titles(self, tree):
+        cmd = next(c for c in tree.get_commands() if c.name == "help")
+        param = next(p for p in cmd.parameters if p.name == "topic")
+        offered = {c.name for c in param.choices}
+        titles = {title for title, _, _ in TOPICS.values()}
+        assert offered == titles, (
+            f"the picker offers {sorted(offered)} but the topics are "
+            f"{sorted(titles)} — the two must agree or the overview cannot"
+        )
+
+    async def test_the_overview_lists_what_the_picker_shows(self):
+        """Render the landing page and check it names titles, not raw keys."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from gurps_bot.cogs.help import HelpCog
+
+        bot = MagicMock()
+        bot.tree.get_commands.return_value = []
+        interaction = MagicMock()
+        interaction.response.is_done.return_value = False
+        interaction.response.send_message = AsyncMock()
+
+        await HelpCog(bot).help_cmd.callback(HelpCog(bot), interaction, None)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        topics_field = next(f for f in embed.fields if f.name == "Topics")
+
+        for title, _, _ in TOPICS.values():
+            assert title in topics_field.value, f"{title!r} missing from overview"
+        for key in TOPICS:
+            assert f"/help {key}" not in topics_field.value, (
+                f"overview still cites the raw key {key!r}, which the picker "
+                "never shows"
+            )
+
+
 class TestTheEntryPointReads:
     async def test_import_is_reachable_as_char_import(self, tree):
         """It moved out of the top level; the whole point was discoverability."""

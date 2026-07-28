@@ -149,11 +149,16 @@ class HelpCog(commands.Cog):
                 ),
                 colour=discord.Colour.dark_gold(),
             )
+            # Listed by TITLE, because the title is what Discord's picker shows.
+            # This used to list `/help <key>` — the choice *value* — which named
+            # a vocabulary the UI never displays: the embed said "/help start"
+            # while the dropdown offered "Getting started". Nobody types the key
+            # anyway; they type /help and pick.
             embed.add_field(
                 name="Topics",
                 value="\n".join(
-                    f"`/help {key}` — {framing}"
-                    for key, (_, framing, _) in TOPICS.items()
+                    f"**{title}** — {framing}"
+                    for _, (title, framing, _) in TOPICS.items()
                 ),
                 inline=False,
             )
