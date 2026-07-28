@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from gurps_bot.config import DEFER_INTERACTIONS
 from gurps_bot.services.combat import current_combatant, get_combat
 from gurps_bot.utils.fuzzy import fuzzy_match
 
@@ -92,14 +93,17 @@ class CombatContext:
     """Session + combat acquisition for subcommands; check ctx.ok, combat errors go out ephemeral."""
 
     def __init__(
-        self, interaction: discord.Interaction, *, defer: bool = True,
+        self, interaction: discord.Interaction, *, defer: bool | None = None,
     ) -> None:
         self.interaction = interaction
         self.session: AsyncSession | None = None
         self.combat: Combat | None = None
         self.cs: CombatSession | None = None
         self._session_ctx = None
-        self._defer = defer
+        # None means "whatever the deployment is configured for" — off by
+        # default. Passing an explicit bool overrides it, which is what the
+        # tests do so they assert behaviour rather than the current default.
+        self._defer = DEFER_INTERACTIONS if defer is None else defer
 
     @property
     def ok(self) -> bool:
@@ -107,11 +111,13 @@ class CombatContext:
         return self.combat is not None
 
     async def __aenter__(self) -> CombatContext:
-        # Acknowledge before touching the database. Discord invalidates an
-        # un-deferred token after 3 seconds; SQLite waits up to busy_timeout
-        # (5s) for a write lock, so a contended write can still be succeeding
-        # when the interaction is already dead. Deferring moves the ceiling to
-        # 15 minutes. Mirrors CharacterContext, which already did this.
+        # Acknowledge before touching the database, when enabled. Discord
+        # invalidates an un-deferred token after 3 seconds; SQLite waits up to
+        # busy_timeout (5s) for a write lock, so a contended write can still be
+        # succeeding when the interaction is already dead. Deferring moves the
+        # ceiling to 15 minutes. Mirrors CharacterContext, which already did
+        # this. OFF by default — see config.DEFER_INTERACTIONS for the
+        # measurements and for when to turn it on.
         if self._defer and not self.interaction.response.is_done():
             await self.interaction.response.defer()
 

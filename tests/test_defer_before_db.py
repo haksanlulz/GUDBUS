@@ -1,4 +1,4 @@
-"""Combat commands must acknowledge Discord before they touch the database.
+"""Deferring: available, tested, and OFF by default.
 
 Discord invalidates an un-deferred interaction token after 3 seconds. SQLite
 waits up to `busy_timeout` (5000 ms here) for a write lock. Those are ordered
@@ -6,12 +6,20 @@ wrong: a contended write can still be succeeding when the token is already
 dead, and the user sees "The application did not respond" on a command that
 worked. Deferring moves the ceiling to 15 minutes.
 
-Measured before the change, at rising concurrent guild writes: slowest write
-0.37s at 24, 0.62s at 60, 1.58s at 120 — under the deadline, but by under 2x
-at the top and on a workstation SSD rather than the NAS array.
+Measured at rising concurrent WRITES (not guild count — 120 guilds is not 120
+simultaneous writes): slowest write 0.37s at 24, 0.62s at 60, 1.58s at 120
+where the pool queues. Under the deadline, but by under 2x at the top and on a
+workstation SSD rather than the NAS array.
 
-The whole suite passed identically before and after CombatContext started
-deferring, which is exactly why these exist: nothing else asserts it.
+Shipped disabled by operator ruling 2026-07-28: at one guild the wall is
+unreachable and the "thinking..." state Discord shows while deferred is pure
+cost. The machinery is kept complete and covered so enabling it is a config
+change rather than a rewrite. `config.DEFER_INTERACTIONS` holds the conditions
+that should flip it.
+
+Every test here passes an explicit `defer=`, so none of them becomes vacuous if
+that default moves in either direction — which one of them did, before this
+note existed.
 """
 
 from __future__ import annotations
@@ -55,11 +63,38 @@ async def _seed(session_factory):
         await s.commit()
 
 
+class TestDefaultIsOff:
+    """Shipped disabled, deliberately.
+
+    At one guild a combat write takes ~10ms, so the 3-second wall is
+    unreachable and the "thinking..." state Discord shows while deferred is
+    pure cost. The machinery stays present and tested so turning it on is a
+    config change rather than a rewrite — see config.DEFER_INTERACTIONS for the
+    measurements and the conditions that should flip it.
+    """
+
+    async def test_config_default_is_off(self):
+        from gurps_bot import config
+
+        assert config.DEFER_INTERACTIONS is False
+
+    async def test_context_does_not_defer_by_default(self, session_factory):
+        await _seed(session_factory)
+        interaction = _interaction(session_factory)
+        async with CombatContext(interaction):  # no explicit flag
+            pass
+        interaction.response.defer.assert_not_awaited()
+        interaction.response.send_message.assert_not_awaited()
+
+
 class TestCombatContextDefers:
+    """Behaviour when enabled. Explicit flag, so these do not silently become
+    vacuous if the default flips either way."""
+
     async def test_it_defers(self, session_factory):
         await _seed(session_factory)
         interaction = _interaction(session_factory)
-        async with CombatContext(interaction):
+        async with CombatContext(interaction, defer=True):
             pass
         interaction.response.defer.assert_awaited_once()
 
@@ -80,7 +115,7 @@ class TestCombatContextDefers:
 
         interaction.client.db = tracked_db
 
-        async with CombatContext(interaction):
+        async with CombatContext(interaction, defer=True):
             pass
 
         assert order[:2] == ["defer", "db"], f"wrong order: {order}"
@@ -88,15 +123,19 @@ class TestCombatContextDefers:
     async def test_it_defers_even_when_no_combat_is_active(self, session_factory):
         """The lookup is itself a query; the ack cannot wait on its result."""
         interaction = _interaction(session_factory)  # nothing seeded
-        async with CombatContext(interaction) as ctx:
+        async with CombatContext(interaction, defer=True) as ctx:
             assert not ctx.ok
         interaction.response.defer.assert_awaited_once()
 
     async def test_it_does_not_defer_twice(self, session_factory):
-        """A command that already answered must not be re-acknowledged."""
+        """A command that already answered must not be re-acknowledged.
+
+        Explicitly enabled: with the default off this would pass without
+        exercising the guard at all.
+        """
         await _seed(session_factory)
         interaction = _interaction(session_factory, already_done=True)
-        async with CombatContext(interaction):
+        async with CombatContext(interaction, defer=True):
             pass
         interaction.response.defer.assert_not_awaited()
 

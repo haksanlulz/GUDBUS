@@ -179,6 +179,7 @@ nothing to run). If registrations are ever missing, mention the bot: `@<bot> syn
 | `DATABASE_URL` | no | Defaults to `sqlite+aiosqlite:///data/gurps_bot.db`. |
 | `BOT_AUTHOR_LEGAL_NAME` | for `/legal` | Name in the SJG game-aid notice. A handle is fine. Warns at startup if unset. |
 | `AUTO_SYNC` | no | Default on: global command registration at startup, only when the command set changed. `0` disables. |
+| `DEFER_INTERACTIONS` | no | Default **off**. `1` makes combat commands acknowledge Discord before touching the DB. Discord kills an un-deferred interaction at 3s while SQLite waits up to 5s for a write lock, so a contended write can outlive its token — deferring moves that to 15 min, at the cost of a "thinking…" state on every such command. Unreachable at one table (~10 ms writes); turn on when writes start overlapping or before going public. |
 | `BOT_INVITE_URL` | no | OAuth2 invite link. |
 | `BOT_SUPPORT_URL` | no | Support/contact link for `/legal`. |
 | `KOFI_URL`, `BUYMEACOFFEE_URL`, `PATREON_URL`, `GITHUB_SPONSORS_URL`, `PAYPAL_URL`, `LIBERAPAY_URL` | no | Donation links for `/support` + `/donate`. Unset = the commands show a "share the bot" message. |
