@@ -113,13 +113,17 @@ async def _run_major_wound(session_factory, **kwargs):
 
     The dice are NOT patched. `check` is left real because the modifier is
     deterministic even when the roll is not, and the knockdown line states the
-    modifier verbatim — so asserting on the rendered text pins the thing that
-    matters (did the trait reach the roll) without depending on intercepting a
-    module-level name. An earlier version of this file patched
-    `gurps_bot.cogs.combat.check` and asserted on call args; that passed alone
-    and on 3.12 but failed under the full suite on 3.10, and the root cause of
-    the patch interaction was never found. Reading the output avoids the
-    question entirely and tests the GM-visible contract instead.
+    modifier verbatim — so asserting on the rendered text pins the GM-visible
+    contract.
+
+    An earlier version patched `gurps_bot.cogs.combat.check` and asserted on
+    call args; it failed under the full suite because `Bot.close()` in
+    test_extensions_load popped the cog modules out of sys.modules, leaving
+    `patch` and the executing code in two different module objects. That is
+    fixed at the source now (see `_restore_extension_modules`), and
+    TestModifierArithmetic below patches deliberately again — the two styles
+    answer different questions, and the summed modifier is only visible from
+    inside the call.
     """
     interaction = _interaction(session_factory)
     with patch(_REFRESH, new_callable=AsyncMock, return_value=True):
@@ -187,3 +191,46 @@ class TestModifierIsAttributedHonestly:
         text = await _run_major_wound(session_factory)
         assert "High Pain Threshold +3" in text
         assert "skull" not in text and "face" not in text
+
+
+class TestModifierArithmetic:
+    """What the rendered text cannot show: the single number that reached the roll.
+
+    The output names each contribution separately — "skull -10", "High Pain
+    Threshold +3" — so reading it proves both were considered but never proves
+    they were added. Only the call itself carries the sum.
+
+    This patches `gurps_bot.cogs.combat.check`, which was unreliable until the
+    module-identity bug in test_extensions_load was fixed; if these ever start
+    reporting zero calls again while the bot demonstrably works, that is the
+    symptom to recognise, not a wiring regression.
+    """
+
+    async def _modifier(self, session_factory, **kwargs):
+        interaction = _interaction(session_factory)
+        mock = MagicMock(return_value=_fixed_check(8, 10))
+        with patch(_REFRESH, new_callable=AsyncMock, return_value=True), patch(
+            "gurps_bot.cogs.combat.check", mock
+        ):
+            await _cog().hp_cmd.callback(
+                _cog(), interaction, target="Hero", amount=-6, **kwargs
+            )
+        mock.assert_called_once()
+        return mock.call_args.args[1]
+
+    async def test_high_pain_threshold_is_plus_three(self, session, session_factory):
+        await _seed(session, trait_names=["High Pain Threshold"])
+        assert await self._modifier(session_factory) == 3
+
+    async def test_low_pain_threshold_is_minus_four(self, session, session_factory):
+        await _seed(session, trait_names=["Low Pain Threshold"])
+        assert await self._modifier(session_factory) == -4
+
+    async def test_no_relevant_trait_is_zero(self, session, session_factory):
+        await _seed(session, trait_names=["Combat Reflexes"])
+        assert await self._modifier(session_factory) == 0
+
+    async def test_location_and_trait_are_summed(self, session, session_factory):
+        """Skull -10 with High Pain Threshold +3 reaches the roll as -7."""
+        await _seed(session, trait_names=["High Pain Threshold"])
+        assert await self._modifier(session_factory, location="skull") == -7
