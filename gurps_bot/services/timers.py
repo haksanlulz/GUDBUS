@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.timers import UNITS, Timer
+from gurps_bot.services.limits import MAX_TIMERS_PER_CHANNEL, enforce_row_cap
 
 
 async def add_timer(
@@ -28,6 +29,10 @@ async def add_timer(
         raise ValueError("Unknown unit")
     if total < 1:
         raise ValueError("total must be >= 1")
+    await enforce_row_cap(
+        session, Timer, MAX_TIMERS_PER_CHANNEL, "timers in this channel",
+        guild_id=guild_id, channel_id=channel_id,
+    )
 
     if remaining is None:
         remaining_value = total

@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.models import DiceMacro
+from gurps_bot.services.limits import MAX_MACROS_PER_USER, enforce_row_cap
 from gurps_bot.mechanics.dice import parse_dice
 from gurps_bot.utils.sanitize import sanitize_name
 
@@ -44,6 +45,13 @@ async def save_macro(
     the name — that's the actionable half, since the name indexes the row.
     """
     key = normalize_macro_name(name)
+    # Replacing an existing macro is exempt: the cap bounds row count, and a
+    # replace adds none. Mirrors the character import cap.
+    if await get_macro(session, discord_user_id, key) is None:
+        await enforce_row_cap(
+            session, DiceMacro, MAX_MACROS_PER_USER, "macros",
+            discord_user_id=discord_user_id,
+        )
     parse_dice(expression)  # validate; raises ValueError on bad notation
     existing = await get_macro(session, discord_user_id, key)
     if existing is not None:

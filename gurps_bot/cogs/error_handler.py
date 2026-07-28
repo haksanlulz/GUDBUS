@@ -8,6 +8,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from gurps_bot.services.limits import StorageLimitExceeded
+
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
 
@@ -122,6 +124,17 @@ class ErrorHandler(commands.Cog):
                 msg = "You don't have permission to use this command."
             elif isinstance(error, app_commands.TransformerError):
                 msg = f"Invalid input: {error}"
+            elif isinstance(
+                getattr(error, "original", None), StorageLimitExceeded
+            ) or isinstance(error, StorageLimitExceeded):
+                # A row cap. The message is written to be read by the person who
+                # hit it ("You have N notes (maximum M)"), so surface it rather
+                # than burying it under the generic apology — being told you hit
+                # a limit is actionable; "something went wrong" is not.
+                # discord.py wraps a callback exception in CommandInvokeError,
+                # hence the .original check first.
+                original = getattr(error, "original", None) or error
+                msg = str(original)
             else:
                 # capture context before responding; the send below can fail
                 ctx = _interaction_context(interaction)

@@ -10,6 +10,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.study import StudyLog
+from gurps_bot.services.limits import MAX_STUDY_LOGS_PER_USER, enforce_row_cap
 from gurps_bot.mechanics.study import StudyProgress, learning_hours_for, study_progress
 
 
@@ -24,6 +25,10 @@ async def log_study(
     gm_multiplier: float | None = None,
 ) -> StudyLog:
     """Record one study session; stores real_hours verbatim (audit) plus the post-cap learning_hours."""
+    await enforce_row_cap(
+        session, StudyLog, MAX_STUDY_LOGS_PER_USER, "study log entries",
+        discord_user_id=discord_user_id,
+    )
     learning_hours = learning_hours_for(method, real_hours, gm_multiplier)
 
     row = StudyLog(

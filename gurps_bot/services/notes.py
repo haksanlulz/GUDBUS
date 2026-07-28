@@ -12,6 +12,10 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.notes import Note
+from gurps_bot.services.limits import (
+    MAX_NOTES_PER_USER_PER_GUILD,
+    enforce_row_cap,
+)
 
 # engineering caps, not GURPS numbers
 TITLE_MAX = 200
@@ -65,6 +69,14 @@ async def add_note(
     tags: list[str] | None = None,
     gm_secret: bool = False,
 ) -> Note:
+    await enforce_row_cap(
+        session,
+        Note,
+        MAX_NOTES_PER_USER_PER_GUILD,
+        "notes in this server",
+        discord_user_id=discord_user_id,
+        guild_id=guild_id,
+    )
     clean_title = _validate_title(title)
     note = Note(
         discord_user_id=discord_user_id,
