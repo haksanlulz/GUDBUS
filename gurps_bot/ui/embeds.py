@@ -80,7 +80,7 @@ def char_list_embed(characters: list[tuple[str, int, bool]]) -> discord.Embed:
     """Items are (name, points, is_active)."""
     embed = discord.Embed(title="Your Characters", color=BLUE)
     if not characters:
-        embed.description = "*No characters imported yet. Use `/import` to add one.*"
+        embed.description = "*No characters imported yet. Use `/char import` to add one.*"
         return embed
     lines = []
     for name, points, active in characters:

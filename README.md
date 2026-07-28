@@ -38,7 +38,7 @@
 
 | Command | Description |
 |---------|-------------|
-| `/import` | Upload a `.gcs` character file |
+| `/char import` | Upload a `.gcs` character file |
 | `/char view` | View active character summary |
 | `/char skills` | List skills (with search) |
 | `/char spells` | List spells (with search) |
@@ -162,7 +162,7 @@ gurps_bot/
   config.py           # Environment variable configuration
   cogs/
     admin.py          # /sync, /status, guild cleanup
-    characters.py     # /import, /char group
+    characters.py     # the /char group
     rolling.py        # /roll, /check, /contest, /damage
     combat.py         # /attack, /defend, /combat group
     error_handler.py  # Global error handler

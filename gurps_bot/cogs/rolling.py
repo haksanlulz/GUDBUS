@@ -132,7 +132,7 @@ async def _resolve_target(
     async with interaction.client.db() as session:
         char = await get_active_character(session, interaction.user.id, interaction.guild_id)
         if not char:
-            await _send_error("No active character. Use `/import` first.")
+            await _send_error("No active character. Use `/char import` first.")
             return None
 
         target_lower = target_str.lower()

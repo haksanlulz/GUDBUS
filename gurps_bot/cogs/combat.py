@@ -347,7 +347,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             try:
                 char = await require_active_character(ctx.session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await respond(interaction, "No active character. Use `/import` first.", ephemeral=True)
+                await respond(interaction, "No active character. Use `/char import` first.", ephemeral=True)
                 return
 
             try:

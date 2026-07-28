@@ -8,7 +8,7 @@ analytics, no data sale.
 
 - **Discord IDs** — your user ID, and the guild/channel IDs a command ran in.
   These key everything below.
-- **Imported characters** (`/import`) — the attributes, skills, spells, traits,
+- **Imported characters** (`/char import`) — the attributes, skills, spells, traits,
   and equipment parsed from the `.gcs` sheet you upload, plus that file's name
   and the sheet's own internal id.
 - **Combat state** (`/combat`) — combatants, HP/FP, statuses, turn order.

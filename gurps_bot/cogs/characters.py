@@ -1,4 +1,4 @@
-"""Character management cog: /import and the /char group."""
+"""Character management cog: the /char group, import included."""
 
 from __future__ import annotations
 
@@ -80,8 +80,11 @@ async def _send_paginated(
         view.message = msg
 
 
-class ImportCog(commands.Cog):
-    "Import GCS Character Files."
+
+
+@app_commands.guild_only()
+class CharGroup(commands.GroupCog, group_name="char"):
+    "Character Viewing and Management Commands."
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
@@ -89,7 +92,6 @@ class ImportCog(commands.Cog):
     @app_commands.checks.cooldown(1, 10.0)
     @app_commands.command(name="import", description="Import a .gcs Character File")
     @app_commands.describe(file="A .gcs character sheet file")
-    @app_commands.guild_only()
     async def import_char(self, interaction: discord.Interaction, file: discord.Attachment) -> None:
         # extension check is just ux; the json parse below is the real validation
         if not file.filename.endswith(".gcs"):
@@ -176,14 +178,6 @@ class ImportCog(commands.Cog):
             f"Imported **{parsed.name}**{replaced} and set as active.",
             embed=embed,
         )
-
-
-@app_commands.guild_only()
-class CharGroup(commands.GroupCog, group_name="char"):
-    "Character Viewing and Management Commands."
-
-    def __init__(self, bot: GURPSBot) -> None:
-        self.bot = bot
 
     @app_commands.command(name="view", description="View Your Active Character Summary")
     async def view(self, interaction: discord.Interaction) -> None:
@@ -380,5 +374,4 @@ class CharGroup(commands.GroupCog, group_name="char"):
 
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(ImportCog(bot))
     await bot.add_cog(CharGroup(bot))
