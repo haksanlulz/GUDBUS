@@ -71,7 +71,22 @@ def _cog():
 
 
 def _sent_content(interaction):
-    return interaction.response.send_message.await_args.args[0]
+    """The reply text, wherever `ui.respond` put it.
+
+    Content became a KEYWORD when `respond_and_refresh` started routing through
+    `ui.respond` (2026-07-29) — `respond()` assembles a payload dict — so
+    reading `args[0]` raised IndexError in six tests at once. Reads both, and
+    both channels, since which one is used depends on whether the command
+    deferred.
+    """
+    sender = interaction.response.send_message
+    if not sender.await_args:
+        sender = interaction.followup.send
+    call = sender.await_args
+    assert call is not None, "nothing was sent on either channel"
+    if "content" in call.kwargs:
+        return call.kwargs["content"]
+    return call.args[0]
 
 
 def _fixed_check(rolled, target):

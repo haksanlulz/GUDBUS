@@ -9,6 +9,7 @@ import discord
 
 from gurps_bot.config import DEFER_INTERACTIONS
 from gurps_bot.services.combat import current_combatant, get_combat
+from gurps_bot.ui.respond import respond
 from gurps_bot.utils.fuzzy import fuzzy_match
 
 if TYPE_CHECKING:
@@ -100,9 +101,10 @@ class CombatContext:
         self.combat: Combat | None = None
         self.cs: CombatSession | None = None
         self._session_ctx = None
-        # None means "whatever the deployment is configured for" — off by
-        # default. Passing an explicit bool overrides it, which is what the
-        # tests do so they assert behaviour rather than the current default.
+        # None means "whatever the deployment is configured for" — on by
+        # default since 2026-07-29. Passing an explicit bool overrides it, which
+        # is what the tests do so they assert behaviour rather than the current
+        # default, and so they survived the default flipping.
         self._defer = DEFER_INTERACTIONS if defer is None else defer
 
     @property
@@ -116,8 +118,8 @@ class CombatContext:
         # busy_timeout (5s) for a write lock, so a contended write can still be
         # succeeding when the interaction is already dead. Deferring moves the
         # ceiling to 15 minutes. Mirrors CharacterContext, which already did
-        # this. OFF by default — see config.DEFER_INTERACTIONS for the
-        # measurements and for when to turn it on.
+        # this. ON by default — see config.DEFER_INTERACTIONS for the
+        # measurements and for when a deployment should turn it off.
         if self._defer and not self.interaction.response.is_done():
             await self.interaction.response.defer()
 
@@ -139,8 +141,18 @@ class CombatContext:
         await self.session.commit()
 
     async def respond_and_refresh(self, content: str) -> None:
-        """Reply first, then refresh — the 3s interaction ACK window can't wait on the tracker edit."""
-        await self.interaction.response.send_message(content)
+        """Reply first, then refresh — the 3s interaction ACK window can't wait on the tracker edit.
+
+        Routed through `respond()` rather than calling `response.send_message`
+        directly. This method was the one place `ui.respond` was created for and
+        did not reach: after `__aenter__` defers, the interaction is already
+        acknowledged, so a direct `send_message` raises `InteractionResponded`.
+        Every one of the eight combat commands that ends here would then fail to
+        reply — and `hp_cmd` commits before it replies, so the damage landed and
+        the user was told the command failed. `_send_error` twenty lines below
+        had the branch all along, which is what made the omission easy to miss.
+        """
+        await respond(self.interaction, content)
         if not await self.refresh_tracker():
             await self.interaction.followup.send(
                 "⚠️ Couldn't update the combat tracker — check my "

@@ -122,20 +122,34 @@ class TestFindCombatant:
 
 
 class TestRespondAndRefresh:
-    """ack the interaction before the HTTP tracker edit; warn if the edit failed."""
+    """ack the interaction before the HTTP tracker edit; warn if the edit failed.
 
-    async def test_acks_before_refresh_then_warns_on_failure(self):
+    Parametrized over whether the command deferred, because that is what picks
+    the channel and both states are now reachable — deferring is on by default
+    since 2026-07-29. `is_done` is set EXPLICITLY in both: left unset, a
+    MagicMock returns a truthy mock, so every reply silently takes the
+    already-answered branch and the un-deferred case is never tested. That is
+    exactly how these two tests read before the flip, and it is why they went
+    red rather than catching the bug themselves.
+    """
+
+    @pytest.mark.parametrize("deferred", [False, True])
+    async def test_acks_before_refresh_then_warns_on_failure(self, deferred):
         from unittest.mock import AsyncMock, MagicMock
 
         from gurps_bot.services.combat_session import CombatContext
 
         order: list[str] = []
         interaction = MagicMock()
+        interaction.response.is_done.return_value = deferred
         interaction.response.send_message = AsyncMock(
             side_effect=lambda *a, **k: order.append("ack")
         )
+        interaction.response.defer = AsyncMock()
+        # After a defer the ack itself arrives on the followup, so this records
+        # both the ack and the warning — position in `order` distinguishes them.
         interaction.followup.send = AsyncMock(
-            side_effect=lambda *a, **k: order.append("warn")
+            side_effect=lambda *a, **k: order.append("ack" if deferred and not order else "warn")
         )
 
         ctx = CombatContext(interaction)
@@ -143,16 +157,30 @@ class TestRespondAndRefresh:
 
         await ctx.respond_and_refresh("done")
 
-        # ack first, tracker edit second, warning last
+        # ack first, tracker edit second, warning last — the invariant, whichever
+        # channel carried the ack.
         assert order == ["ack", "refresh", "warn"]
-        interaction.followup.send.assert_awaited_once()
 
-    async def test_no_warning_when_refresh_succeeds(self):
+    @pytest.mark.parametrize(
+        "deferred,expect_channel",
+        [(False, "response"), (True, "followup")],
+    )
+    async def test_the_ack_goes_to_the_channel_the_state_requires(
+        self, deferred, expect_channel
+    ):
+        """The regression guard for the 2026-07-29 bug.
+
+        `respond_and_refresh` called `response.send_message` directly while
+        `_send_error` beside it branched on `is_done()`. With deferring on that
+        raises InteractionResponded, and the eight combat commands ending here
+        committed their write before failing to reply.
+        """
         from unittest.mock import AsyncMock, MagicMock
 
         from gurps_bot.services.combat_session import CombatContext
 
         interaction = MagicMock()
+        interaction.response.is_done.return_value = deferred
         interaction.response.send_message = AsyncMock()
         interaction.response.defer = AsyncMock()
         interaction.followup.send = AsyncMock()
@@ -162,8 +190,12 @@ class TestRespondAndRefresh:
 
         await ctx.respond_and_refresh("done")
 
-        interaction.response.send_message.assert_awaited_once()
-        interaction.followup.send.assert_not_awaited()
+        if expect_channel == "response":
+            interaction.response.send_message.assert_awaited_once()
+            interaction.followup.send.assert_not_awaited()
+        else:
+            interaction.followup.send.assert_awaited_once()
+            interaction.response.send_message.assert_not_awaited()
 
     async def test_refresh_tracker_returns_false_when_combat_ended(self):
         # a concurrent /combat end can delete the combat between commit and refresh;

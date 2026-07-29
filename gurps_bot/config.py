@@ -32,8 +32,9 @@ AUTO_SYNC: bool = _parse_flag(os.getenv("AUTO_SYNC"), True)
 # container recreate keeps it and an image with a changed command set re-syncs.
 COMMAND_FINGERPRINT_PATH = DATA_DIR / ".command_fingerprint"
 
-# Acknowledge an interaction before touching the database. OFF by default, and
-# the reasoning is worth keeping because the default should flip one day.
+# Acknowledge an interaction before touching the database. ON by default since
+# 2026-07-29; it shipped off on 2026-07-28 and the day-old reasoning for that is
+# kept below, because what changed was the population and not the measurements.
 #
 # Discord invalidates an un-deferred interaction token after 3 seconds; SQLite
 # waits up to busy_timeout (5s) for a write lock. Those are ordered wrong, so a
@@ -50,8 +51,19 @@ COMMAND_FINGERPRINT_PATH = DATA_DIR / ".command_fingerprint"
 # 120, where the connection pool starts queueing. Under the deadline, but by
 # under 2x at the top and on a workstation SSD rather than the NAS array.
 #
-# Turn it on (DEFER_INTERACTIONS=1) when any of these is true: the bot serves
-# enough busy tables that writes overlap, "The application did not respond"
-# shows up at a table, or the hosted instance goes public — past the 100-server
-# verification wall the concurrency that makes this matter is reachable.
-DEFER_INTERACTIONS: bool = _parse_flag(os.getenv("DEFER_INTERACTIONS"), False)
+# The third of those conditions is what fired. Off was right while every install
+# was one known table on known hardware. A published bot runs on hosts nobody
+# here has measured — a Pi, an SD card, a shared VPS — and the margin above was
+# already under 2x at the top, on a workstation SSD. The trade is asymmetric: the
+# cost of deferring is a "thinking..." flicker, and the cost of not deferring is
+# a stranger's first contended /attack reporting "The application did not
+# respond" on a command that in fact worked, which reads as a broken bot.
+#
+# CharacterContext has defaulted to deferring since it was written, so until now
+# the character commands acknowledged first and the write-heavy combat ones did
+# not — the split was an oversight rather than a decision, and this ends it.
+#
+# Set DEFER_INTERACTIONS=0 to turn it off, which is worth doing on a single-table
+# instance on a fast disk: there the 3-second wall is genuinely unreachable
+# (~10ms writes) and the flicker buys nothing.
+DEFER_INTERACTIONS: bool = _parse_flag(os.getenv("DEFER_INTERACTIONS"), True)
