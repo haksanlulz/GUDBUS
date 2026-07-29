@@ -37,6 +37,35 @@ OLDER_IMG = "sha256:dddd33333333333333333333333333333333333333333333333333333333
 # Newest first, exactly as `docker images` orders them.
 ALL_IMAGES = [RUNNING_IMG, PREV_IMG, OLD_IMG, OLDER_IMG]
 
+LOCAL_D = "sha256:1111000000000000000000000000000000000000000000000000000000000000"
+REMOTE_D = "sha256:2222000000000000000000000000000000000000000000000000000000000000"
+OTHER_D = "sha256:3333000000000000000000000000000000000000000000000000000000000000"
+
+# Stub curl: a registry that answers a token request and a manifest HEAD.
+#
+# Keyed per tag through STUB_REMOTE_<tag> so a test can make :latest and
+# sha-new resolve to different digests, which is the whole point of the
+# target-mismatch case. An unset tag exits non-zero, i.e. the registry does not
+# have it — the same shape as having no network, which is what the default
+# fixture exercises.
+CURL_STUB = r"""#!/bin/sh
+printf '%s\n' "$*" >> "$CURL_LOG"
+url=""
+for a in "$@"; do case "$a" in https://*) url=$a ;; esac; done
+case "$url" in
+  *"/token?"*) printf '{"token":"stub-token"}\n'; exit 0 ;;
+  */manifests/*)
+    tag=${url##*/manifests/}
+    var="STUB_REMOTE_$(printf '%s' "$tag" | tr -c 'A-Za-z0-9' '_')"
+    eval "d=\${$var:-}"
+    [ -n "$d" ] || exit 22
+    printf 'HTTP/2 200\r\ndocker-content-digest: %s\r\n\r\n' "$d"
+    exit 0
+    ;;
+esac
+exit 22
+"""
+
 STUB = r"""#!/bin/sh
 # Stub docker. Logs argv one line per call, answers the queries the script makes.
 printf '%s\n' "$*" >> "$DOCKER_LOG"
@@ -72,6 +101,11 @@ case "$1" in
         fi
         ;;
       '{{.State.Running}}') printf 'true\n' ;;
+      '{{range .RepoDigests}}'*)
+        # Empty when the tag is not present locally at all, which is a real
+        # state and a safe one — nothing cached means nothing stale.
+        [ -z "${STUB_LOCAL_DIGEST:-}" ] || printf '%s@%s\n' "$STUB_IMAGE_REPO" "$STUB_LOCAL_DIGEST"
+        ;;
       *compose.project*)    printf '%s\n' "$STUB_COMPOSE_PROJECT" ;;
       *compose.service*)    printf '%s\n' "$STUB_COMPOSE_SERVICE" ;;
       *unraid*)             printf '%s\n' "$STUB_UNRAID_MANAGED" ;;
@@ -104,6 +138,10 @@ def env(tmp_path):
     docker.write_text(STUB, encoding="utf-8", newline="\n")
     docker.chmod(0o755)
 
+    curl = bin_dir / "curl"
+    curl.write_text(CURL_STUB, encoding="utf-8", newline="\n")
+    curl.chmod(0o755)
+
     project = tmp_path / "GUDBUS"
     project.mkdir()
     (project / "docker-compose.yml").write_text(
@@ -115,12 +153,15 @@ def env(tmp_path):
 
     log = tmp_path / "docker.log"
     log.write_text("", encoding="utf-8")
+    curl_log = tmp_path / "curl.log"
+    curl_log.write_text("", encoding="utf-8")
 
     return {
         "PATH": f"{bin_dir}{';' if ';' in '' else ':'}",
         "tmp_path": tmp_path,
         "project": project,
         "log": log,
+        "curl_log": curl_log,
         "bin": bin_dir,
     }
 
@@ -134,6 +175,13 @@ def run(env, *args, **overrides):
     e.update(
         {
             "DOCKER_LOG": str(env["log"]),
+            "CURL_LOG": str(env["curl_log"]),
+            # Named explicitly rather than shadowed on PATH. Git Bash on Windows
+            # prepends its own bin dir ahead of whatever the caller prepended,
+            # so the stub was ignored there and the suite made real requests to
+            # ghcr.io — and three of these tests then passed for the wrong
+            # reason, on a real curl failing rather than the stub declining.
+            "GUDBUS_CURL": str(env["bin"] / "curl"),
             "GUDBUS_PROJECT_DIR": str(env["project"]),
             "GUDBUS_CONTAINER": "gudbus",
             "GUDBUS_IMAGE_REPO": IMAGE_REPO,
@@ -159,7 +207,13 @@ def run(env, *args, **overrides):
     result = subprocess.run(
         [SHELL, str(SCRIPT), *args],
         capture_output=True,
-        text=True,
+        # Decoded explicitly. `text=True` uses the locale encoding, which is
+        # cp1252 under PowerShell here and UTF-8 under a POSIX shell, so the
+        # script's non-ASCII warning markers came back mangled in one and not
+        # the other — an assertion that holds or fails by which terminal
+        # launched pytest is not an assertion.
+        encoding="utf-8",
+        errors="replace",
         env=e,
         cwd=str(env["tmp_path"]),
     )
@@ -355,6 +409,199 @@ class TestTemplateManagedContainer:
         result, _ = run(env, "--preflight", "sha-new", **TEMPLATE)
         assert "image.revision" in result.stdout, (
             "should point at the running artifact, not the template form"
+        )
+
+
+#: A template container tracking the release pointer — production's real shape.
+MOVING = dict(TEMPLATE, STUB_CURRENT_IMAGE=f"{IMAGE_REPO}:latest")
+
+
+class TestImageFreshness:
+    """The failure this exists for happened, on 2026-07-28, on the real box.
+
+    Production tracks `:latest`, a *moving* tag. An unRAID template "Apply"
+    recreates the container but does not pull, so it rebuilds on whatever copy
+    of `:latest` is already in the local image store. The deploy looked
+    successful — new container, healthy, logs clean — and was running the
+    previous release: the 18th extension was absent and the sync reported
+    `Command set unchanged`.
+
+    Preflight cannot pull for you (it mutates nothing by design, and the update
+    itself belongs to the UI on this path), but it can compare the local copy
+    against the registry and say so.
+    """
+
+    def test_a_stale_local_moving_tag_is_reported(self, env):
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=REMOTE_D,
+        )
+        assert result.returncode == 0
+        assert "STALE" in result.stdout, (
+            "the local :latest differs from the registry's and the operator was "
+            "not told; this is the 2026-07-28 deploy verbatim"
+        )
+
+    def test_the_pull_command_names_the_moving_tag_not_the_target(self, env):
+        """The discriminating case, and the easy thing to get wrong.
+
+        Pulling `:sha-new` fetches the right image but leaves the `:latest` tag
+        pointing at the old one — and `:latest` is what the template
+        references, so the recreate still comes up on the stale image. Only a
+        pull of the moving tag itself moves that pointer.
+        """
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=REMOTE_D,
+        )
+        assert f"docker pull {IMAGE_REPO}:latest" in result.stdout
+        assert f"pull {IMAGE_REPO}:sha-new" not in result.stdout, (
+            "pulling the sha tag does not move :latest, so it would not fix "
+            "the very failure being reported"
+        )
+
+    def test_a_local_copy_matching_the_registry_is_not_called_stale(self, env):
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=REMOTE_D,
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=REMOTE_D,
+        )
+        assert result.returncode == 0
+        assert "STALE" not in result.stdout
+        assert "up to date" in result.stdout
+
+    def test_it_reports_when_the_moving_tag_is_not_the_target_commit(self, env):
+        """A separate failure with the same ending.
+
+        The local copy can be a perfect match for the registry's `:latest`
+        while `:latest` has not yet been moved to the commit you asked for —
+        release published, pointer not yet updated, or the target is a trunk
+        build that will never be on `:latest`. Applying then deploys something
+        other than the commit whose CI you just checked.
+        """
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=REMOTE_D,
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=OTHER_D,
+        )
+        assert result.returncode == 0
+        assert "does NOT" in result.stdout, (
+            "latest resolves to a different image than the requested commit "
+            "and nothing said so"
+        )
+
+    def test_an_immutable_sha_pin_is_not_checked_for_drift(self, env):
+        """`sha-` tags are immutable, so local and registry cannot disagree.
+
+        Reporting a comparison here would be noise at best; claiming staleness
+        would be wrong. The default fixture runs `:sha-old`, so this also
+        covers the Compose path, which pins a sha on every deploy.
+        """
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **TEMPLATE,
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+        )
+        assert result.returncode == 0
+        assert "STALE" not in result.stdout
+        assert "immutable" in result.stdout
+
+    def test_it_never_pulls(self, env):
+        """Preflight's mutate-nothing contract is why it ships untested against
+        the real box. A pull is not a recreate, but it does change what the next
+        recreate runs, so it stays the operator's call."""
+        _, calls = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+        )
+        assert not [c for c in calls if c.startswith("pull ")]
+
+    def test_no_registry_reachable_degrades_to_a_warning(self, env):
+        """Same posture as the CI gate: unverified is reported, never fatal.
+
+        With no STUB_REMOTE_* set the stub registry has nothing, which is what
+        no network looks like from here.
+        """
+        result, _ = run(
+            env, "--preflight", "sha-new", **MOVING, STUB_LOCAL_DIGEST=LOCAL_D
+        )
+        assert result.returncode == 0
+        assert "UNVERIFIED" in result.stdout
+        assert "STALE" not in result.stdout, (
+            "a failed lookup must not be read as a mismatch"
+        )
+
+    def test_an_absent_local_copy_is_not_stale(self, env):
+        """Nothing cached means the recreate must pull, so there is no hazard."""
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST="",
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=REMOTE_D,
+        )
+        assert result.returncode == 0
+        assert "STALE" not in result.stdout
+        assert "not present locally" in result.stdout
+
+    def test_the_check_can_be_skipped(self, env):
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            GUDBUS_SKIP_FRESHNESS_CHECK="1",
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+        )
+        assert result.returncode == 0
+        assert "Image freshness" not in result.stdout
+
+    def test_a_stale_pointer_makes_the_apply_instructions_say_pull_first(self, env):
+        """The report is only useful if it lands where the operator is looking.
+
+        The closing instructions are what gets read and acted on, so a stale
+        pointer has to change them, not just add a paragraph further up.
+        """
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **MOVING,
+            STUB_LOCAL_DIGEST=LOCAL_D,
+            STUB_REMOTE_latest=REMOTE_D,
+            STUB_REMOTE_sha_new=REMOTE_D,
+        )
+        tail = result.stdout.split("Preflight complete")[-1]
+        assert "pull" in tail, (
+            "the apply instructions still read as though a bare Apply is enough"
         )
 
 
