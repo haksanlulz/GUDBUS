@@ -41,3 +41,8 @@ htmlcov/
 # which is what makes the marks reproducible.
 /icon.png
 /banner.png
+
+# Generated on demand by tools/prose_inventory.py. Deliberately not tracked:
+# a checked-in copy is a second thing to keep true, and it goes stale the moment
+# a command description changes.
+prose-inventory.md
