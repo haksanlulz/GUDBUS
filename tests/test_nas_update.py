@@ -89,7 +89,14 @@ case "$1" in
       _id=id-before; _img="$STUB_CURRENT_IMAGE"
     fi
     case "$3" in
-      '{{.Config.Image}}')  printf '%s\n' "$_img" ;;
+      '{{.Config.Image}}')
+        # Fail for a name that is not the container that exists — this is the
+        # first inspect the script makes, and it is where a wrong name (or wrong
+        # case) has to surface. Without this the stub answered for any name and
+        # a case-mismatch test could not fail.
+        [ "$4" = "$STUB_CONTAINER_NAME" ] || exit 1
+        printf '%s\n' "$_img"
+        ;;
       '{{.Id}}')            printf '%s\n' "$_id" ;;
       '{{.Image}}')
         # Called two ways: for our container by name, and for every container
@@ -121,7 +128,15 @@ case "$1" in
       *) printf 'STUB-REFUSED-UNSCOPED-LISTING\n' >&2; exit 1 ;;
     esac
     ;;
-  ps)   printf '%s\n' $STUB_ALL_CONTAINERS; exit 0 ;;
+  ps)
+    # Names when asked for names, ids otherwise: the error path lists names to
+    # suggest a near-miss, while the prune collects ids.
+    case "$*" in
+      *'{{.Names}}'*) printf '%s\n' ${STUB_CONTAINER_NAMES:-$STUB_CONTAINER_NAME} ;;
+      *)              printf '%s\n' $STUB_ALL_CONTAINERS ;;
+    esac
+    exit 0
+    ;;
   rmi)  exit "${STUB_RMI_RC:-0}" ;;
   exec) exit 0 ;;
 esac
@@ -602,6 +617,43 @@ class TestImageFreshness:
         tail = result.stdout.split("Preflight complete")[-1]
         assert "pull" in tail, (
             "the apply instructions still read as though a bare Apply is enough"
+        )
+
+
+class TestContainerName:
+    """The default has to match the container that actually exists.
+
+    Production moved from Compose (`gudbus`) to the unRAID template (`GUDBUS`)
+    on 2026-07-28 and the default was not updated, so `--preflight` would have
+    died on "container not found" the first time it ran. Docker names are
+    case-sensitive and this one deployment spells itself five ways, so a
+    near-miss has to be named rather than left in a 60-line listing.
+    """
+
+    def test_the_default_matches_the_template_container(self, env):
+        import re
+
+        source = SCRIPT.read_text(encoding="utf-8")
+        m = re.search(r"CONTAINER=\$\{GUDBUS_CONTAINER:-(\S+?)\}", source)
+        assert m, "could not find the container default"
+        assert m.group(1) == "GUDBUS", (
+            "verified on the box 2026-07-29: the template container is GUDBUS"
+        )
+
+    def test_a_case_mismatch_is_named_not_just_listed(self, env):
+        """The failure that cost a round trip: right container, wrong case."""
+        result, _ = run(
+            env,
+            "--preflight",
+            "sha-new",
+            **TEMPLATE,
+            GUDBUS_CONTAINER="gudbus",  # what the caller asked for
+            STUB_CONTAINER_NAME="GUDBUS",  # what actually exists on the box
+        )
+        out = result.stdout + result.stderr
+        assert "case-sensitive" in out, (
+            "a case-only mismatch must say so; the bare listing did not make "
+            "GUDBUS vs gudbus visible"
         )
 
 

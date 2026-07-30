@@ -41,7 +41,14 @@
 set -eu
 
 PROJECT_DIR=${GUDBUS_PROJECT_DIR:-/boot/config/plugins/compose.manager/projects/GUDBUS}
-CONTAINER=${GUDBUS_CONTAINER:-gudbus}
+# Verified against the running box 2026-07-29: the template container is
+# `GUDBUS`, uppercase. The default was `gudbus` because that is what Compose
+# Manager named it, and it went stale when production moved to the template on
+# 07-28 — so --preflight would have failed with "container not found" on its
+# first real use. Docker names are case-sensitive; the mismatch is invisible
+# until something looks. GAUNTLET §2 lists five different spellings across this
+# one deployment, and this is the fourth time one of them was guessed wrong.
+CONTAINER=${GUDBUS_CONTAINER:-GUDBUS}
 REPO=${GUDBUS_REPO:-haksanlulz/GUDBUS}
 COMPOSE="$PROJECT_DIR/docker-compose.yml"
 IMAGE_REPO=${GUDBUS_IMAGE_REPO:-ghcr.io/haksanlulz/gudbus}
@@ -213,9 +220,22 @@ run with --preflight: it performs the checks and leaves the update to the UI."
   docker compose version >/dev/null 2>&1 || die "'docker compose' (v2) unavailable"
 fi
 
+# On a miss, name the case-insensitive match rather than only listing every
+# container. Docker names ARE case-sensitive, this deployment spells itself five
+# different ways across the app / project / service / container / repo, and a
+# 60-container listing does not make `GUDBUS` vs `gudbus` jump out — which is
+# exactly how the stale default above survived a whole day unnoticed.
 CURRENT_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$CONTAINER" 2>/dev/null) \
-  || die "container '$CONTAINER' not found. Running containers:
-$(docker ps --format '  {{.Names}}')"
+  || die "container '$CONTAINER' not found.$(
+      NEAR=$(docker ps -a --format '{{.Names}}' 2>/dev/null \
+             | grep -ix "$CONTAINER" || true)
+      [ -z "$NEAR" ] && NEAR=$(docker ps -a --format '{{.Names}}' 2>/dev/null \
+             | grep -i "$CONTAINER" || true)
+      [ -n "$NEAR" ] && printf '\nDid you mean one of these? Names are case-sensitive:\n%s' \
+        "$(printf '%s' "$NEAR" | sed 's/^/  /')"
+    )
+All containers:
+$(docker ps -a --format '  {{.Names}}')"
 CURRENT_ID=$(docker inspect -f '{{.Id}}' "$CONTAINER")
 
 # --- ownership: prove this container is ours before touching anything -------
