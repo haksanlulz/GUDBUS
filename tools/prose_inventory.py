@@ -43,6 +43,14 @@ from discord.ext import commands
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+# This document is full of em dashes and arrows, and Python encodes stdout with
+# the locale codec — cp1252 under PowerShell — so printing it there died on
+# UnicodeEncodeError, and redirecting to a file died the same way. Set here
+# rather than documented as a PYTHONIOENCODING incantation the reader has to
+# remember, and which has no inline form in PowerShell anyway.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 from gurps_bot.bot import EXTENSIONS  # noqa: E402
 
 
