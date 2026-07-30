@@ -37,31 +37,45 @@ OLDER_IMG = "sha256:dddd33333333333333333333333333333333333333333333333333333333
 # Newest first, exactly as `docker images` orders them.
 ALL_IMAGES = [RUNNING_IMG, PREV_IMG, OLD_IMG, OLDER_IMG]
 
-LOCAL_D = "sha256:1111000000000000000000000000000000000000000000000000000000000000"
-REMOTE_D = "sha256:2222000000000000000000000000000000000000000000000000000000000000"
-OTHER_D = "sha256:3333000000000000000000000000000000000000000000000000000000000000"
+CLEAN_CHECKRUNS = '{"total_count":2,"check_runs":[{"name":"pytest (3.10)","status":"completed","conclusion":"success"},{"name":"pytest (3.12)","status":"completed","conclusion":"success"}]}'
+RED_CHECKRUNS = '{"total_count":2,"check_runs":[{"name":"pytest (3.10)","status":"completed","conclusion":"failure"},{"name":"pytest (3.12)","status":"completed","conclusion":"success"}]}'
+RUNNING_CHECKRUNS = '{"total_count":1,"check_runs":[{"name":"pytest (3.10)","status":"in_progress","conclusion":null}]}'
+QUEUED_CHECKRUNS = '{"total_count":1,"check_runs":[{"name":"pytest (3.10)","status":"queued","conclusion":null}]}'
 
-# Stub curl: a registry that answers a token request and a manifest HEAD.
+#: `behind`/`identical` mean the commit is an ancestor of main, i.e. a release.
+COMPARE_RELEASE = '{"status":"behind","ahead_by":0,"behind_by":3,"files":[]}'
+
+#: A trunk build. The files[] entries each carry their OWN "status" key, which is
+#: exactly what defeated the first version of the channel parse: a greedy match
+#: took the LAST one and read a nightly as a release. Kept verbose on purpose.
+COMPARE_NIGHTLY = (
+    '{"status":"ahead","ahead_by":2,"behind_by":0,"files":['
+    '{"filename":"a.py","status":"modified"},'
+    '{"filename":"b.py","status":"added"},'
+    '{"filename":"c.py","status":"renamed"}]}'
+)
+
+# Stub curl: the two GitHub API reads the CI gate makes.
 #
-# Keyed per tag through STUB_REMOTE_<tag> so a test can make :latest and
-# sha-new resolve to different digests, which is the whole point of the
-# target-mismatch case. An unset tag exits non-zero, i.e. the registry does not
-# have it — the same shape as having no network, which is what the default
-# fixture exercises.
+# Bodies come from the environment so a test can hand the script a red commit,
+# an in-flight one, or a comparison whose files[] array carries its own "status"
+# key — that last one is the shape that broke the channel parse once and is the
+# reason this stub returns raw JSON rather than a tidy summary.
+#
+# GUDBUS_CURL points at this file. It is NOT shadowed on PATH: Git Bash on
+# Windows prepends its own bin dir ahead of the caller's, so a stub placed on
+# PATH was ignored and the suite made real requests to api.github.com.
 CURL_STUB = r"""#!/bin/sh
-printf '%s\n' "$*" >> "$CURL_LOG"
+printf '%s
+' "$*" >> "$CURL_LOG"
+[ "${STUB_CURL_FAIL:-0}" = "1" ] && exit 22
 url=""
 for a in "$@"; do case "$a" in https://*) url=$a ;; esac; done
 case "$url" in
-  *"/token?"*) printf '{"token":"stub-token"}\n'; exit 0 ;;
-  */manifests/*)
-    tag=${url##*/manifests/}
-    var="STUB_REMOTE_$(printf '%s' "$tag" | tr -c 'A-Za-z0-9' '_')"
-    eval "d=\${$var:-}"
-    [ -n "$d" ] || exit 22
-    printf 'HTTP/2 200\r\ndocker-content-digest: %s\r\n\r\n' "$d"
-    exit 0
-    ;;
+  */check-runs) printf '%s
+' "$STUB_CHECKRUNS"; exit 0 ;;
+  */compare/*)  printf '%s
+' "$STUB_COMPARE";   exit 0 ;;
 esac
 exit 22
 """
@@ -108,11 +122,6 @@ case "$1" in
         fi
         ;;
       '{{.State.Running}}') printf 'true\n' ;;
-      '{{range .RepoDigests}}'*)
-        # Empty when the tag is not present locally at all, which is a real
-        # state and a safe one — nothing cached means nothing stale.
-        [ -z "${STUB_LOCAL_DIGEST:-}" ] || printf '%s@%s\n' "$STUB_IMAGE_REPO" "$STUB_LOCAL_DIGEST"
-        ;;
       *compose.project*)    printf '%s\n' "$STUB_COMPOSE_PROJECT" ;;
       *compose.service*)    printf '%s\n' "$STUB_COMPOSE_SERVICE" ;;
       *unraid*)             printf '%s\n' "$STUB_UNRAID_MANAGED" ;;
@@ -200,8 +209,12 @@ def run(env, *args, **overrides):
             "GUDBUS_PROJECT_DIR": str(env["project"]),
             "GUDBUS_CONTAINER": "gudbus",
             "GUDBUS_IMAGE_REPO": IMAGE_REPO,
-            # No network in tests; the CI gate has its own coverage.
+            # Off by default so the 30-odd prune/template tests stay focused;
+            # TestCiGate turns it back on. Before 2026-07-29 nothing turned it
+            # on at all, so the gate that refuses a red build was untested.
             "GUDBUS_SKIP_CI_CHECK": "1",
+            "STUB_CHECKRUNS": CLEAN_CHECKRUNS,
+            "STUB_COMPARE": COMPARE_RELEASE,
             "GUDBUS_SKIP_BACKUP": "1",
             "STUB_IMAGE_REPO": IMAGE_REPO,
             "STUB_IMAGE_IDS": " ".join(ALL_IMAGES),
@@ -427,197 +440,98 @@ class TestTemplateManagedContainer:
         )
 
 
-#: A template container tracking the release pointer — production's real shape.
-MOVING = dict(TEMPLATE, STUB_CURRENT_IMAGE=f"{IMAGE_REPO}:latest")
+CI_ON = {"GUDBUS_SKIP_CI_CHECK": "0"}
 
 
-class TestImageFreshness:
-    """The failure this exists for happened, on 2026-07-28, on the real box.
+class TestCiGate:
+    """The script's actual safety feature, and until now the untested one.
 
-    Production tracks `:latest`, a *moving* tag. An unRAID template "Apply"
-    recreates the container but does not pull, so it rebuilds on whatever copy
-    of `:latest` is already in the local image store. The deploy looked
-    successful — new container, healthy, logs clean — and was running the
-    previous release: the 18th extension was absent and the sync reported
-    `Command set unchanged`.
-
-    Preflight cannot pull for you (it mutates nothing by design, and the update
-    itself belongs to the UI on this path), but it can compare the local copy
-    against the registry and say so.
+    Every other test in this file sets GUDBUS_SKIP_CI_CHECK=1, so nothing
+    exercised the check that refuses to deploy a commit whose tests are red —
+    which is the whole reason the script reads the GitHub API at all. It exists
+    as a belt to the publish workflow's braces: images published before that
+    workflow was gated are still pullable, and a workflow edit could remove the
+    gate without anything here noticing.
     """
 
-    def test_a_stale_local_moving_tag_is_reported(self, env):
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=REMOTE_D,
+    def test_it_refuses_a_commit_with_a_failing_check_run(self, env):
+        result, calls = run(
+            env, "sha-new", **CI_ON, STUB_CHECKRUNS=RED_CHECKRUNS
         )
-        assert result.returncode == 0
-        assert "STALE" in result.stdout, (
-            "the local :latest differs from the registry's and the operator was "
-            "not told; this is the 2026-07-28 deploy verbatim"
+        assert result.returncode != 0
+        assert "FAILING" in result.stderr
+        assert "compose up" not in " ".join(calls), "deployed a red build anyway"
+
+    def test_it_refuses_while_ci_is_still_running(self, env):
+        """Absent conclusions are not passes — that is the fail-open shape."""
+        result, calls = run(
+            env, "sha-new", **CI_ON, STUB_CHECKRUNS=RUNNING_CHECKRUNS
         )
+        assert result.returncode != 0
+        assert "still running" in result.stderr
+        assert "compose up" not in " ".join(calls)
 
-    def test_the_pull_command_names_the_moving_tag_not_the_target(self, env):
-        """The discriminating case, and the easy thing to get wrong.
+    def test_it_refuses_while_ci_is_merely_queued(self, env):
+        result, _ = run(env, "sha-new", **CI_ON, STUB_CHECKRUNS=QUEUED_CHECKRUNS)
+        assert result.returncode != 0
 
-        Pulling `:sha-new` fetches the right image but leaves the `:latest` tag
-        pointing at the old one — and `:latest` is what the template
-        references, so the recreate still comes up on the stale image. Only a
-        pull of the moving tag itself moves that pointer.
-        """
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=REMOTE_D,
-        )
-        assert f"docker pull {IMAGE_REPO}:latest" in result.stdout
-        assert f"pull {IMAGE_REPO}:sha-new" not in result.stdout, (
-            "pulling the sha tag does not move :latest, so it would not fix "
-            "the very failure being reported"
-        )
+    def test_a_green_commit_passes_the_gate(self, env):
+        """The other half: a gate that refuses everything is also broken."""
+        result, calls = run(env, "sha-new", **CI_ON)
+        assert result.returncode == 0, result.stderr
+        assert "no failing check runs" in result.stdout
+        assert "compose up" in " ".join(calls)
 
-    def test_a_local_copy_matching_the_registry_is_not_called_stale(self, env):
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=REMOTE_D,
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=REMOTE_D,
-        )
-        assert result.returncode == 0
-        assert "STALE" not in result.stdout
-        assert "up to date" in result.stdout
-
-    def test_it_reports_when_the_moving_tag_is_not_the_target_commit(self, env):
-        """A separate failure with the same ending.
-
-        The local copy can be a perfect match for the registry's `:latest`
-        while `:latest` has not yet been moved to the commit you asked for —
-        release published, pointer not yet updated, or the target is a trunk
-        build that will never be on `:latest`. Applying then deploys something
-        other than the commit whose CI you just checked.
-        """
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=REMOTE_D,
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=OTHER_D,
-        )
-        assert result.returncode == 0
-        assert "does NOT" in result.stdout, (
-            "latest resolves to a different image than the requested commit "
-            "and nothing said so"
-        )
-
-    def test_an_immutable_sha_pin_is_not_checked_for_drift(self, env):
-        """`sha-` tags are immutable, so local and registry cannot disagree.
-
-        Reporting a comparison here would be noise at best; claiming staleness
-        would be wrong. The default fixture runs `:sha-old`, so this also
-        covers the Compose path, which pins a sha on every deploy.
-        """
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **TEMPLATE,
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-        )
-        assert result.returncode == 0
-        assert "STALE" not in result.stdout
-        assert "immutable" in result.stdout
-
-    def test_it_never_pulls(self, env):
-        """Preflight's mutate-nothing contract is why it ships untested against
-        the real box. A pull is not a recreate, but it does change what the next
-        recreate runs, so it stays the operator's call."""
-        _, calls = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-        )
-        assert not [c for c in calls if c.startswith("pull ")]
-
-    def test_no_registry_reachable_degrades_to_a_warning(self, env):
-        """Same posture as the CI gate: unverified is reported, never fatal.
-
-        With no STUB_REMOTE_* set the stub registry has nothing, which is what
-        no network looks like from here.
-        """
-        result, _ = run(
-            env, "--preflight", "sha-new", **MOVING, STUB_LOCAL_DIGEST=LOCAL_D
-        )
+    def test_an_unreachable_api_warns_rather_than_refusing(self, env):
+        """Deliberate: the box may have no egress, and a deploy blocked by a
+        network hiccup is worse than one that says the status is unverified."""
+        result, _ = run(env, "sha-new", **CI_ON, STUB_CURL_FAIL="1")
         assert result.returncode == 0
         assert "UNVERIFIED" in result.stdout
-        assert "STALE" not in result.stdout, (
-            "a failed lookup must not be read as a mismatch"
-        )
 
-    def test_an_absent_local_copy_is_not_stale(self, env):
-        """Nothing cached means the recreate must pull, so there is no hazard."""
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST="",
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=REMOTE_D,
-        )
-        assert result.returncode == 0
-        assert "STALE" not in result.stdout
-        assert "not present locally" in result.stdout
+    def test_the_skip_flag_bypasses_it(self, env):
+        result, _ = run(env, "sha-new", STUB_CHECKRUNS=RED_CHECKRUNS)
+        assert result.returncode == 0, "SKIP_CI_CHECK=1 should deploy anyway"
 
-    def test_the_check_can_be_skipped(self, env):
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            GUDBUS_SKIP_FRESHNESS_CHECK="1",
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-        )
-        assert result.returncode == 0
-        assert "Image freshness" not in result.stdout
+    def test_it_reads_the_commit_out_of_the_tag(self, env):
+        """`sha-` prefix stripped, or every lookup 404s and reads as unverified."""
+        _, _ = run(env, "sha-abc1234", **CI_ON)
+        calls = env["curl_log"].read_text(encoding="utf-8")
+        assert "/commits/abc1234/check-runs" in calls
+        assert "sha-abc1234/check-runs" not in calls
 
-    def test_a_stale_pointer_makes_the_apply_instructions_say_pull_first(self, env):
-        """The report is only useful if it lands where the operator is looking.
 
-        The closing instructions are what gets read and acted on, so a stale
-        pointer has to change them, not just add a paragraph further up.
+class TestReleaseChannel:
+    """Which branch a `sha-` tag came from. Reports, never refuses.
+
+    Both `main` and `dev` publish `sha-` tags, so the tag alone does not say
+    whether you are about to put a release or a trunk build on the box.
+    """
+
+    def test_an_ancestor_of_main_reads_as_a_release(self, env):
+        result, _ = run(env, "sha-new", **CI_ON, STUB_COMPARE=COMPARE_RELEASE)
+        assert "RELEASE" in result.stdout
+
+    def test_a_trunk_build_reads_as_a_nightly(self, env):
+        """The regression guard for the greedy-parse bug.
+
+        The comparison's files[] entries each carry their own "status", so a
+        greedy match takes the LAST one — `"modified"` — and falls through to
+        the warning branch or, worse, matches nothing and reads as a release.
+        The parse is anchored on the adjacent "ahead_by" key for this reason.
+        It looked correct on every release tag it was tried against, because a
+        release comparison has an empty files[].
         """
-        result, _ = run(
-            env,
-            "--preflight",
-            "sha-new",
-            **MOVING,
-            STUB_LOCAL_DIGEST=LOCAL_D,
-            STUB_REMOTE_latest=REMOTE_D,
-            STUB_REMOTE_sha_new=REMOTE_D,
+        result, _ = run(env, "sha-new", **CI_ON, STUB_COMPARE=COMPARE_NIGHTLY)
+        assert "NIGHTLY" in result.stdout, (
+            "read a trunk build as a release; the files[] status keys won"
         )
-        tail = result.stdout.split("Preflight complete")[-1]
-        assert "pull" in tail, (
-            "the apply instructions still read as though a bare Apply is enough"
-        )
+        assert "RELEASE" not in result.stdout
+
+    def test_an_unreadable_comparison_says_so(self, env):
+        result, _ = run(env, "sha-new", **CI_ON, STUB_COMPARE='{"unexpected":true}')
+        assert result.returncode == 0
+        assert "could not read the channel" in result.stdout
 
 
 class TestContainerName:

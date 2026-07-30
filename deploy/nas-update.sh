@@ -18,14 +18,13 @@
 #   GUDBUS_IMAGE_REPO    registry repo to prune within (never anything else)
 #   GUDBUS_KEEP_IMAGES   old images to keep besides the running one (default 1)
 #   GUDBUS_KEEP_BACKUPS  in-volume DB backups to keep (default 7)
-#   GUDBUS_SKIP_FRESHNESS_CHECK=1  skip the local-vs-registry digest comparison
 #   GUDBUS_CURL          curl binary to use (default: whatever is on PATH)
 #
-# GUDBUS_CURL exists because PATH is not a reliable seam for the tests: Git Bash
-# on Windows prepends its own bin directory ahead of anything the caller
-# prepended, so a stub `curl` placed on PATH was silently ignored and the suite
-# made real calls to ghcr.io instead. It doubles as a genuine knob for a host
-# where curl is not on the default PATH.
+# GUDBUS_CURL is how the tests drive the CI gate below without a network, and
+# a genuine knob for a host where curl is not on the default PATH. Named
+# explicitly rather than shadowed on PATH: Git Bash on Windows prepends its own
+# bin directory ahead of anything the caller prepended, so a stub `curl` placed
+# on PATH was ignored and the suite made real calls out instead.
 #
 # Pass --no-prune to keep every old image and backup.
 #
@@ -58,42 +57,6 @@ CURL=${GUDBUS_CURL:-curl}
 
 die() { printf '\nFAILED: %s\n' "$1" >&2; exit 1; }
 step() { printf '\n== %s\n' "$1"; }
-
-# What a tag resolves to in the registry right now, without pulling it.
-#
-# A HEAD on the manifest returns Docker-Content-Digest, which is the same
-# digest `docker pull <tag>` records in the image's RepoDigests — so the two
-# are directly comparable, which is the whole basis of the freshness check
-# below. GHCR requires a bearer token even for public packages; its token
-# endpoint issues one anonymously for a pull scope.
-#
-# One Accept header listing every media type rather than several headers: a
-# registry is entitled to honour only the first, and a multi-arch image
-# answered as a single-platform manifest would return a digest that compares
-# unequal to the locally pulled one for no real reason.
-registry_digest() {
-  _host=${IMAGE_REPO%%/*}
-  _path=${IMAGE_REPO#*/}
-  _tok=$("$CURL" -fsSL "https://$_host/token?scope=repository:$_path:pull&service=$_host" 2>/dev/null \
-         | tr -d ' \n' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p') || true
-  [ -n "${_tok:-}" ] || return 1
-  _dig=$("$CURL" -fsSL -I -H "Authorization: Bearer $_tok" \
-           -H 'Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.docker.distribution.manifest.v2+json' \
-           "https://$_host/v2/$_path/manifests/$1" 2>/dev/null \
-         | tr -d '\r' | sed -n 's/^[Dd]ocker-[Cc]ontent-[Dd]igest: *//p' | head -1) || true
-  [ -n "${_dig:-}" ] || return 1
-  printf '%s' "$_dig"
-}
-
-# The digest the local copy of a reference was pulled under. Empty when the tag
-# is not in the local image store at all, or when the image was built here
-# rather than pulled — both mean there is no stale cached copy to worry about.
-local_digest() {
-  docker inspect -f '{{range .RepoDigests}}{{println .}}{{end}}' "$1" 2>/dev/null \
-    | sed -n 's/.*@//p' | head -1
-}
-
-short_digest() { printf '%s' "$1" | cut -c1-24; }
 
 DRY_RUN=0
 PRUNE=1
@@ -345,89 +308,6 @@ Re-run with GUDBUS_SKIP_CI_CHECK=1 only if you know why it is red."
   fi
 fi
 
-# ------------------------------------------------------- image freshness
-# Production tracks `:latest`, a MOVING tag, and an unRAID template "Apply"
-# recreates the container without pulling — so it comes up on whatever copy of
-# that tag is already in the local image store. That is a deploy which looks
-# entirely successful and is running the previous release. It happened on
-# 2026-07-28: new container, healthy, clean logs, the 18th extension absent and
-# the command sync reporting `Command set unchanged`.
-#
-# Two failures end the same way and need saying separately:
-#
-#   the local copy of the moving tag is behind the registry  -> pull, then apply
-#   the moving tag does not point at the commit you asked for -> apply nothing
-#
-# Reports, never refuses, and pulls nothing. Preflight's entire basis for being
-# safe to ship without a test against someone else's production box is that it
-# mutates nothing, and a pull changes what the next recreate will run.
-STALE_POINTER=0
-if [ "${GUDBUS_SKIP_FRESHNESS_CHECK:-0}" != "1" ]; then
-  step "Image freshness"
-
-  # Split the running reference into repo and tag. Done on the segment after
-  # the last slash so a registry host carrying a port (host:5000/repo) is not
-  # mistaken for a tag.
-  AFTER_SLASH=${CURRENT_IMAGE##*/}
-  case "$AFTER_SLASH" in
-    *:*) RUN_TAG=${AFTER_SLASH##*:}; RUN_REF=$CURRENT_IMAGE ;;
-    *)   RUN_TAG=latest;             RUN_REF="$CURRENT_IMAGE:latest" ;;
-  esac
-
-  case "$CURRENT_IMAGE" in
-    *@sha256:*)
-      printf '  running a digest pin — immutable, so a recreate cannot drift\n'
-      ;;
-    *)
-      case "$RUN_TAG" in
-        sha-*)
-          printf '  running :%s — an immutable tag, so a recreate cannot drift\n' "$RUN_TAG"
-          ;;
-        *)
-          printf '  running   : :%s (MOVING — a recreate reuses the local copy)\n' "$RUN_TAG"
-          LOCAL_DIG=$(local_digest "$RUN_REF") || true
-          REMOTE_DIG=$(registry_digest "$RUN_TAG" || true)
-          TARGET_DIG=$(registry_digest "$TAG" || true)
-
-          if [ -z "${LOCAL_DIG:-}" ]; then
-            printf '  local     : not present locally — the recreate must pull it\n'
-          elif [ -z "${REMOTE_DIG:-}" ]; then
-            printf '  local     : %s\n' "$(short_digest "$LOCAL_DIG")"
-            printf '  WARNING: could not reach the registry; freshness UNVERIFIED\n'
-          else
-            printf '  local     : %s\n  registry  : %s\n' \
-              "$(short_digest "$LOCAL_DIG")" "$(short_digest "$REMOTE_DIG")"
-            if [ "$LOCAL_DIG" = "$REMOTE_DIG" ]; then
-              printf '  the cached :%s is up to date\n' "$RUN_TAG"
-            else
-              STALE_POINTER=1
-              printf '  ⚠ STALE — the cached :%s is NOT what the registry serves.\n' "$RUN_TAG"
-              printf '    Applying now recreates the container on the OLD image and\n'
-              printf '    looks like a successful deploy. Pull the moving tag first —\n'
-              printf '    pulling the sha- tag instead fetches the right image but\n'
-              printf '    leaves :%s pointing at the old one:\n\n' "$RUN_TAG"
-              printf '        docker pull %s\n' "$RUN_REF"
-            fi
-          fi
-
-          # Separate question: does that moving tag carry the commit asked for?
-          if [ -n "${TARGET_DIG:-}" ] && [ -n "${REMOTE_DIG:-}" ]; then
-            if [ "$TARGET_DIG" = "$REMOTE_DIG" ]; then
-              printf '  :%s carries %s\n' "$RUN_TAG" "$TAG"
-            else
-              printf '\n  ⚠ :%s does NOT carry %s — it resolves to %s.\n' \
-                "$RUN_TAG" "$TAG" "$(short_digest "$REMOTE_DIG")"
-              printf '    Applying would deploy something other than the commit\n'
-              printf '    whose CI was just checked. Either wait for the release to\n'
-              printf '    move the pointer, or pin %s explicitly.\n' "$TAG"
-            fi
-          fi
-          ;;
-      esac
-      ;;
-  esac
-fi
-
 if [ "$PREFLIGHT" = "1" ]; then
   if [ "${GUDBUS_SKIP_BACKUP:-0}" != "1" ] && [ "$DRY_RUN" != "1" ]; then
     step "Backing up the database"
@@ -450,14 +330,10 @@ src.backup(dst); dst.close(); src.close()
   printf '  The checks are done; the update itself is not this script'"'"'s to make\n'
   printf '  on a template-managed container. Apply it the way the box is\n'
   printf '  managed:\n\n'
-  if [ "$STALE_POINTER" = "1" ]; then
-    # The report above is only useful if it reaches the instructions the
-    # operator actually acts on. A bare Apply here is the failure, not the fix.
-    printf '    unRAID template : docker pull %s FIRST — Apply alone\n' "$RUN_REF"
-    printf '                      recreates on the stale cached image — then Apply\n'
-  else
-    printf '    unRAID template : set the tag in the container template, Apply\n'
-  fi
+  printf '    unRAID template : use Update, which pulls first; a bare Apply
+'
+  printf '                      recreates on the image already present locally
+'
   printf '    Compose project : re-run this script WITHOUT --preflight\n\n'
   printf '  Afterwards, confirm the box is actually where you think it is —\n'
   printf '  the running artifact, not the form that describes it:\n\n'

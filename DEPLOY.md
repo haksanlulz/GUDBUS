@@ -51,13 +51,14 @@ Releases carry **`linux/amd64` and `linux/arm64`**, so the ARM hosts above
 (Oracle A1, Raspberry Pi) can pull rather than build. `docker pull` picks the
 right one; nothing to specify.
 
-⚠️ **`:latest` and `:nightly` are moving tags, and recreating a container does
-not pull.** Whatever "restart" or "recreate" button your host gives you rebuilds
-the container on the copy of that tag already in the local image store, so a
-release published after your last pull is simply not there. The container comes
-up healthy, the logs are clean, and you are running the previous version — that
-happened here on 2026-07-28, and the only tell was a missing extension and a
-command sync reporting no change. Pull first, then recreate:
+⚠️ **`:latest` and `:nightly` are moving tags, and *recreating* a container is
+not the same as *updating* it.** A plain restart or recreate rebuilds the
+container on the copy of that tag already in your local image store, so a release
+published since your last pull simply is not there and the container comes up
+healthy on the previous version. Most host UIs have a distinct "update" action
+that pulls first — unRAID's does — so this bites the hand-rolled `docker run`
+and `docker compose up` paths rather than the button. Pull explicitly if you are
+not certain which you just did:
 
 ```sh
 docker pull ghcr.io/haksanlulz/gudbus:latest
@@ -65,9 +66,15 @@ docker pull ghcr.io/haksanlulz/gudbus:latest
 
 Pulling `:sha-<commit>` instead does **not** help: it fetches the right image
 but leaves `:latest` pointing at the old one, and `:latest` is what your
-container references. `deploy/nas-update.sh --preflight <tag>` compares your
-local copy against the registry and says which case you are in. Pinning a
-`:sha-` tag avoids the whole question, since those never move.
+container references. Pinning a `:sha-` tag avoids the whole question, since
+those never move — and confirms itself afterwards:
+
+```sh
+docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' <container>
+```
+
+That reads the running artifact rather than the form that describes it, which is
+the only version that can tell you a deploy actually took.
 
 Trunk is amd64 only, deliberately: arm64 is emulated on the build runner and
 roughly doubles it, and nothing pulls an arm64 nightly — the ARM advice is for
