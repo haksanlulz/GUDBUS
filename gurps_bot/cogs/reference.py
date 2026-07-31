@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 
 _REF_COLOR = discord.Color.dark_teal()
 
-_FOOTER = "GURPS facts per SJG Online Policy - see /legal"
+_FOOTER = "GURPS facts per SJG Online Policy — see /legal"
 
 _NOT_SYNCED = (
     "Reference data is not synced yet — run `tools/sync_gcs_library.py` to vendor "
@@ -371,35 +371,35 @@ class ReferenceCog(commands.Cog):
         embed = _BUILDERS[command](entry)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="skill", description="Look Up a GURPS Skill (Facts + Page Cite)")
+    @app_commands.command(name="skill", description="Look up a GURPS skill (facts + page cite)")
     @app_commands.describe(name="Skill name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
     async def skill(self, interaction: discord.Interaction, name: str) -> None:
         await self._lookup(interaction, "skill", name)
 
-    @app_commands.command(name="trait", description="Look Up a GURPS Advantage or Disadvantage")
+    @app_commands.command(name="trait", description="Look up a GURPS advantage or disadvantage")
     @app_commands.describe(name="Trait name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
     async def trait(self, interaction: discord.Interaction, name: str) -> None:
         await self._lookup(interaction, "trait", name)
 
-    @app_commands.command(name="spell", description="Look Up a GURPS Spell (Facts + Page Cite)")
+    @app_commands.command(name="spell", description="Look up a GURPS spell (facts + page cite)")
     @app_commands.describe(name="Spell name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
     async def spell(self, interaction: discord.Interaction, name: str) -> None:
         await self._lookup(interaction, "spell", name)
 
-    @app_commands.command(name="technique", description="Look Up a GURPS Technique (Facts + Page Cite)")
+    @app_commands.command(name="technique", description="Look up a GURPS technique (facts + page cite)")
     @app_commands.describe(name="Technique name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
     async def technique(self, interaction: discord.Interaction, name: str) -> None:
         await self._lookup(interaction, "technique", name)
 
-    @app_commands.command(name="item", description="Look Up GURPS Equipment (Facts + Page Cite)")
+    @app_commands.command(name="item", description="Look up GURPS equipment (facts + page cite)")
     @app_commands.describe(name="Equipment name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)

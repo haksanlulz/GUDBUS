@@ -85,7 +85,7 @@ class GMScreenCog(commands.Cog):
 
     @app_commands.command(
         name="screen",
-        description="GM Quick-Reference Screen — Paginated GURPS Tables",
+        description="GM quick-reference screen — paginated GURPS tables",
     )
     @app_commands.describe(category="Jump straight to a section (optional)")
     @app_commands.choices(category=_CATEGORY_CHOICES)
@@ -110,7 +110,7 @@ class GMScreenCog(commands.Cog):
 
     @app_commands.command(
         name="gm",
-        description="GM Dashboard — Live Timers, Combat, and Your Recent Study/Notes",
+        description="GM dashboard — live timers, combat, and your recent study and notes",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def gm(self, interaction: discord.Interaction) -> None:

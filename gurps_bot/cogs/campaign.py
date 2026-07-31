@@ -17,7 +17,7 @@ from gurps_bot.services.campaign import get_campaign_rules, set_rule_of_14
 log = logging.getLogger(__name__)
 
 _COLOR = discord.Color.dark_teal()
-_FOOTER = "GURPS facts per SJG Online Policy - see /legal"
+_FOOTER = "GURPS facts per SJG Online Policy — see /legal"
 
 
 def _rules_embed(rule_of_14: bool) -> discord.Embed:

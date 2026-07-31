@@ -31,7 +31,7 @@ class AdminCog(commands.Cog):
     # registration guild-scoped with the global set emptied, so one kick wiped
     # all commands with no in-Discord way back (2026-07-25 escape).
     @app_commands.command(
-        name="sync", description="Force a global slash-command re-register (Bot Owner Only)"
+        name="sync", description="Force a global slash-command re-register (bot owner only)"
     )
     async def sync_commands(self, interaction: discord.Interaction) -> None:
         if not await interaction.client.is_owner(interaction.user):
@@ -66,7 +66,7 @@ class AdminCog(commands.Cog):
         synced = await tree.sync()
         await ctx.reply(f"Synced {len(synced)} commands globally.")
 
-    @app_commands.command(name="status", description="Bot Status and Diagnostics")
+    @app_commands.command(name="status", description="Bot status and diagnostics")
     async def status(self, interaction: discord.Interaction) -> None:
         import sys
         from datetime import datetime, timezone

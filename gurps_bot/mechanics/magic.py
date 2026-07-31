@@ -113,7 +113,7 @@ def effective_spell_cost(
     high-skill reduction. ``blocking`` suppresses the reduction only (B236) —
     the size/area multiplier still applies."""
     if size_modifier > 0 and area_radius > 0:
-        raise ValueError("A spell is Regular (size_modifier) xor Area (area_radius), not both")
+        raise ValueError("Give size_modifier (Regular spell) or area_radius (Area spell), not both")
     if base_cost < 0:
         raise ValueError("base_cost must be non-negative")
     if area_radius < 0:
@@ -245,7 +245,7 @@ def ceremonial_energy(
     extra = total - spell_cost
     skill_bonus = _extra_energy_bonus(extra / spell_cost) if extra > 0 else 0
     note = (
-        "Ceremonial: casting time x10; high skill gives no cost/time reduction; "
+        "Ceremonial: casting time ×10; high skill gives no cost/time reduction; "
         "a roll of 16 always fails and 17-18 always critically fails."
     )
     return CeremonialResult(

@@ -55,11 +55,11 @@ class CalcCharacterCog(commands.Cog):
 
     @app_commands.command(
         name="encumbrance",
-        description="Basic Lift, Encumbrance Level, Effective Move and Dodge for a Carried Weight",
+        description="Basic Lift, encumbrance level, effective Move and Dodge for a carried weight",
     )
     @app_commands.describe(
         st="Strength (ST)",
-        basic_move="Basic Move (yards/turn)",
+        basic_move="Basic Move (yards/second)",
         basic_speed="Basic Speed",
         weight="Carried weight in pounds",
     )
@@ -89,7 +89,7 @@ class CalcCharacterCog(commands.Cog):
             value=f"**{result.level} — {result.level_name}**",
             inline=True,
         )
-        embed.add_field(name="X Move", value=f"{result.move_multiplier:g}", inline=True)
+        embed.add_field(name="Move Multiplier", value=f"×{result.move_multiplier:g}", inline=True)
         move_val = "0 (cannot move)" if result.overloaded else str(result.effective_move)
         embed.add_field(name="Effective Move", value=move_val, inline=True)
         embed.add_field(name="Dodge", value=str(result.dodge), inline=True)
@@ -97,7 +97,7 @@ class CalcCharacterCog(commands.Cog):
 
         threshold_lines = [
             f"`{t.level}` **{t.name}** ≤ {_fmt_weight(t.max_weight)} "
-            f"(x{t.move_multiplier:g} Move, −{t.dodge_penalty} Dodge)"
+            f"(×{t.move_multiplier:g} Move, -{t.dodge_penalty} Dodge)"
             for t in thresholds
         ]
         embed.add_field(name="Bands", value="\n".join(threshold_lines), inline=False)
@@ -106,7 +106,7 @@ class CalcCharacterCog(commands.Cog):
 
     @app_commands.command(
         name="lifting",
-        description="One/Two-Handed, Overhead, Shove and Drag Capacities for a Strength Score",
+        description="One/two-handed lift, overhead, shove, and drag capacities from ST",
     )
     @app_commands.describe(st="Strength (ST)")
     @app_commands.checks.cooldown(2, 5.0)
@@ -139,9 +139,9 @@ class CalcCharacterCog(commands.Cog):
         embed.set_footer(text="B353")
         await interaction.response.send_message(embed=embed)
 
-    reaction = app_commands.Group(name="reaction", description="GURPS Reaction-Roll Helpers (B560)")
+    reaction = app_commands.Group(name="reaction", description="GURPS reaction-roll helpers (B560)")
 
-    @reaction.command(name="roll", description="Roll 3d + Modifier and Read the Reaction Band")
+    @reaction.command(name="roll", description="Roll 3d + modifier and read the reaction band")
     @app_commands.describe(modifier="Net reaction modifier (bonus + / penalty -)")
     @app_commands.checks.cooldown(2, 5.0)
     async def reaction_roll(self, interaction: discord.Interaction, modifier: int = 0) -> None:
@@ -166,7 +166,7 @@ class CalcCharacterCog(commands.Cog):
         embed.set_footer(text="B560")
         await interaction.response.send_message(embed=embed)
 
-    @reaction.command(name="band", description="Look up the Reaction Band for an Adjusted Total")
+    @reaction.command(name="band", description="Look up the reaction band for an adjusted total")
     @app_commands.describe(total="Adjusted reaction total (3d + modifiers, already summed)")
     @app_commands.checks.cooldown(2, 5.0)
     async def reaction_band(self, interaction: discord.Interaction, total: int) -> None:
@@ -190,7 +190,7 @@ class CalcCharacterCog(commands.Cog):
 
     @app_commands.command(
         name="ranged",
-        description="Combined Ranged-Attack to-Hit Modifier (Range + Speed + Size)",
+        description="Combined ranged-attack to-hit modifier (range + speed + size)",
     )
     @app_commands.describe(
         distance="Distance to target in yards",
@@ -211,19 +211,19 @@ class CalcCharacterCog(commands.Cog):
             await interaction.response.send_message(f"Invalid input: {e}", ephemeral=True)
             return
 
-        embed = discord.Embed(title="Ranged to-Hit Modifier", color=GREEN)
+        embed = discord.Embed(title="Ranged To-Hit Modifier", color=GREEN)
         embed.add_field(name="Speed/Range", value=f"{mod.speed_range_modifier:+d}", inline=True)
         embed.add_field(name="Size", value=f"{mod.size_modifier:+d}", inline=True)
         embed.add_field(name="Net Modifier", value=f"**{mod.total:+d}**", inline=False)
         embed.set_footer(
-            text=f"{mod.distance_yards:g}yd • size {mod.target_size_yards:g}yd "
-            f"• {mod.target_speed_yards_per_second:g}yd/s • B550"
+            text=f"{mod.distance_yards:g} yd • size {mod.target_size_yards:g} yd "
+            f"• {mod.target_speed_yards_per_second:g} yd/s • B550"
         )
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(
         name="range",
-        description="Speed/Range Table Penalty for a Distance in Yards",
+        description="Speed/Range Table penalty for a distance in yards",
     )
     @app_commands.describe(yards="Distance in yards")
     @app_commands.checks.cooldown(2, 5.0)
@@ -241,7 +241,7 @@ class CalcCharacterCog(commands.Cog):
 
     @app_commands.command(
         name="size",
-        description="Size Modifier (SM) for an Object's Longest Dimension in Yards",
+        description="Size Modifier (SM) for an object's longest dimension in yards",
     )
     @app_commands.describe(longest_dimension="Longest dimension in yards")
     @app_commands.checks.cooldown(2, 5.0)

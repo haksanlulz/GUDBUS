@@ -119,9 +119,9 @@ def move_label(p: Posture) -> str:
     if fraction <= 0.0:
         return "none (cannot move)"
     if abs(fraction - 2 / 3) < 1e-6:
-        return "x2/3"
+        return "×2/3"
     if abs(fraction - 1 / 3) < 1e-6:
-        return "x1/3"
+        return "×1/3"
     return f"x{fraction:.2g}"
 
 

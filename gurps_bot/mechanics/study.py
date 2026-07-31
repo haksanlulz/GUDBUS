@@ -33,7 +33,7 @@ class StudyProgress:
 def _reject_nan(value: float, label: str) -> None:
     """Raise ValueError if value is NaN (NaN slips past >= 0 comparisons)."""
     if isinstance(value, float) and math.isnan(value):
-        raise ValueError(f"{label} must not be NaN")
+        raise ValueError(f"{label} must be a finite number")
 
 
 def study_multiplier(method: str, gm_multiplier: float | None = None) -> float:

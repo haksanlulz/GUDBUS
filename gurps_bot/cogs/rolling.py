@@ -163,10 +163,10 @@ class RollingCog(commands.Cog):
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="roll", description="Roll Dice (e.g. 3d6, 2d+1, 4d6+3)")
+    @app_commands.command(name="roll", description="Roll dice (e.g. 3d6, 2d+1, 4d6+3)")
     @app_commands.describe(
         dice="Dice expression (e.g. 3d6, 2d+1, 1d-2)",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def roll_dice(
@@ -182,11 +182,11 @@ class RollingCog(commands.Cog):
         embed = embeds.roll_embed(result)
         await interaction.response.send_message(embed=embed, ephemeral=hidden)
 
-    @app_commands.command(name="check", description="Roll 3d6 vs a Skill or Attribute")
+    @app_commands.command(name="check", description="Roll 3d6 vs a skill or attribute")
     @app_commands.describe(
         target="Skill or attribute name (or raw number)",
         modifier="Bonus (+) or penalty (-) to the roll",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     @app_commands.autocomplete(target=_skill_attr_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)
@@ -207,13 +207,13 @@ class RollingCog(commands.Cog):
         embed = embeds.check_embed(result, label)
         await interaction.response.send_message(embed=embed, ephemeral=hidden)
 
-    @app_commands.command(name="contest", description="Quick Contest Between Two Targets")
+    @app_commands.command(name="contest", description="Quick Contest between two targets")
     @app_commands.describe(
         target_a="First side's target number or skill name",
         target_b="Second side's target number or skill name",
         label_a="Label for first side",
         label_b="Label for second side",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     @app_commands.autocomplete(target_a=_skill_attr_autocomplete, target_b=_skill_attr_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)
@@ -249,8 +249,8 @@ class RollingCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     @app_commands.command(name="fright-check", description="Roll a Fright Check")
     @app_commands.describe(
-        modifier="Bonus or penalty to the fright check",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        modifier="Bonus or penalty to the Fright Check",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     async def fright_check(
         self,
@@ -327,14 +327,14 @@ class RollingCog(commands.Cog):
         embed = embeds.fright_check_embed(result, effect, label=label)
         await interaction.response.send_message(embed=embed, ephemeral=hidden)
 
-    @app_commands.command(name="damage", description="Roll Damage Dice With Type")
+    @app_commands.command(name="damage", description="Roll damage dice with a damage type")
     @app_commands.describe(
         dice="Damage dice (e.g. 2d+1)",
         damage_type="Damage type (cr, cut, imp, pi, burn, etc.)",
         dr="Damage resistance to subtract",
         location="Hit location for wounding modifier",
         injury_tolerance="Target's Injury Tolerance, if any (B380): machines, undead, swarms",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     @app_commands.choices(
         damage_type=DAMAGE_TYPE_CHOICES,

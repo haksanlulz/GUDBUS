@@ -148,5 +148,5 @@ def _resolve_divisor(environment: str) -> int:
     except KeyError:
         valid = ", ".join(sorted(_ENVIRONMENT_DIVISORS))
         raise ValueError(
-            f"unknown environment {environment!r}; expected one of: {valid}"
+            f"Unknown environment {environment!r}; expected one of: {valid}"
         ) from None

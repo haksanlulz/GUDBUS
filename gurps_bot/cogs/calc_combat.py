@@ -29,8 +29,8 @@ _PHYSICS = discord.Color.dark_orange()
 _RED = discord.Color.red()
 
 _SURFACE_CHOICES = [
-    app_commands.Choice(name="Hard (2x HP)", value="hard"),
-    app_commands.Choice(name="Soft (1x HP)", value="soft"),
+    app_commands.Choice(name="Hard (2× HP)", value="hard"),
+    app_commands.Choice(name="Soft (1× HP)", value="soft"),
 ]
 
 _ANGLE_CHOICES = [
@@ -92,16 +92,16 @@ class CalcCombatCog(commands.Cog):
 
     calc = app_commands.Group(
         name="calc",
-        description="Combat-Physics Calculators (Fall, Collision, Explosion, Knockback)",
+        description="Combat-physics calculators (fall, collision, explosion, knockback)",
     )
 
-    @calc.command(name="fall", description="Falling Damage From a Height (B431)")
+    @calc.command(name="fall", description="Falling damage from a height (B431)")
     @app_commands.describe(
-        height="Distance fallen (number)",
+        height="Distance fallen, in the unit chosen below",
         unit="Whether height is in yards or feet",
         hp="Faller's HP (drives the damage dice)",
         dr="Damage Resistance subtracted if rolling",
-        surface="Hard ground (2x HP) or soft (1x HP)",
+        surface="Hard ground (2× HP) or soft (1× HP)",
         gravity="Local gravity in Gs (Earth = 1)",
         catfall="Faller has the Catfall advantage (B41)",
         acrobatics="A successful Acrobatics roll was made (controlled fall)",
@@ -168,7 +168,7 @@ class CalcCombatCog(commands.Cog):
         )
         embed.add_field(
             name="Surface",
-            value=f"{result.surface} (x{result.hp_multiplier} HP)",
+            value=f"{result.surface} (×{result.hp_multiplier} HP)",
             inline=True,
         )
         embed.add_field(
@@ -178,9 +178,9 @@ class CalcCombatCog(commands.Cog):
         )
         flags = []
         if result.has_catfall:
-            flags.append("Catfall (½ dmg)")
+            flags.append("Catfall (½ damage)")
         if result.acrobatics_success:
-            flags.append("Acrobatics (−5 yd)")
+            flags.append("Acrobatics (-5 yd)")
         if flags:
             embed.add_field(name="Modifiers", value=", ".join(flags), inline=False)
 
@@ -200,7 +200,7 @@ class CalcCombatCog(commands.Cog):
 
     @calc.command(
         name="collision",
-        description="Two-Body Collision / Vehicle Slam Damage (B430)",
+        description="Two-body collision / vehicle slam damage (B430)",
     )
     @app_commands.describe(
         striker_hp="Striking body's HP",
@@ -282,12 +282,12 @@ class CalcCombatCog(commands.Cog):
 
     @calc.command(
         name="explosion",
-        description="Concussion Falloff + Fragmentation Danger Radius (B414)",
+        description="Concussion falloff + fragmentation danger radius (B414)",
     )
     @app_commands.describe(
         basic_damage="Pre-rolled basic explosion damage (roll the dice yourself)",
         distances="Yards from center to evaluate, e.g. '0 2 5 10'",
-        frag_dice="Fragmentation dice COUNT (the N in [Nd]); omit if none",
+        frag_dice="Fragmentation dice count — the N in [Nd]; omit if none",
         environment="Medium (sets the per-yard concussion divisor)",
     )
     @app_commands.choices(environment=_ENVIRONMENT_CHOICES)
@@ -325,7 +325,7 @@ class CalcCombatCog(commands.Cog):
             return
 
         embed = discord.Embed(
-            title=f"Explosion — {basic_damage} Basic Dmg",
+            title=f"Explosion — {basic_damage} Basic Damage",
             description=f"Environment: {result.environment}",
             color=_RED,
         )
@@ -369,11 +369,11 @@ class CalcCombatCog(commands.Cog):
 
     @calc.command(
         name="knockback",
-        description="Knockback Distance + Fall-Check Trigger (B378)",
+        description="Knockback distance + fall-check trigger (B378)",
     )
     @app_commands.describe(
         basic_damage="Pre-DR damage roll total (sum of dice before DR)",
-        damage_type="Damage type (only cr, or cut that fails to penetrate, knocks back)",
+        damage_type="Damage type — only crushing knocks back (or cutting that fails to penetrate DR)",
         target_st="Target's ST (or the object's HP for a non-resisting object)",
         penetrated_dr="Did the damage penetrate DR? (only matters for cutting)",
         double_knockback="Double Knockback enhancement (halves the denominator)",
@@ -425,7 +425,7 @@ class CalcCombatCog(commands.Cog):
 
         embed.add_field(name="Distance", value=f"**{result.yards}** yd", inline=True)
         embed.add_field(
-            name="Per",
+            name="Rate",
             value=f"{result.effective_denom} pt/yd",
             inline=True,
         )

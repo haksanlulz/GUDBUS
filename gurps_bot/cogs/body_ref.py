@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 _POSTURE_COLOR = discord.Color.dark_red()
 _TARGET_COLOR = discord.Color.dark_red()
-_FOOTER = "GURPS facts per SJG Online Policy - see /legal"
+_FOOTER = "GURPS facts per SJG Online Policy — see /legal"
 
 # both lists sit under discord's 25-choice cap
 _POSTURE_CHOICES = [
@@ -48,7 +48,7 @@ def build_posture_embed(name: str) -> discord.Embed:
         e.set_footer(text=_FOOTER)
         return e
 
-    e = discord.Embed(title=f"Posture - {p.name} (B551)", color=_POSTURE_COLOR)
+    e = discord.Embed(title=f"Posture — {p.name} (B551)", color=_POSTURE_COLOR)
     e.add_field(name="Your melee attack", value=f"{p.attack_penalty:+d}", inline=True)
     e.add_field(name="Your active defense", value=f"{p.defense_modifier:+d}", inline=True)
     e.add_field(name="Your Move", value=move_label(p), inline=True)
@@ -78,7 +78,7 @@ def build_target_embed(name: str) -> discord.Embed:
         return e
 
     cite = loc.source or "B552"
-    e = discord.Embed(title=f"Targeting - {loc.name} ({cite})", color=_TARGET_COLOR)
+    e = discord.Embed(title=f"Targeting — {loc.name} ({cite})", color=_TARGET_COLOR)
     e.add_field(name="To-hit penalty", value=str(loc.penalty), inline=True)
     kind = "Deliberate only" if loc.deliberate_only else "Also on random table"
     e.add_field(name="Availability", value=kind, inline=True)
@@ -86,7 +86,7 @@ def build_target_embed(name: str) -> discord.Embed:
         # a GM whose table runs Basic Set only needs to see this before ruling
         e.add_field(
             name="Source",
-            value=f"Optional - {loc.source}, not the Basic Set.",
+            value=f"Optional — {loc.source}, not the Basic Set.",
             inline=False,
         )
     e.add_field(name="Effect", value=loc.effect, inline=False)
@@ -102,7 +102,7 @@ class BodyRefCog(commands.Cog):
 
     @app_commands.command(
         name="posture",
-        description="Look Up a GURPS Posture's Combat Modifiers (B551)",
+        description="Look up a GURPS posture's combat modifiers (B551)",
     )
     @app_commands.describe(name="Which posture")
     @app_commands.choices(name=_POSTURE_CHOICES)
@@ -114,7 +114,7 @@ class BodyRefCog(commands.Cog):
 
     @app_commands.command(
         name="target",
-        description="Look Up a Deliberate Hit Location's Penalty + Effect (B552)",
+        description="Look up a deliberate hit location's penalty + effect (B552)",
     )
     @app_commands.describe(location="Which deliberate hit location")
     @app_commands.choices(location=_TARGET_CHOICES)

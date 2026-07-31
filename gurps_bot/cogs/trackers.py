@@ -82,9 +82,17 @@ def _cap_desc(text: str) -> str:
         return text
     return text[: EMBED_DESC_LIMIT - 40] + "\n*…truncated*"
 
-# no 'adventuring' choice — it's GM-set per session and needs a multiplier arg
+# no 'adventuring' choice — it's GM-set per session and needs a multiplier arg.
+# B292's own names where .title() mangles them ("On The Job", bare "Intensive")
+_METHOD_DISPLAY = {
+    "self_teaching": "Self-Teaching",
+    "on_the_job": "On the Job",
+    "intensive": "Intensive Training",
+}
 STUDY_METHOD_CHOICES = [
-    app_commands.Choice(name=key.replace("_", " ").title(), value=key)
+    app_commands.Choice(
+        name=_METHOD_DISPLAY.get(key, key.replace("_", " ").title()), value=key
+    )
     for key in METHOD_MULTIPLIERS
 ]
 
@@ -144,10 +152,10 @@ class StudyCog(commands.Cog):
         self.bot = bot
 
     study_group = app_commands.Group(
-        name="study", description="Log Training Time and Track Skill Learning-Hours"
+        name="study", description="Log training time and track skill learning-hours"
     )
 
-    @study_group.command(name="log", description="Log a Study Session Toward a Skill")
+    @study_group.command(name="log", description="Log a study session toward a skill")
     @app_commands.describe(
         skill="Skill being studied (free text — need not be on your sheet)",
         method="Study method (sets the real→learning-hour rate)",
@@ -199,8 +207,8 @@ class StudyCog(commands.Cog):
             name="Real Hours", value=_fmt_hours(row.real_hours), inline=True
         )
         embed.add_field(
-            name="Learning Hours +",
-            value=_fmt_hours(row.learning_hours),
+            name="Learning Hours Gained",
+            value=f"+{_fmt_hours(row.learning_hours)}",
             inline=True,
         )
         embed.add_field(
@@ -221,7 +229,7 @@ class StudyCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @study_group.command(
-        name="progress", description="Show Learning-Hour Progress for a Skill"
+        name="progress", description="Show learning-hour progress for a skill"
     )
     @app_commands.describe(
         skill="Skill to report on",
@@ -269,7 +277,7 @@ class StudyCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @study_group.command(
-        name="list", description="List Your Recent Study Sessions"
+        name="list", description="List your recent study sessions"
     )
     @app_commands.describe(
         skill="Optional: only sessions for this skill",
@@ -317,7 +325,7 @@ class StudyCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @study_group.command(
-        name="reset", description="Delete All Study Sessions for One Skill"
+        name="reset", description="Delete all study sessions for one skill"
     )
     @app_commands.describe(
         skill="Skill whose study log to wipe",
@@ -344,7 +352,7 @@ class StudyCog(commands.Cog):
         embed = discord.Embed(
             title=_cap_title(f"Reset {skill}"),
             description=(
-                f"Deleted **{deleted}** study session(s)."
+                f"Deleted **{deleted}** study session{'' if deleted == 1 else 's'}."
                 if deleted
                 else "*No matching sessions — nothing to delete.*"
             ),
@@ -361,13 +369,13 @@ class NotesCog(commands.Cog):
         self.bot = bot
 
     notes_group = app_commands.Group(
-        name="notes", description="Campaign, Session, and GM Notes",
+        name="notes", description="Campaign, session, and GM notes",
         # guild_only: a DM has guild_id None, which would disable the scope
         # filter and leak every user's non-secret notes across guilds
         guild_only=True,
     )
 
-    @notes_group.command(name="add", description="Add a Note")
+    @notes_group.command(name="add", description="Add a note")
     @app_commands.describe(
         title="Short note title",
         body="Note body text",
@@ -432,7 +440,7 @@ class NotesCog(commands.Cog):
         embed.set_footer(text="Use /notes list or /notes search to find it again.")
         await interaction.response.send_message(embed=embed, ephemeral=secret)
 
-    @notes_group.command(name="list", description="List Notes Visible to You")
+    @notes_group.command(name="list", description="List notes visible to you")
     @app_commands.describe(
         tag="Optional: only notes carrying this tag",
         this_channel="Limit to notes filed in this channel",
@@ -466,7 +474,7 @@ class NotesCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     @notes_group.command(
-        name="search", description="Search Your Visible Notes (Title/Body/Tags)"
+        name="search", description="Search your visible notes (title, body, tags)"
     )
     @app_commands.describe(query="Substring to search for")
     @app_commands.checks.cooldown(2, 5.0)
@@ -490,7 +498,7 @@ class NotesCog(commands.Cog):
         embed = self._notes_list_embed(f'Search: "{query}"', notes)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @notes_group.command(name="edit", description="Edit One of Your Notes")
+    @notes_group.command(name="edit", description="Edit one of your notes")
     @app_commands.describe(
         note_id="ID of the note to edit (shown in /notes list)",
         title="New title (optional)",
@@ -545,7 +553,7 @@ class NotesCog(commands.Cog):
         embed.set_footer(text="Note updated.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @notes_group.command(name="delete", description="Delete One of Your Notes")
+    @notes_group.command(name="delete", description="Delete one of your notes")
     @app_commands.describe(note_id="ID of the note to delete")
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_delete(
@@ -603,7 +611,7 @@ class TimersCog(commands.Cog):
         self.bot = bot
 
     timer_group = app_commands.Group(
-        name="timer", description="Countdown Timers for Durations and Conditions",
+        name="timer", description="Countdown timers for durations and conditions",
         guild_only=True,  # timers are guild/channel-scoped; never usable in a DM
     )
 
@@ -614,7 +622,7 @@ class TimersCog(commands.Cog):
             return None
         return interaction.guild_id, interaction.channel_id
 
-    @timer_group.command(name="add", description="Start a Countdown Timer")
+    @timer_group.command(name="add", description="Start a countdown timer")
     @app_commands.describe(
         label="What the timer counts (e.g. Haste, Bleeding, Stunned)",
         duration="How many units the timer lasts",
@@ -680,7 +688,7 @@ class TimersCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @timer_group.command(
-        name="tick", description="Advance This Channel's Timers and Report Expirations"
+        name="tick", description="Advance this channel's timers and report expirations"
     )
     @app_commands.describe(
         unit="Which unit to advance (only timers of this unit tick)",
@@ -757,7 +765,7 @@ class TimersCog(commands.Cog):
             )
         await interaction.response.send_message(embed=embed)
 
-    @timer_group.command(name="list", description="List This Channel's Timers")
+    @timer_group.command(name="list", description="List this channel's timers")
     @app_commands.describe(
         target="Optional: only timers on this target",
         include_expired="Include already-expired timers (default true)",
@@ -808,7 +816,7 @@ class TimersCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @timer_group.command(
-        name="remove", description="Remove One Timer (or Clear All) in This Channel"
+        name="remove", description="Remove one timer (or clear all) in this channel"
     )
     @app_commands.describe(
         timer_id="ID of the timer to remove (omit to clear — see clear_all)",
@@ -841,7 +849,7 @@ class TimersCog(commands.Cog):
             scope_word = "expired " if expired_only else ""
             embed = discord.Embed(
                 title="Cleared Timers",
-                description=f"Removed **{count}** {scope_word}timer(s).",
+                description=f"Removed **{count}** {scope_word}timer{'' if count == 1 else 's'}.",
                 color=GREY,
             )
             await interaction.response.send_message(embed=embed)
@@ -876,10 +884,10 @@ class WealthCog(commands.Cog):
         self.bot = bot
 
     wealth_group = app_commands.Group(
-        name="wealth", description="Track Cash Balance and Status Cost-of-Living"
+        name="wealth", description="Track cash balance and Status cost of living"
     )
 
-    @wealth_group.command(name="show", description="Show Your Current Wallet")
+    @wealth_group.command(name="show", description="Show your current wallet")
     @app_commands.describe(
         character_scoped="Show your active character's wallet (default) or user wallet"
     )
@@ -918,7 +926,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @wealth_group.command(
-        name="adjust", description="Add Income (+) or Record a Spend (-)"
+        name="adjust", description="Add income (+) or record a spend (-)"
     )
     @app_commands.describe(
         amount="Signed $ amount — positive = income, negative = spend",
@@ -963,7 +971,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @wealth_group.command(
-        name="set", description="Set Your Balance to an Exact Amount (GM Correction)"
+        name="set", description="Set your balance to an exact amount (GM correction)"
     )
     @app_commands.describe(
         balance="Exact $ balance to set",
@@ -996,7 +1004,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @wealth_group.command(
-        name="status", description="Set Your Status Tier (Drives Cost of Living)"
+        name="status", description="Set your Status tier (drives cost of living)"
     )
     @app_commands.describe(
         status="GURPS Status tier (-2..8)",
@@ -1040,7 +1048,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @wealth_group.command(
-        name="upkeep", description="Deduct One Month's Cost of Living From Your Wallet"
+        name="upkeep", description="Deduct one month's cost of living from your wallet"
     )
     @app_commands.describe(
         living_status="Status you're living at this month (B265: may be above/below your own; defaults to your set Status)",
@@ -1104,7 +1112,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
     @wealth_group.command(
-        name="starting", description="Look up Starting Cash for a TL + Wealth Level"
+        name="starting", description="Look up starting cash for a TL + Wealth level"
     )
     @app_commands.describe(
         tl="Tech level (0..12)",

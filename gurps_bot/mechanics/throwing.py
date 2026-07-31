@@ -116,7 +116,7 @@ def thrust_for_st(st: int) -> DiceSpec:
     """Thrust dice for ST 1..40 (B16); the ST 40 cap is this table's range, not a rules limit."""
     if st < _MIN_ST or st > _MAX_ST:
         raise ValueError(
-            f"ST {st} outside supported thrust range {_MIN_ST}..{_MAX_ST}"
+            f"ST {st} is outside the supported range {_MIN_ST}-{_MAX_ST}"
         )
     count, modifier = _THRUST_BY_ST[st]
     return DiceSpec(count=count, sides=6, modifier=modifier)
@@ -126,7 +126,7 @@ def throw_distance(st: int, weight_lbs: float) -> ThrowResult:
     """Throw distance + reachability (B355): >8*BL is unthrowable; ST range 1..40 matches throw_damage so distance and damage agree."""
     if st < _MIN_ST or st > _MAX_ST:
         raise ValueError(
-            f"ST {st} outside supported throw range {_MIN_ST}..{_MAX_ST}"
+            f"ST {st} is outside the supported range {_MIN_ST}-{_MAX_ST}"
         )
     if weight_lbs < 0:
         raise ValueError(f"weight_lbs must be >= 0, got {weight_lbs}")
@@ -182,7 +182,7 @@ def throw_damage(st: int, weight_lbs: float) -> DiceSpec:
 
     if weight_lbs > 8 * bl:
         raise ValueError(
-            f"weight {weight_lbs} exceeds 8*BL ({8 * bl}); object cannot be thrown"
+            f"weight {weight_lbs} exceeds 8× Basic Lift ({8 * bl}); object cannot be thrown"
         )
 
     count = base.count

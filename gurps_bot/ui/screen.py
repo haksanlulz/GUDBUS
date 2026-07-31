@@ -270,7 +270,7 @@ def fright_page() -> discord.Embed:
     e = discord.Embed(
         title="GM Screen — Fright Check (B360-361)",
         description=(
-            "Roll vs Will, capped at 13 — Rule of 14. "
+            "Roll vs Will — capped at 13 if the Rule of 14 is on (see /campaign show). "
             "On a failure: roll 3d + margin of failure, read the total here."
         ),
         color=_PURPLE,
@@ -298,7 +298,7 @@ def fright_page() -> discord.Embed:
 def body_page() -> discord.Embed:
     """Posture (B551) + deliberate targeting (B552) — the data the random 3d6 table omits."""
     e = discord.Embed(
-        title="GM Screen - Body (Posture & Targeting)",
+        title="GM Screen — Body (Posture & Targeting)",
         description="Att/Def = to your melee attack/defense · Rngd/Mle = to hit you.",
         color=_RED,
     )

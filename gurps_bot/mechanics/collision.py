@@ -75,7 +75,7 @@ def collision_dice(
     count = math.floor(x + 0.5)
     if count > _MAX_DICE:
         raise ValueError(
-            f"Collision dice count {count} exceeds the maximum of {_MAX_DICE} (dice.py limit)"
+            f"Collision dice count {count} exceeds the maximum of {_MAX_DICE}"
         )
     return DiceSpec(count=count, sides=6, modifier=0)
 

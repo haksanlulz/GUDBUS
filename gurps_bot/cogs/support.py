@@ -40,7 +40,7 @@ _NO_LINKS_VALUE = (
     "share the bot with your group, report bugs, and suggest features."
 )
 
-_FOOTER = "Thank you! — the bot never handles payments; links go to the platforms."
+_FOOTER = "Thank you — the bot never handles payments; links go straight to the platforms."
 
 # discord field-value hard cap
 _FIELD_CAP = 1024
@@ -78,7 +78,7 @@ def build_support_embed(
 ) -> discord.Embed:
     """Render the support embed; pure, no discord runtime or I/O."""
     embed = discord.Embed(
-        title="Support GURPS Bot",
+        title="Support GUDBUS",
         description=(message or _DEFAULT_MESSAGE),
         color=_SUPPORT_COLOR,
     )

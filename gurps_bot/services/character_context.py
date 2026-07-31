@@ -73,7 +73,7 @@ class CharacterContext:
         if not char:
             # __aexit__ can't suppress an __aenter__ exception, so error goes out here
             await self.interaction.followup.send(
-                "No active character. Use `/char import` to add one.",
+                "No active character. Use `/char import` first.",
                 ephemeral=True,
             )
         else:

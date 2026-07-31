@@ -128,7 +128,7 @@ def damage_embed(result: DamageResult) -> discord.Embed:
     embed.add_field(name="After DR", value=str(result.raw_damage), inline=True)
     embed.add_field(
         name="Wound",
-        value=f"**{result.wound}** (x{result.wounding_multiplier})",
+        value=f"**{result.wound}** (×{result.wounding_multiplier})",
         inline=True,
     )
     if result.location:

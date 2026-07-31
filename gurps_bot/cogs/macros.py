@@ -64,7 +64,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="save", description="Save a Named Dice Macro")
+    @app_commands.command(name="save", description="Save a named dice macro")
     @app_commands.describe(
         name="Macro name (e.g. greatsword)",
         expression="Dice notation (e.g. 2d+4, 3d6, 1d-1)",
@@ -99,7 +99,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
             f"Saved macro **{stored_name}** = `{stored_expr}`.", ephemeral=True
         )
 
-    @app_commands.command(name="roll", description="Roll a Saved Macro")
+    @app_commands.command(name="roll", description="Roll a saved macro")
     @app_commands.describe(name="Macro name")
     @app_commands.autocomplete(name=_macro_name_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)
@@ -142,7 +142,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
             f"**{macro.name}** (`{macro.expression}`): [{dice}] = **{result.total}**"
         )
 
-    @app_commands.command(name="list", description="List Your Saved Macros")
+    @app_commands.command(name="list", description="List your saved macros")
     @app_commands.checks.cooldown(2, 5.0)
     async def list_cmd(self, interaction: discord.Interaction) -> None:
         async with interaction.client.db() as session:
@@ -155,7 +155,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
         lines = "\n".join(f"**{m.name}** = `{m.expression}`" for m in macros)
         await interaction.response.send_message(lines, ephemeral=True)
 
-    @app_commands.command(name="delete", description="Delete a Saved Macro")
+    @app_commands.command(name="delete", description="Delete a saved macro")
     @app_commands.describe(name="Macro name")
     @app_commands.autocomplete(name=_macro_name_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)

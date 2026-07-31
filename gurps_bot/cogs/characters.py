@@ -84,13 +84,13 @@ async def _send_paginated(
 
 @app_commands.guild_only()
 class CharGroup(commands.GroupCog, group_name="char"):
-    "Character Viewing and Management Commands."
+    "Import, view, and manage your characters."
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
     @app_commands.checks.cooldown(1, 10.0)
-    @app_commands.command(name="import", description="Import a .gcs Character File")
+    @app_commands.command(name="import", description="Import a .gcs character file")
     @app_commands.describe(file="A .gcs character sheet file")
     async def import_char(self, interaction: discord.Interaction, file: discord.Attachment) -> None:
         # extension check is just ux; the json parse below is the real validation
@@ -179,7 +179,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
             embed=embed,
         )
 
-    @app_commands.command(name="view", description="View Your Active Character Summary")
+    @app_commands.command(name="view", description="View your active character summary")
     async def view(self, interaction: discord.Interaction) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
@@ -191,7 +191,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
             )
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="skills", description="List Your Character's Skills")
+    @app_commands.command(name="skills", description="List your character's skills")
     @app_commands.describe(search="Filter skills by name")
     async def skills(self, interaction: discord.Interaction, search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
@@ -212,7 +212,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         ]
         await _send_paginated(interaction, "Skills", lines, char_name)
 
-    @app_commands.command(name="spells", description="List Your Character's Spells")
+    @app_commands.command(name="spells", description="List your character's spells")
     @app_commands.describe(search="Filter spells by name")
     async def spells(self, interaction: discord.Interaction, search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
@@ -233,7 +233,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         ]
         await _send_paginated(interaction, "Spells", lines, char_name)
 
-    @app_commands.command(name="traits", description="List Your Character's Advantages and Disadvantages")
+    @app_commands.command(name="traits", description="List your character's advantages and disadvantages")
     @app_commands.describe(search="Filter traits by name")
     async def traits(self, interaction: discord.Interaction, search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
@@ -254,7 +254,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         ]
         await _send_paginated(interaction, "Traits", lines, char_name)
 
-    @app_commands.command(name="equipment", description="View Your Character's Equipment")
+    @app_commands.command(name="equipment", description="View your character's equipment")
     async def equipment(self, interaction: discord.Interaction) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
@@ -275,7 +275,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
             per_page=20, empty_msg="No equipment.",
         )
 
-    @app_commands.command(name="export", description="Export Your Active Character as .gcs")
+    @app_commands.command(name="export", description="Export your active character as .gcs")
     async def export(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer(ephemeral=True)
         async with CharacterContext(interaction, defer=False) as ctx:
@@ -299,7 +299,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
             f"Exported **{char_name}**.", file=file, ephemeral=True,
         )
 
-    @app_commands.command(name="list", description="List All Your Imported Characters")
+    @app_commands.command(name="list", description="List all your imported characters")
     async def list_chars(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         user_id = interaction.user.id
@@ -317,7 +317,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         embed = embeds.char_list_embed(char_list)
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="switch", description="Switch Your Active Character")
+    @app_commands.command(name="switch", description="Switch your active character")
     @app_commands.describe(name="Character name to switch to")
     @app_commands.autocomplete(name=_char_name_autocomplete)
     async def switch(self, interaction: discord.Interaction, name: str) -> None:
@@ -338,7 +338,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         await interaction.response.send_message(f"Switched to **{name}**.")
 
     @app_commands.checks.cooldown(1, 10.0)
-    @app_commands.command(name="delete", description="Delete an Imported Character")
+    @app_commands.command(name="delete", description="Delete an imported character")
     @app_commands.describe(name="Character name to delete")
     @app_commands.autocomplete(name=_char_name_autocomplete)
     async def delete_char(self, interaction: discord.Interaction, name: str) -> None:

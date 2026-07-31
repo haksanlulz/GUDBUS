@@ -132,11 +132,11 @@ class CombatCog(commands.Cog):
         self.bot = bot
 
     @app_commands.checks.cooldown(2, 5.0)
-    @app_commands.command(name="attack", description="Roll an Attack With a Weapon")
+    @app_commands.command(name="attack", description="Roll an attack with a weapon")
     @app_commands.describe(
         weapon="Weapon name (autocomplete from your character)",
         modifier="Bonus or penalty to the attack roll",
-        hidden="Roll in secret (GM blind roll): only you see the result",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
     )
     @app_commands.autocomplete(weapon=_weapon_autocomplete)
     async def attack(
@@ -150,7 +150,11 @@ class CombatCog(commands.Cog):
             try:
                 char = await require_active_character(session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await respond(interaction, "No active character.", ephemeral=True)
+                await respond(
+                    interaction,
+                    "No active character. Use `/char import` first.",
+                    ephemeral=True,
+                )
                 return
 
             traits = await get_character_traits(session, char.id)
@@ -190,7 +194,7 @@ class CombatCog(commands.Cog):
                 log.warning("Could not fetch original_response for RollDamageView")
 
     @app_commands.checks.cooldown(2, 5.0)
-    @app_commands.command(name="defend", description="Roll a Defense (Dodge, Parry, or Block)")
+    @app_commands.command(name="defend", description="Roll a defense (Dodge, Parry, or Block)")
     @app_commands.describe(
         defense_type="Type of defense",
         modifier="Bonus or penalty",
@@ -212,7 +216,11 @@ class CombatCog(commands.Cog):
             try:
                 char = await require_active_character(session, interaction.user.id, interaction.guild_id)
             except NoActiveCharacter:
-                await respond(interaction, "No active character.", ephemeral=True)
+                await respond(
+                    interaction,
+                    "No active character. Use `/char import` first.",
+                    ephemeral=True,
+                )
                 return
 
             calc = char.calc_json
@@ -273,7 +281,7 @@ class CombatCog(commands.Cog):
         await respond(interaction, embed=embed)
 
     @app_commands.checks.cooldown(2, 5.0)
-    @app_commands.command(name="hit-location", description="Roll a Random Hit Location (3d6)")
+    @app_commands.command(name="hit-location", description="Roll a random hit location (3d6)")
     async def hit_location(self, interaction: discord.Interaction) -> None:
         result = roll_hit_location()
         embed = embeds.hit_location_embed(result)
@@ -287,7 +295,7 @@ class CombatCog(commands.Cog):
 @app_commands.guild_only()
 @app_commands.default_permissions(send_messages=True)
 class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
-    "Combat Tracker Commands."
+    "Turn-based combat tracking for this channel."
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
@@ -314,7 +322,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         await self.bot.wait_until_ready()
 
     @app_commands.checks.cooldown(1, 5.0)
-    @app_commands.command(name="start", description="Start a New Combat in This Channel")
+    @app_commands.command(name="start", description="Start a new combat in this channel")
     async def start(self, interaction: discord.Interaction) -> None:
         async with interaction.client.db() as session:
             try:
@@ -338,7 +346,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 log.warning("Could not fetch tracker message id at combat start")
             await session.commit()
 
-    @app_commands.command(name="join", description="Join the Current Combat With Your Active Character")
+    @app_commands.command(name="join", description="Join the current combat with your active character")
     async def join(self, interaction: discord.Interaction) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
@@ -361,7 +369,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 f"**{pc.name}** joined combat (Speed {pc.basic_speed})."
             )
 
-    @app_commands.command(name="add-npc", description="Add an NPC to Combat (GM Only)")
+    @app_commands.command(name="add-npc", description="Add an NPC to combat (GM only)")
     @app_commands.describe(
         name="NPC name",
         speed="Basic Speed",
@@ -397,7 +405,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 f"Added **{npc.name}** (Speed {npc.basic_speed}, HP {npc.hp_max})."
             )
 
-    @app_commands.command(name="leave", description="Leave the Current Combat")
+    @app_commands.command(name="leave", description="Leave the current combat")
     async def leave(self, interaction: discord.Interaction) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
@@ -412,7 +420,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await ctx.commit()
             await ctx.respond_and_refresh(f"**{combatant_name}** left combat.")
 
-    @app_commands.command(name="remove", description="Remove a Combatant (GM Only)")
+    @app_commands.command(name="remove", description="Remove a combatant (GM only)")
     @app_commands.describe(target="Combatant name")
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def remove(self, interaction: discord.Interaction, target: str) -> None:
@@ -426,18 +434,21 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await ctx.commit()
             await ctx.respond_and_refresh(f"Removed **{combatant_name}** from combat.")
 
-    @app_commands.command(name="hp", description="Modify a Combatant's HP")
+    @app_commands.command(name="hp", description="Modify a combatant's HP")
     @app_commands.describe(
         target="Combatant name",
         amount="HP change (negative = damage, positive = heal)",
         location="Hit location — only affects a major-wound knockdown roll (B420)",
     )
     @app_commands.choices(location=[
+        # B420 knockdown penalties — must match _KNOCKDOWN_LOCATION_MODIFIERS
+        # (face/vitals/groin -5, skull/eye -10); the old labels kept the
+        # pre-correction -10s and taught values the engine never applies
         app_commands.Choice(name="Face (-5)", value="face"),
         app_commands.Choice(name="Skull (-10)", value="skull"),
         app_commands.Choice(name="Eye (-10)", value="eye"),
-        app_commands.Choice(name="Groin (-10)", value="groin"),
-        app_commands.Choice(name="Vitals (-10, crushing)", value="vitals"),
+        app_commands.Choice(name="Groin (-5)", value="groin"),
+        app_commands.Choice(name="Vitals (-5)", value="vitals"),
     ])
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def hp_cmd(
@@ -505,7 +516,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             msg += knockdown_line
             await ctx.respond_and_refresh(msg)
 
-    @app_commands.command(name="fp", description="Modify a Combatant's FP")
+    @app_commands.command(name="fp", description="Modify a combatant's FP")
     @app_commands.describe(target="Combatant name", amount="FP change (negative = spend, positive = recover)")
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def fp_cmd(
@@ -527,7 +538,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 f"**{combatant.name}** FP {sign}{amount} \u2192 {combatant.fp_current}/{combatant.fp_max}"
             )
 
-    @app_commands.command(name="status", description="Add or Remove a Status Effect")
+    @app_commands.command(name="status", description="Add or remove a status effect")
     @app_commands.describe(target="Combatant name", effect="Status effect", action="Add or remove")
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     @app_commands.choices(
@@ -564,7 +575,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await ctx.commit()
             await ctx.respond_and_refresh(f"**{effect}** {verb} **{c.name}**.")
 
-    @app_commands.command(name="maneuver", description="Set Your Maneuver for This Turn")
+    @app_commands.command(name="maneuver", description="Set your maneuver for this turn")
     @app_commands.describe(maneuver="GURPS maneuver")
     @app_commands.choices(
         maneuver=[app_commands.Choice(name=m.value, value=m.value) for m in Maneuver],
@@ -595,14 +606,14 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await ctx.commit()
             await ctx.respond_and_refresh(f"**{current.name}** chooses **{maneuver}**.")
 
-    @app_commands.command(name="defend", description="Roll an Active Defense (auto-tracks cumulative Parry penalties)")
+    @app_commands.command(name="defend", description="Roll an active defense (auto-tracks cumulative Parry penalties)")
     @app_commands.describe(
         defense_type="Dodge, Parry, or Block",
         value="Your defense score (the Dodge/Parry/Block target number)",
-        modifier="Extra modifier — e.g. +3 for a retreat",
+        modifier="Extra modifier — e.g. +3 for a retreating Dodge (B377)",
         target="Combatant defending (GM only; defaults to your own)",
-        hidden="Roll in secret (GM blind roll): only you see the result",
-        fencing_or_master="Fencing weapon, Trained By A Master, or Weapon Master: parry step -2 not -4 (B376)",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+        fencing_or_master="Fencing weapon, Trained by a Master, or Weapon Master: repeat-parry step is -2, not -4 (B376)",
         weapon="Which weapon or hand is parrying — the -4 accrues per weapon (B376)",
     )
     @app_commands.choices(defense_type=[
@@ -669,7 +680,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await respond(interaction, embed=embed, ephemeral=hidden)
 
     @app_commands.checks.cooldown(1, 5.0)
-    @app_commands.command(name="end", description="End the Current Combat (GM Only)")
+    @app_commands.command(name="end", description="End the current combat (GM only)")
     async def end(self, interaction: discord.Interaction) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:

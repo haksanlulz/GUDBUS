@@ -43,18 +43,18 @@ _HIKE_ENCUMBRANCE_CHOICES = [
 ]
 
 _TERRAIN_CHOICES = [
-    app_commands.Choice(name="Very Bad (x0.20)", value="VERY_BAD"),
-    app_commands.Choice(name="Bad (x0.50)", value="BAD"),
-    app_commands.Choice(name="Average (x1.00)", value="AVERAGE"),
-    app_commands.Choice(name="Good (x1.25)", value="GOOD"),
+    app_commands.Choice(name="Very Bad (×0.20)", value="VERY_BAD"),
+    app_commands.Choice(name="Bad (×0.50)", value="BAD"),
+    app_commands.Choice(name="Average (×1.00)", value="AVERAGE"),
+    app_commands.Choice(name="Good (×1.25)", value="GOOD"),
 ]
 
 _WEATHER_CHOICES = [
-    app_commands.Choice(name="Clear (x1.0)", value="CLEAR"),
-    app_commands.Choice(name="Rain (x0.5)", value="RAIN"),
-    app_commands.Choice(name="Ankle-Deep Snow (x0.5)", value="SNOW_ANKLE"),
-    app_commands.Choice(name="Deep Snow (x0.25)", value="SNOW_DEEP"),
-    app_commands.Choice(name="Ice (x0.5)", value="ICE"),
+    app_commands.Choice(name="Clear (×1.0)", value="CLEAR"),
+    app_commands.Choice(name="Rain (×0.5)", value="RAIN"),
+    app_commands.Choice(name="Ankle-Deep Snow (×0.5)", value="SNOW_ANKLE"),
+    app_commands.Choice(name="Deep Snow (×0.25)", value="SNOW_DEEP"),
+    app_commands.Choice(name="Ice (×0.5)", value="ICE"),
 ]
 
 # values are swimming.Encumbrance member names
@@ -87,7 +87,7 @@ _VEHICLE_KIND_CHOICES = [
     app_commands.Choice(
         name="Animal/Tracked/Walking (Decel 10)", value="ANIMAL_TRACKED_WALKING"
     ),
-    app_commands.Choice(name="Air or Water (5+HND)", value="AIR_WATER"),
+    app_commands.Choice(name="Air or Water (5+Hnd)", value="AIR_WATER"),
 ]
 
 
@@ -99,7 +99,7 @@ class CalcMovementCog(commands.Cog):
 
     @app_commands.command(
         name="jump",
-        description="High-Jump Height (Inches) and Long-Jump Distance (Yards) From Basic Move",
+        description="High-jump height (inches) and long-jump distance (yards) from Basic Move",
     )
     @app_commands.describe(
         basic_move="Basic Move (yards/second)",
@@ -169,11 +169,11 @@ class CalcMovementCog(commands.Cog):
         if super_jump > 0:
             embed.add_field(
                 name="Super Jump",
-                value=f"x{high.super_jump_multiplier} ({super_jump} lvl)",
+                value=f"×{high.super_jump_multiplier} ({super_jump} lvl)",
                 inline=True,
             )
         if enc_factor != 1.0:
-            embed.add_field(name="Encumbrance", value=f"x{enc_factor:g}", inline=True)
+            embed.add_field(name="Encumbrance", value=f"×{enc_factor:g}", inline=True)
         if running_start:
             start_detail = f"{yards_run:g} yd run" if yards_run else "running"
             embed.add_field(name="Running Start", value=start_detail, inline=True)
@@ -182,7 +182,7 @@ class CalcMovementCog(commands.Cog):
 
     @app_commands.command(
         name="throw",
-        description="Throwing Distance (Yards) and Thrown Damage From ST + Object Weight",
+        description="Throwing distance (yards) and thrown damage from ST + object weight",
     )
     @app_commands.describe(
         st="Strength (1-40)",
@@ -212,10 +212,10 @@ class CalcMovementCog(commands.Cog):
         if not res.throwable:
             embed.add_field(
                 name="Distance",
-                value=f"**Too heavy** (> 8x BL = {8 * res.basic_lift:g} lbs)",
+                value=f"**Too heavy** (> 8× BL = {8 * res.basic_lift:g} lbs)",
                 inline=False,
             )
-            embed.set_footer(text="B355 — object exceeds 8x Basic Lift; cannot be thrown.")
+            embed.set_footer(text="B355 — object exceeds 8× Basic Lift; cannot be thrown.")
             await interaction.response.send_message(embed=embed)
             return
 
@@ -227,7 +227,7 @@ class CalcMovementCog(commands.Cog):
         )
         embed.add_field(
             name="Modifier",
-            value=f"ST x{res.distance_modifier:g} (ratio {res.weight_ratio:.2f})",
+            value=f"ST ×{res.distance_modifier:g} (ratio {res.weight_ratio:.2f})",
             inline=True,
         )
         if estimate.damage is not None:
@@ -241,7 +241,7 @@ class CalcMovementCog(commands.Cog):
 
     @app_commands.command(
         name="hike",
-        description="Miles Travelled per Day From Basic Move, Encumbrance, Terrain, and Weather",
+        description="Miles traveled per day from Basic Move, encumbrance, terrain, and weather",
     )
     @app_commands.describe(
         basic_move="Basic Move (yards/second)",
@@ -306,12 +306,12 @@ class CalcMovementCog(commands.Cog):
         )
         embed.add_field(
             name="Terrain",
-            value=f"{terr.name.title()} (x{result.terrain_mult:g})",
+            value=f"{terr.name.title()} (×{result.terrain_mult:g})",
             inline=True,
         )
         embed.add_field(
             name="Weather",
-            value=f"{weath.name.title()} (x{result.weather_mult:g})",
+            value=f"{weath.name.title()} (×{result.weather_mult:g})",
             inline=True,
         )
         if hiking_success:
@@ -319,7 +319,7 @@ class CalcMovementCog(commands.Cog):
         if result.enhanced_move_mult != 1.0:
             embed.add_field(
                 name="Enhanced Move",
-                value=f"x{result.enhanced_move_mult:g}",
+                value=f"×{result.enhanced_move_mult:g}",
                 inline=True,
             )
         embed.add_field(name="FP Cost", value=result.fp_note, inline=False)
@@ -328,7 +328,7 @@ class CalcMovementCog(commands.Cog):
 
     @app_commands.command(
         name="swim",
-        description="Water Move, Distance Over a Duration, and Fatigue Timing From Basic Move",
+        description="Water Move, distance over a duration, and fatigue timing from Basic Move",
     )
     @app_commands.describe(
         basic_move="Basic Move (yards/second)",
@@ -418,12 +418,12 @@ class CalcMovementCog(commands.Cog):
 
     vehicle = app_commands.Group(
         name="vehicle",
-        description="Vehicle Calculators (Cruising, Endurance, Dodge, Control, Decel, Crash)",
+        description="Vehicle calculators (cruising, endurance, dodge, control, decel, crash)",
     )
 
     @vehicle.command(
         name="cruising",
-        description="Sustainable Cruising Speed Over Terrain (B463/466)",
+        description="Sustainable cruising speed over terrain (B463/466)",
     )
     @app_commands.describe(
         top_speed="Vehicle Top Speed in yards/second",
@@ -431,7 +431,7 @@ class CalcMovementCog(commands.Cog):
         locomotion="How the vehicle moves over ground",
         road_bound="Road-bound (e.g. a car): capped when off-road",
         off_road="Currently off-road (applies the road-bound cap)",
-        acceleration="Acceleration in yds/sec (needed for a road-bound off-road cap)",
+        acceleration="Acceleration in yd/s (needed for a road-bound off-road cap)",
     )
     @app_commands.choices(terrain=_VEHICLE_TERRAIN_CHOICES, locomotion=_LOCOMOTION_CHOICES)
     @app_commands.checks.cooldown(2, 5.0)
@@ -471,7 +471,7 @@ class CalcMovementCog(commands.Cog):
 
     @vehicle.command(
         name="endurance",
-        description="Loiter Endurance: Range ÷ Cruising Speed (B463)",
+        description="Loiter endurance: range ÷ cruising speed (B463)",
     )
     @app_commands.describe(
         range_miles="Vehicle Range in miles",
@@ -525,13 +525,13 @@ class CalcMovementCog(commands.Cog):
 
     @vehicle.command(
         name="control",
-        description="Make a Control Roll and Read It vs Stability Rating (B466)",
+        description="Make a control roll and read it vs Stability Rating (B466)",
     )
     @app_commands.describe(
         control_skill="Operator's control skill",
         handling="Vehicle Handling (Hnd)",
         sr="Stability Rating (the SR in Hnd/SR)",
-        visibility="Visibility penalty (−1..−10 for fog/darkness), 0 if clear",
+        visibility="Visibility penalty (-1 to -10 for fog/darkness), 0 if clear",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_control(
@@ -574,7 +574,7 @@ class CalcMovementCog(commands.Cog):
 
     @vehicle.command(
         name="decel",
-        description="Safe Deceleration per Turn by Drivetrain (B468)",
+        description="Safe deceleration per turn by drivetrain (B468)",
     )
     @app_commands.describe(
         kind="Drivetrain class",
@@ -597,7 +597,7 @@ class CalcMovementCog(commands.Cog):
 
     @vehicle.command(
         name="crash",
-        description="Crash / Ram Damage: Impact at Velocity + Skid (B468/430)",
+        description="Crash / ram damage: impact at velocity + skid (B468/430)",
     )
     @app_commands.describe(
         velocity="Impact velocity in yards/second",

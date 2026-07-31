@@ -46,15 +46,15 @@ class CalcMagicCog(commands.Cog):
     # group is "cast", not "spell"; /spell is the reference cog's lookup command
     cast = app_commands.Group(
         name="cast",
-        description="Spellcasting Calculators (Cost, Time, Ceremonial, Range, Missile)",
+        description="Spellcasting calculators (cost, time, ceremonial, range, missile)",
     )
 
-    @cast.command(name="cost", description="Energy Cost to Cast a Spell (B236-240)")
+    @cast.command(name="cost", description="Energy cost to cast a spell (B236-240)")
     @app_commands.describe(
         base_cost="The spell's listed energy cost (Area spells: its base cost)",
         skill="Your base skill with the spell (drives the high-skill reduction)",
-        size_modifier="Regular spell: subject's Size Modifier (cost x(1+SM) for SM>0)",
-        area_radius="Area spell: radius in yards (cost = base x radius)",
+        size_modifier="Regular spell: subject's Size Modifier (cost ×(1+SM) for SM>0)",
+        area_radius="Area spell: radius in yards (cost = base × radius)",
         maintain="Optional: listed maintenance cost, to also show the reduced upkeep",
         low_mana="Low-mana area (-5 to base skill for the reduction)",
     )
@@ -85,7 +85,7 @@ class CalcMagicCog(commands.Cog):
         if result.area_radius > 0:
             shape = f"Area, radius {result.area_radius} yd (x{result.area_radius})"
         elif result.size_modifier > 0:
-            shape = f"Regular, SM +{result.size_modifier} (x{1 + result.size_modifier})"
+            shape = f"Regular, SM +{result.size_modifier} (×{1 + result.size_modifier})"
         else:
             shape = "Regular, SM 0"
         embed.add_field(name="Spell", value=shape, inline=False)
@@ -94,7 +94,7 @@ class CalcMagicCog(commands.Cog):
         )
         embed.add_field(
             name=f"High Skill (≥15)",
-            value=f"−{result.reduction}" + (" (low mana −5)" if result.low_mana else ""),
+            value=f"-{result.reduction}" + (" (low mana -5)" if result.low_mana else ""),
             inline=True,
         )
         embed.add_field(
@@ -110,7 +110,7 @@ class CalcMagicCog(commands.Cog):
         embed.set_footer(text="B236-240 — scale for size/area, then reduce for high skill")
         await interaction.response.send_message(embed=embed)
 
-    @cast.command(name="time", description="Seconds to Cast a Spell (B236-238)")
+    @cast.command(name="time", description="Seconds to cast a spell (B236-238)")
     @app_commands.describe(
         base_seconds="The spell's listed casting time in seconds (most spells: 1)",
         skill="Your base skill (≤9 doubles time; 20+ halves; 25+ ÷4; …)",
@@ -149,16 +149,16 @@ class CalcMagicCog(commands.Cog):
 
     @cast.command(
         name="ceremonial",
-        description="Pool Ceremonial Energy + Extra-Energy Skill Bonus (B238)",
+        description="Pool ceremonial energy + extra-energy skill bonus (B238)",
     )
     @app_commands.describe(
         spell_cost="The spell's energy cost (after size/area scaling)",
         caster_energy="Energy the lead caster contributes",
         mage_energy="Total energy from assistants who know the spell at 15+ (unlimited each)",
-        skilled_nonmages="Non-mages who know the spell at 15+ (3 each)",
-        low_skill_mages="Mages who know the spell at ≤14 (3 each)",
+        skilled_nonmages="Non-mages who know the spell at 15+ (+3 each)",
+        low_skill_mages="Mages who know the spell at ≤14 (+3 each)",
         supporters="Supporting spectators (+1 each, max +100)",
-        opposers="Opposing spectators (−5 each, max −100)",
+        opposers="Opposing spectators (-5 each, max -100)",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def ceremonial(
@@ -206,12 +206,12 @@ class CalcMagicCog(commands.Cog):
 
     @cast.command(
         name="distance",
-        description="Skill Penalty to Cast a Regular Spell at Range (B240)",
+        description="Skill penalty to cast a Regular spell at range (B240)",
     )
     @app_commands.describe(
         yards="Distance to the subject in yards",
         can_touch="You can touch the subject (no penalty)",
-        can_see="You can see the subject (else a further −5)",
+        can_see="You can see the subject (else a further -5)",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def distance(
@@ -236,14 +236,14 @@ class CalcMagicCog(commands.Cog):
         )
         if not can_touch and not can_see:
             embed.add_field(
-                name="Note", value="Can't touch or see: extra −5 applied", inline=False
+                name="Note", value="Can't touch or see: extra -5 applied", inline=False
             )
-        embed.set_footer(text="B240 — −1/yd if not touching; further −5 if unseen")
+        embed.set_footer(text="B240 — -1/yd if not touching; further -5 if unseen")
         await interaction.response.send_message(embed=embed)
 
     @cast.command(
         name="seek",
-        description="Long-Distance Modifier for an Information/Seek Spell (B241)",
+        description="Long-distance modifier for an Information/Seek spell (B241)",
     )
     @app_commands.describe(
         distance="Distance to the subject",
@@ -276,7 +276,7 @@ class CalcMagicCog(commands.Cog):
 
     @cast.command(
         name="missile",
-        description="Missile-Spell Damage: 1d per Energy, ≤Magery/sec, ≤3 s (B240)",
+        description="Missile spell damage: 1d per energy point, up to Magery/sec, max 3 s (B240)",
     )
     @app_commands.describe(
         magery="Your Magery level (max energy per second of casting)",

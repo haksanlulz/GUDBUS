@@ -90,13 +90,13 @@ DAMAGE_TYPE_DISPLAY: dict[str, str] = {
     "cut": "Cutting (cut)",
     "imp": "Impaling (imp)",
     "pi": "Piercing (pi)",
-    "pi-": "Sm. Piercing (pi-)",
-    "pi+": "Lg. Piercing (pi+)",
+    "pi-": "Small Piercing (pi-)",
+    "pi+": "Large Piercing (pi+)",
     "pi++": "Huge Piercing (pi++)",
     "burn": "Burning (burn)",
     "tox": "Toxic (tox)",
     "cor": "Corrosion (cor)",
-    "fat": "Fatigue (fat) - costs FP",
+    "fat": "Fatigue (fat) — costs FP",
 }
 
 # 3d6 -> location (B552); this owns the roll ranges only, penalties come from

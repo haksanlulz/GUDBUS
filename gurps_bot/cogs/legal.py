@@ -125,7 +125,7 @@ class LegalCog(commands.Cog):
 
     @app_commands.command(
         name="legal",
-        description="Legal Notice, Credits, Trademark, and Privacy Information",
+        description="Legal notice, credits, trademark, and privacy information",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def legal(self, interaction: discord.Interaction) -> None:
@@ -135,7 +135,7 @@ class LegalCog(commands.Cog):
 
     @app_commands.command(
         name="about",
-        description="About This Bot — Credits, Trademark, and Privacy",
+        description="About this bot — credits, trademark, and privacy",
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def about(self, interaction: discord.Interaction) -> None:
