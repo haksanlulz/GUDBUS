@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/sh
 # Snapshot the SQLite database (timestamped, keeps the newest N). Cron-able and
 # safe to run while the bot is live: both backup paths use SQLite's online
 # backup API (sqlite3 .backup, or python3's Connection.backup), and if neither
@@ -11,7 +11,12 @@
 # Override defaults with env vars: BOT_BACKUP_DIR, BOT_BACKUP_KEEP.
 # SQLITE3_BIN / PYTHON3_BIN override tool discovery (tests use these; PATH
 # stubs are unreliable under Git Bash, which prepends its own bin dir).
-set -euo pipefail
+#
+# POSIX sh, like nas-update.sh: the tests run it under `sh`, and on Ubuntu
+# that is dash, which has no `pipefail`. Nothing here needed it — the backup
+# commands aren't pipelines, so `set -e` already aborts on their failure, and
+# the prune pipeline is best-effort by design.
+set -eu
 
 cd "$(dirname "$0")/.."   # project root
 
