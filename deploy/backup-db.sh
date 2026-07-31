@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
 # Snapshot the SQLite database (timestamped, keeps the newest N). Cron-able and
-# safe to run while the bot is live (uses sqlite3 .backup for a consistent copy).
+# safe to run while the bot is live: both backup paths use SQLite's online
+# backup API (sqlite3 .backup, or python3's Connection.backup), and if neither
+# tool exists the script REFUSES rather than falling back to cp — a plain copy
+# of a live WAL database can miss committed-but-uncheckpointed pages while
+# printing success, which is worse than no backup.
 #
 #   crontab:  0 4 * * *  /opt/gurps-bot/deploy/backup-db.sh
 #
 # Override defaults with env vars: BOT_BACKUP_DIR, BOT_BACKUP_KEEP.
+# SQLITE3_BIN / PYTHON3_BIN override tool discovery (tests use these; PATH
+# stubs are unreliable under Git Bash, which prepends its own bin dir).
 set -euo pipefail
 
 cd "$(dirname "$0")/.."   # project root
@@ -21,10 +27,29 @@ mkdir -p "$DEST"
 TS="$(date +%Y%m%d-%H%M%S)"
 OUT="$DEST/gurps_bot-$TS.db"
 
-if command -v sqlite3 >/dev/null 2>&1; then
-  sqlite3 "$DB" ".backup '$OUT'"          # consistent snapshot, WAL-safe
+SQLITE3="${SQLITE3_BIN:-sqlite3}"
+PYTHON3="${PYTHON3_BIN:-python3}"
+
+if command -v "$SQLITE3" >/dev/null 2>&1; then
+  "$SQLITE3" "$DB" ".backup '$OUT'"        # consistent snapshot, WAL-safe
+elif command -v "$PYTHON3" >/dev/null 2>&1; then
+  # Same online-backup API through the interpreter the bot already ships with
+  # (the Docker image carries no sqlite3 CLI).
+  "$PYTHON3" - "$DB" "$OUT" <<'PY'
+import sqlite3
+import sys
+
+src = sqlite3.connect(sys.argv[1])
+dst = sqlite3.connect(sys.argv[2])
+with dst:
+    src.backup(dst)
+dst.close()
+src.close()
+PY
 else
-  cp "$DB" "$OUT"                          # fallback; prefer installing sqlite3
+  echo "!! neither sqlite3 nor python3 found — refusing to cp a live database" >&2
+  echo "   (a plain copy can silently lose committed-but-uncheckpointed WAL pages)" >&2
+  exit 1
 fi
 echo "backed up -> $OUT"
 

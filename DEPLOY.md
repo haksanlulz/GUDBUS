@@ -1,9 +1,9 @@
 # Deploying
 
-Small discord.py bot, one SQLite file, runs as a systemd service. ~200 MB RAM,
-~70 MB vendored data. Any cheap Linux host works: Oracle Cloud Always-Free (steps
-below), a $4-5 VPS (Hetzner/Vultr/DO), or a Raspberry Pi. Not serverless — the bot
-holds a persistent gateway connection.
+Small discord.py bot, one SQLite file. ~200 MB RAM, ~70 MB vendored data. Any
+cheap Linux host works: Oracle Cloud Always-Free (steps below), a $4-5 VPS
+(Hetzner/Vultr/DO), or a Raspberry Pi. Not serverless — the bot holds a
+persistent gateway connection.
 
 Two ways to run it: **Docker** (below; only the container engine to install) or
 **systemd + uv** (the rest of this doc). Pick one.
@@ -122,14 +122,17 @@ name, volume or env file, and that the nightly one carries the same hardening;
 a dev instance running with more privilege than production is not testing
 production.
 
-**Data & backups:** the DB is in the `gurps-data` named volume. Back it up with
+**Data & backups:** the DB is in the `gurps-data` named volume. The image
+ships no `sqlite3` CLI, so back it up through Python's same online-backup API
+(WAL-safe on a live bot — never plain-copy the file):
 
 ```sh
-docker compose exec gurps-bot sh -c 'sqlite3 data/gurps_bot.db ".backup /app/data/backup.db"'
+docker compose exec gurps-bot python -c "import sqlite3; s=sqlite3.connect('data/gurps_bot.db'); d=sqlite3.connect('data/backup.db'); s.backup(d); d.close(); s.close()"
 docker compose cp gurps-bot:/app/data/backup.db ./gurps_bot-backup.db
 ```
 
-or bind-mount a host path instead (see the comment in `docker-compose.yml`).
+or bind-mount a host path instead (see the comment in `docker-compose.yml`)
+and run `deploy/backup-db.sh` from the host against it.
 
 ---
 

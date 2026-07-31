@@ -1,14 +1,14 @@
 # GUDBUS
 
-**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 94 slash commands.
+**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 97 slash commands.
 
 ## Features
 
-- **Character Management** -- Import `.gcs` files, view attributes/skills/spells/traits/equipment, switch between characters, export back to `.gcs`
-- **Dice Rolling** -- Standard dice notation (`3d6`, `2d+1`, `4d6+3`), GURPS success rolls with critical thresholds, quick contests
-- **Combat** -- Damage rolls with wounding multipliers, hit locations, fright checks, attack/defend rolls
-- **Combat Tracker** -- Persistent initiative tracker with HP/FP tracking, status effects, maneuvers, round management, interactive buttons
-- **Autocomplete** -- Fuzzy-matched skill, attribute, weapon, and character name suggestions
+- **Character Management** — Import `.gcs` files, view attributes/skills/spells/traits/equipment, switch between characters, export back to `.gcs`
+- **Dice Rolling** — Standard dice notation (`3d6`, `2d+1`, `4d6+3`), GURPS success rolls with critical thresholds, Quick Contests
+- **Combat** — Damage rolls with wounding multipliers, hit locations, Fright Checks, attack/defend rolls
+- **Combat Tracker** — Persistent initiative tracker with HP/FP tracking, status effects, maneuvers, round management, interactive buttons
+- **Autocomplete** — Fuzzy-matched skill, attribute, weapon, and character name suggestions
 
 ## Setup
 
@@ -23,7 +23,8 @@
    ```bash
    cp .env.example .env
    ```
-   Edit `.env` with your Discord bot token and optional dev guild ID.
+   Edit `.env` with your Discord bot token; the other knobs are optional and
+   documented inline.
 
 3. **Run the bot:**
    ```bash
@@ -31,7 +32,7 @@
    ```
 
 4. **Command registration:** automatic. Commands register globally at startup
-   when the command set changed. `/sync` (owner) forces a re-register;
+   whenever the command set changes. `/sync` (owner) forces a re-register;
    `@<bot> sync` is the mention-prefix rescue if registrations are ever gone.
 
 ## Commands
@@ -86,7 +87,7 @@
 | `/vehicle cruising` | Sustainable cruising speed over terrain (B463) |
 | `/vehicle endurance` | Loiter endurance: Range ÷ cruising speed (B463) |
 | `/vehicle dodge` | Vehicle Dodge from control skill + Handling (B470) |
-| `/vehicle control` | Roll a control roll and read it vs Stability Rating (B466) |
+| `/vehicle control` | Make a control roll and read it vs Stability Rating (B466) |
 | `/vehicle decel` | Safe deceleration per turn by drivetrain (B468) |
 | `/vehicle crash` | Crash/ram damage at velocity + ground skid (B468/B430) |
 | `/reaction roll` | Roll 3d + modifier and read the reaction band (B560) |
@@ -120,7 +121,7 @@
 | `/wealth upkeep` | Deduct one month's cost of living (B265) |
 | `/wealth starting` | Look up starting cash for a TL + Wealth level (B25) |
 | `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
-| `/gm` | GM dashboard: live timers, combat, and your recent study/notes |
+| `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 | `/skill` | Look up a GURPS skill (facts + page cite) |
 | `/trait` | Look up a GURPS advantage or disadvantage (facts + page cite) |
 | `/spell` | Look up a GURPS spell (facts + page cite) |
@@ -166,7 +167,7 @@ gurps_bot/
     rolling.py        # /roll, /check, /contest, /damage
     combat.py         # /attack, /defend, /combat group
     error_handler.py  # Global error handler
-    ...               # + 11 more cogs (calc_*, trackers, macros, reference, gmscreen, body_ref, legal, support)
+    ...               # + 13 more cogs (calc_*, trackers, macros, reference, gmscreen, body_ref, campaign, help, legal, support)
   db/
     engine.py         # Async SQLAlchemy engine + session factory
     models.py         # ORM models (Character, Skill, Spell, Trait, Combat, Combatant)
@@ -175,14 +176,14 @@ gurps_bot/
   services/
     characters.py     # Character data access layer
     combat.py         # Combat tracker data access layer
-    ...               # + 9 more (dashboard, macros, notes, reference, timers, ...)
+    ...               # + 12 more (dashboard, macros, notes, reference, timers, ...)
   mechanics/
     checks.py         # GURPS 3d6 roll-under engine
     damage.py         # Damage + wounding multipliers
     dice.py           # Dice parser and roller
     tables.py         # Fright check, critical hit/miss tables
     combat_constants.py  # Maneuvers, status effects, display helpers
-    ...               # + 20 more (defense, injury, speed_range, encumbrance, ...)
+    ...               # + 21 more (defense, injury, speed_range, encumbrance, ...)
   gcs/
     parser.py         # GCS v5 JSON parser
     library.py        # in-memory facts-only reference catalog
@@ -190,7 +191,7 @@ gurps_bot/
     embeds.py         # Discord embed builders
     views.py          # Interactive UI (pagination, confirmation, combat tracker)
     formatters.py     # Text formatting helpers
-    ...               # + screen, tracker
+    ...               # + screen, tracker, respond
   utils/
     fuzzy.py          # rapidfuzz wrapper
     cache.py          # TTL cache for autocomplete
@@ -227,8 +228,10 @@ schema).
 This project was built with AI assistance (Claude). Correctness was established
 by the test suite — including golden-file harnesses for the GCS parser and the
 magic mechanics, and a test that pins the SJG legal notice character-exact —
-and by the deploy script, which runs the full suite before every service
-restart. The author reviews and is accountable for all shipped code.
+and enforced twice on the way out: CI publishes no Docker image from a commit
+whose test matrix failed, and the systemd deploy script runs the full suite
+before every service restart. The author reviews and is accountable for all
+shipped code.
 
 ## License
 
