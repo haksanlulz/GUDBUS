@@ -360,14 +360,18 @@ class TestSkillCacheSingleOwner:
 #: Discord's hard limit on top-level entries per application. Not ours to raise.
 _DISCORD_TOP_LEVEL_CAP = 100
 
-#: Measured from the live tree 2026-08-07. The arc adds one subsystem at a time
-#: and each one wants commands, so this number is the whole reason groups are
-#: mandatory: at one top-level per feature the app hits Discord's wall inside a
-#: handful of slices, and the wall has no appeal. Slice 1 takes this to 46 by
-#: adding a crafting GROUP — a single entry buying a whole subsystem, which is
-#: the trade the pin exists to make visible.
-_TOP_LEVEL_COUNT = 45
-_GROUP_COUNT = 12
+#: Measured from the live tree. The arc adds one subsystem at a time and each
+#: one wants commands, so this number is the whole reason groups are mandatory:
+#: at one top-level per feature the app hits Discord's wall inside a handful of
+#: slices, and the wall has no appeal.
+#:
+#: 2026-08-07, 45 → 46: slice 1a added the `craft` GROUP. One top-level entry
+#: bought a whole subsystem, and crafting's remaining four domains — alchemy,
+#: repair, enchantment, mundane crafting — now cost zero further entries. That
+#: is the trade this pin exists to make visible, and it is the ruling ATTACK.md
+#: predicted the first slice would force.
+_TOP_LEVEL_COUNT = 46
+_GROUP_COUNT = 13
 _STANDALONE_COUNT = 33
 
 

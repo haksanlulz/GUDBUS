@@ -38,6 +38,7 @@ EXTENSIONS = [
     "gurps_bot.cogs.reference",
     "gurps_bot.cogs.macros",
     "gurps_bot.cogs.campaign",
+    "gurps_bot.cogs.crafting",
     # Last: it reads the loaded tree for command descriptions, and loading it
     # last is not required (it reads at invoke time) but keeps the order honest
     # about what it depends on.

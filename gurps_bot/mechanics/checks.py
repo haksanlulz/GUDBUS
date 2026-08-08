@@ -59,6 +59,17 @@ def _determine_outcome(rolled: int, target: int) -> Outcome:
     return Outcome.FAILURE
 
 
+def check_against(rolled: int, target: int) -> Outcome:
+    """Classify a roll someone else made, without rolling one here.
+
+    The GM rolls Concept and Prototype secretly (B473-474), so the crafting
+    engine is handed a number rather than making one. Also the only way to
+    assert the no-clamp property at a negative target without gambling on
+    ``check()`` producing a 3.
+    """
+    return _determine_outcome(rolled, target)
+
+
 def check(target: int, modifier: int = 0) -> CheckResult:
     """3d6 vs target + modifier"""
     effective = target + modifier

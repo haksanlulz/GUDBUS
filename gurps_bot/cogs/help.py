@@ -78,6 +78,11 @@ TOPICS: dict[str, tuple[str, str, tuple[str, ...]]] = {
          "timer add", "timer list", "timer tick", "timer remove",
          "reaction roll", "reaction band"),
     ),
+    "crafting": (
+        "Making things",
+        "Invent what no catalog carries, and price the attempt before you start.",
+        ("craft invent", "craft costs"),
+    ),
     "tracking": (
         "Between sessions",
         "Study time and money, tracked across sessions.",
