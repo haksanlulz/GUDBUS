@@ -12,11 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-import discord
 import pytest_asyncio
-from discord.ext import commands
 
-from gurps_bot.bot import EXTENSIONS
 from gurps_bot.cogs.help import _tree_descriptions
 
 README = Path(__file__).resolve().parent.parent / "README.md"
@@ -24,18 +21,12 @@ README = Path(__file__).resolve().parent.parent / "README.md"
 
 @pytest_asyncio.fixture
 async def tree():
-    bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
-    try:
-        for ext in EXTENSIONS:
-            await bot.load_extension(ext)
-        yield bot.tree
-    finally:
-        await bot.close()
-        # Bot.close() pops cog modules out of sys.modules; restore the same
-        # objects (see test_extensions_load._restore_extension_modules).
-        from tests.test_extensions_load import _restore_extension_modules
+    # Bot.close() pops the cog modules out of sys.modules; loaded_bot() owns
+    # putting the same objects back (see test_extensions_load for the story).
+    from tests.test_extensions_load import loaded_bot
 
-        _restore_extension_modules()
+    async with loaded_bot() as bot:
+        yield bot.tree
 
 
 async def test_readme_command_count_matches_the_live_tree(tree):

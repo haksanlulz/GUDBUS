@@ -7,6 +7,9 @@ nothing stopped the next edit from breaking them:
   ``interaction.client.db()`` / ``self.bot.db()`` context and delegate queries to
   ``services/``; the cog owns the transaction (``session.commit()``), the service
   owns the query.
+* **Top-level command count** — Discord caps an application at 100 top-level
+  entries, and the post-launch arc's whole premise is breadth. New commands land
+  inside groups; a new top-level is a deliberate re-pin here, not a drift.
 * **Skill-cache single-owner invalidation** — ``skill_cache`` is defined in
   ``utils/_cache_instances.py`` and invalidated ONLY by ``services/characters.py``,
   at the service layer, so every caller of ``set_active_character`` /
@@ -29,6 +32,9 @@ import ast
 from pathlib import Path
 
 import pytest
+from discord import app_commands
+
+from tests.test_extensions_load import loaded_bot
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_ROOT = REPO_ROOT / "gurps_bot"
@@ -345,3 +351,80 @@ class TestSkillCacheSingleOwner:
             f"contract in this module (and utils/_cache_instances.py's docstring) "
             f"names it as the definition site"
         )
+
+
+# ---------------------------------------------------------------------------
+# (c) Top-level command count.
+# ---------------------------------------------------------------------------
+
+#: Discord's hard limit on top-level entries per application. Not ours to raise.
+_DISCORD_TOP_LEVEL_CAP = 100
+
+#: Measured from the live tree 2026-08-07. The arc adds one subsystem at a time
+#: and each one wants commands, so this number is the whole reason groups are
+#: mandatory: at one top-level per feature the app hits Discord's wall inside a
+#: handful of slices, and the wall has no appeal. Slice 1 takes this to 46 by
+#: adding a crafting GROUP — a single entry buying a whole subsystem, which is
+#: the trade the pin exists to make visible.
+_TOP_LEVEL_COUNT = 45
+_GROUP_COUNT = 12
+_STANDALONE_COUNT = 33
+
+
+async def _load_full_tree() -> tuple[list, list]:
+    """(groups, standalone) from the real combined tree.
+
+    Loading every extension into ONE bot is the only way to see the tree
+    Discord sees; per-cog tests each see a fragment. ``loaded_bot`` owns the
+    module-cache restore — ``Bot.close()`` pops the cog modules out of
+    ``sys.modules`` while the parent package still names the orphans, which
+    silently breaks any later ``mock.patch`` by string.
+    """
+    async with loaded_bot() as bot:
+        top = list(bot.tree.get_commands())
+        groups = [c for c in top if isinstance(c, app_commands.Group)]
+        standalone = [c for c in top if not isinstance(c, app_commands.Group)]
+        return groups, standalone
+
+
+class TestTopLevelCommandCountIsPinned:
+    """A new top-level entry must be ruled on, not discovered at the cap."""
+
+    async def test_the_tree_loaded(self):
+        """FAIL CLOSED: an empty tree would satisfy any 'under the cap' check."""
+        groups, standalone = await _load_full_tree()
+        assert groups and standalone, "the combined command tree came back empty"
+
+    async def test_top_level_count_matches_the_pin(self):
+        groups, standalone = await _load_full_tree()
+        total = len(groups) + len(standalone)
+        assert total == _TOP_LEVEL_COUNT, (
+            f"top-level command count is {total}, pinned at {_TOP_LEVEL_COUNT} "
+            f"({len(groups)} groups + {len(standalone)} standalone; pin says "
+            f"{_GROUP_COUNT} + {_STANDALONE_COUNT}).\n"
+            f"Groups: {sorted(g.name for g in groups)}\n"
+            "If the new entry is a GROUP carrying a subsystem, re-pin here and "
+            "say so in the commit. If it is a loose standalone, put it in a "
+            "group instead — Discord caps the app at "
+            f"{_DISCORD_TOP_LEVEL_CAP} and breadth is the point."
+        )
+
+    async def test_the_split_matches_the_pin(self):
+        """Total alone would let a group silently become 12 standalones."""
+        groups, standalone = await _load_full_tree()
+        assert (len(groups), len(standalone)) == (_GROUP_COUNT, _STANDALONE_COUNT), (
+            f"group/standalone split is {len(groups)}/{len(standalone)}, "
+            f"pinned at {_GROUP_COUNT}/{_STANDALONE_COUNT} — the total can hold "
+            f"while the shape degrades"
+        )
+
+    async def test_the_tree_is_under_discords_cap(self):
+        """The pin's own reason, executable rather than documented."""
+        groups, standalone = await _load_full_tree()
+        total = len(groups) + len(standalone)
+        assert total < _DISCORD_TOP_LEVEL_CAP, (
+            f"{total} top-level entries against Discord's {_DISCORD_TOP_LEVEL_CAP} cap"
+        )
+
+    def test_the_pin_is_internally_consistent(self):
+        assert _GROUP_COUNT + _STANDALONE_COUNT == _TOP_LEVEL_COUNT

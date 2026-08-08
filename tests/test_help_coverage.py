@@ -13,32 +13,23 @@ until someone decides where it goes.
 
 from __future__ import annotations
 
-import discord
 import pytest
 import pytest_asyncio
-from discord.ext import commands
 
-from gurps_bot.bot import EXTENSIONS
 from gurps_bot.cogs.help import TOPICS, UNTOPICED, HelpCog, _tree_descriptions
 
 
 @pytest_asyncio.fixture
 async def tree():
-    bot = commands.Bot(command_prefix="!", intents=discord.Intents.none())
-    try:
-        for ext in EXTENSIONS:
-            await bot.load_extension(ext)
-        yield bot.tree
-    finally:
-        await bot.close()
-        # Bot.close() unloads every extension, which pops the cog modules out
-        # of sys.modules. Restore the same OBJECTS rather than re-importing —
-        # re-importing restores the names but builds new modules, which is how
-        # a patch and a call end up in two different ones (see
-        # test_extensions_load._restore_extension_modules for the full story).
-        from tests.test_extensions_load import _restore_extension_modules
+    # Bot.close() unloads every extension, which pops the cog modules out of
+    # sys.modules. loaded_bot() restores the same OBJECTS rather than
+    # re-importing — re-importing restores the names but builds new modules,
+    # which is how a patch and a call end up in two different ones (see
+    # test_extensions_load for the full story).
+    from tests.test_extensions_load import loaded_bot
 
-        _restore_extension_modules()
+    async with loaded_bot() as bot:
+        yield bot.tree
 
 
 def _topiced() -> set[str]:
