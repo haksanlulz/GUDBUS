@@ -162,14 +162,14 @@ class TestConceptModifier:
         mod = crafting.concept_modifier(
             Complexity.COMPLEX,
             new_technology=True,   # -5
-            one_tl_above=True,     # -5
+            tl_gap=1,              # -5
         )
         assert mod.total == -14 - 5 - 5
 
     def test_new_technology_is_independent_of_tech_level(self):
         """"regardless of TL" — the two -5s are different rules and both apply."""
         both = crafting.concept_modifier(
-            Complexity.SIMPLE, new_technology=True, one_tl_above=True
+            Complexity.SIMPLE, new_technology=True, tl_gap=1
         ).total
         only_new = crafting.concept_modifier(Complexity.SIMPLE, new_technology=True).total
         assert both == only_new - 5
@@ -189,7 +189,7 @@ class TestConceptModifier:
     def test_the_breakdown_names_every_term(self):
         """The guided flow shows its work; a bare integer cannot be audited."""
         mod = crafting.concept_modifier(
-            Complexity.AVERAGE, working_model=True, one_tl_above=True
+            Complexity.AVERAGE, working_model=True, tl_gap=1
         )
         labels = [label for label, _ in mod.terms]
         assert any("Average" in label for label in labels)
@@ -325,7 +325,7 @@ class TestMoneyIsNeverSummedIntoOneNumber:
         are two separate sentences applying to the same condition."""
         plain = crafting.invention_costs(Complexity.AVERAGE, retail_price=2_000)
         ahead = crafting.invention_costs(
-            Complexity.AVERAGE, retail_price=2_000, one_tl_above=True
+            Complexity.AVERAGE, retail_price=2_000, tl_gap=1
         )
         assert ahead.facilities == plain.facilities * 3
         assert ahead.per_attempt == plain.per_attempt * 3
@@ -335,7 +335,7 @@ class TestMoneyIsNeverSummedIntoOneNumber:
         figures above — a shared multiplier would be a fabrication."""
         plain = crafting.invention_costs(Complexity.AVERAGE, retail_price=2_000)
         ahead = crafting.invention_costs(
-            Complexity.AVERAGE, retail_price=2_000, one_tl_above=True
+            Complexity.AVERAGE, retail_price=2_000, tl_gap=1
         )
         assert ahead.per_copy_parts_only == plain.per_copy_parts_only
 
@@ -349,7 +349,7 @@ class TestMoneyIsNeverSummedIntoOneNumber:
 
     def test_reuse_and_a_tl_advance_compose(self):
         costs = crafting.invention_costs(
-            Complexity.COMPLEX, retail_price=100, reuses_facilities=True, one_tl_above=True
+            Complexity.COMPLEX, retail_price=100, reuses_facilities=True, tl_gap=1
         )
         assert costs.facilities == 250_000 * 3 // 10
 
@@ -591,3 +591,181 @@ class TestPrototypeCriticalFailure:
             Complexity.COMPLEX, reuses_facilities=True
         )
         assert rebuilt == 250_000
+
+
+# --- sealed probe 1 -----------------------------------------------------------
+
+
+class TestSealedProbeOne:
+    """The anchor scene, re-verified 2026-08-09 against the sealed probe.
+
+    Provenance matters here and ATTACK.md records it: probe 1 is one of the two
+    CLEAN held-out checks. It was not opened while the engine was written, and
+    the engine was committed (`5c535e8`, `e69cb47`) before the seal was broken —
+    so this is an anti-fabrication rung rather than a differential. Seal
+    verified by sha256 against ATTACK.md's frontmatter before reading.
+
+    Scenario: a TL+3 superscience portable mansion, effective skill 16 (the
+    LOWEST of Engineer 18 / Physics 16 / Mathematics 16 — B473 says roll against
+    the lower of the invention skill and any required related skill), Complex,
+    new technology, four skilled assistants at the prototype stage, five workers,
+    base production cost $1,500,000.
+
+    ⚑ The first run FAILED on the two targets, by exactly -10 each. One dominant
+    delta across both, which per Rule 23 indicts the definition rather than the
+    subject: the engine treated "above the inventor's TL" as a boolean worth -5,
+    and TL+3 is three steps of it. Fixed to a graded `tl_gap`.
+
+    ⬜ The money figures are STILL OPEN and are deliberately not asserted here.
+    See `TestSealedProbeOneMoneyIsUnresolved` below.
+    """
+
+    SKILL = 16
+    RETAIL = 1_500_000
+
+    def _concept(self):
+        return crafting.concept_modifier(
+            Complexity.COMPLEX, new_technology=True, tl_gap=3
+        )
+
+    def _prototype(self):
+        return crafting.prototype_modifier(
+            Complexity.COMPLEX,
+            new_technology=True,
+            tl_gap=3,
+            skilled_assistants=4,
+        )
+
+    def test_concept_target_is_minus_eighteen(self):
+        """16 - 14 (Complex) - 15 (three TL steps) - 5 (new tech)."""
+        assert crafting.effective_target(self.SKILL, self._concept()) == -18
+
+    def test_prototype_target_is_minus_fourteen(self):
+        """The same modifiers, plus +4 for the assistants."""
+        assert crafting.effective_target(self.SKILL, self._prototype()) == -14
+
+    def test_neither_target_is_clamped(self):
+        """'A build reporting anything other than -18 and -14 here has failed,
+        even if every other case matches.'"""
+        assert self._concept().total < 0
+        assert self._prototype().total < 0
+
+    def test_a_natural_three_still_succeeds_at_minus_eighteen(self):
+        """B347 corollary the probe calls out: the workflow must not
+        short-circuit an 'impossible' roll away."""
+        from gurps_bot.mechanics.checks import Outcome, check_against
+
+        assert check_against(rolled=3, target=-18) is Outcome.CRITICAL_SUCCESS
+        assert check_against(rolled=4, target=-18) is Outcome.CRITICAL_SUCCESS
+
+    def test_the_four_stages_are_distinct_and_ordered(self):
+        assert [s.name for s in crafting.STAGES] == [
+            "Concept", "Prototype", "Testing", "Production",
+        ]
+
+    def test_concept_and_prototype_are_both_gm_rolled_and_secret(self):
+        for stage in (Stage.CONCEPT, Stage.PROTOTYPE):
+            assert stage.roller is Roller.GM
+            assert stage.secret is True
+
+    def test_testing_uses_a_different_skill_from_the_invention_rolls(self):
+        """Electronics Operation (Superscience) -3, not the invention skill."""
+        assert Stage.TESTING.skill_kind == "operation"
+        assert Stage.PROTOTYPE.skill_kind == "invention"
+        assert crafting.TESTING_PENALTY == -3
+
+    def test_the_cadences_are_per_stage(self):
+        assert Stage.CONCEPT.cadence == "once per day"
+        assert Stage.TESTING.cadence == "once per week"
+
+    def test_prototype_time_is_one_d_months_over_five_workers(self):
+        assert str(Complexity.COMPLEX.prototype_time.dice) == "1d"
+        assert Complexity.COMPLEX.prototype_time.unit == "months"
+        # A rolled 5 over 5 workers is one month; the divisor is applied, and
+        # the floor does not swallow it.
+        elapsed = crafting.prototype_elapsed(
+            Complexity.COMPLEX, rolled_dice=5, workers=5
+        )
+        assert (elapsed.amount, elapsed.unit) == (1, "months")
+
+    def test_a_copy_costs_the_base_production_price(self):
+        costs = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=3)
+        assert costs.per_copy_with_labour == 1_500_000
+
+    def test_a_copy_takes_half_the_prototype_time(self):
+        """'1d/2 months per copy' — half of the prototype's 1d months."""
+        assert crafting.copy_time(prototype_days=30) == 15
+
+
+class TestSealedProbeOneMoneyIsUnresolved:
+    """The one part of probe 1 the engine does NOT reproduce, recorded as such.
+
+    Probe 1 gives, for the same TL+3 scenario:
+
+        facilities  $1,750,000   = Complex base $250,000   x 7
+        per attempt $7,500,000   = retail    $1,500,000    x 5
+
+    B474 prints a single rule — "Triple these costs" / "Triple this cost" — for a
+    ONE-step gap, and B473 says the New Inventions rules cover at most one TL in
+    advance, so the book has no answer for TL+3 at all. **No single multiplier
+    produces both 7 and 5**, so there is nothing to derive: fitting a scaling law
+    to two disagreeing points is exactly the fabrication the probe exists to
+    catch, and the engine would then be "verified" against a rule nobody printed.
+
+    So the engine keeps B474's x3 as the default and takes the multiplier as a
+    GM parameter. These tests pin what IS known and assert the gap stays visible
+    rather than quietly closing.
+
+    ⬜ Operator ruling owed — three readings and no way to choose between them
+    from here: a house rule with an unstated derivation, a rule from Ultra-Tech
+    or another book that was applied but not cited, or one of the deliberate
+    planted errors (ATTACK.md records that probes carry them, and that probe 5's
+    materials figure survived two passes before being caught).
+    """
+
+    RETAIL = 1_500_000
+
+    def test_the_book_default_is_still_triple(self):
+        costs = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=1)
+        assert costs.facilities == 250_000 * 3
+        assert costs.per_attempt == 1_500_000 * 3
+
+    def test_the_default_does_not_silently_scale_with_the_gap(self):
+        """Three steps must not quietly become x9 or x27. The roll penalty is
+        linear because the probe measured it twice; the cost rule was not."""
+        one = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=1)
+        three = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=3)
+        assert three.facilities == one.facilities
+        assert three.per_attempt == one.per_attempt
+
+    def test_no_single_multiplier_reproduces_the_probe(self):
+        """The finding itself, as an assertion — so 'just pick one' fails here.
+
+        If a future session sets a multiplier that satisfies one figure, this
+        shows the other breaks, and the ruling is still owed.
+        """
+        for multiplier in range(1, 21):
+            costs = crafting.invention_costs(
+                Complexity.COMPLEX, self.RETAIL, tl_gap=3,
+                tl_cost_multiplier=multiplier,
+            )
+            matches_both = (
+                costs.facilities == 1_750_000 and costs.per_attempt == 7_500_000
+            )
+            assert not matches_both, (
+                f"multiplier {multiplier} reproduces BOTH probe-1 money figures — "
+                f"the arithmetic that made this test necessary was wrong, and the "
+                f"open ruling can be closed"
+            )
+
+    def test_the_gm_can_still_express_either_figure(self):
+        """The engine must not make the operator's own numbers unreachable."""
+        facilities = crafting.invention_costs(
+            Complexity.COMPLEX, self.RETAIL, tl_gap=3, tl_cost_multiplier=7
+        )
+        assert facilities.facilities == 1_750_000
+
+        attempt = crafting.invention_costs(
+            Complexity.COMPLEX, self.RETAIL, tl_gap=3, tl_cost_multiplier=5
+        )
+        assert attempt.per_attempt == 7_500_000

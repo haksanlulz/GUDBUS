@@ -46,6 +46,19 @@ async def _choose(item, interaction, *values: str) -> None:
     await item.callback(interaction)
 
 
+async def _adjust(view, *, tl_gap="0", variant="0", description="0") -> MagicMock:
+    """Submit the GM-adjustments modal the way Discord does."""
+    from gurps_bot.cogs.crafting import GmAdjustmentsModal
+
+    modal = GmAdjustmentsModal(view)
+    modal.tl_gap._value = tl_gap
+    modal.variant_bonus._value = variant
+    modal.description_bonus._value = description
+    interaction = _interaction()
+    await modal.on_submit(interaction)
+    return interaction
+
+
 def _result(rolled: int, target: int) -> CheckResult:
     spec = DiceSpec(3, 6, 0)
     from gurps_bot.mechanics.checks import _determine_outcome
@@ -74,10 +87,10 @@ class TestTheMenusBuildTheModifier:
         view = InventionFlowView(skill=14, invoker_id=1)
         await _choose(view.complexity_select, _interaction(), "simple")
         await _choose(
-            view.situation_select, _interaction(), "working_model", "one_tl_above"
+            view.situation_select, _interaction(), "working_model", "device_exists"
         )
         expected = crafting.concept_modifier(
-            Complexity.SIMPLE, working_model=True, one_tl_above=True
+            Complexity.SIMPLE, working_model=True, device_exists=True
         )
         assert view.modifier().total == expected.total
 
@@ -89,11 +102,10 @@ class TestTheMenusBuildTheModifier:
         await _choose(view.situation_select, _interaction())
         assert view.modifier().total == Complexity.SIMPLE.concept_penalty
 
-    async def test_the_gm_bonuses_are_menus_not_typed_numbers(self):
+    async def test_the_gm_bonuses_come_from_the_adjustments_modal(self):
         view = InventionFlowView(skill=12, invoker_id=1)
         await _choose(view.complexity_select, _interaction(), "complex")
-        await _choose(view.variant_select, _interaction(), "4")
-        await _choose(view.description_select, _interaction(), "2")
+        await _adjust(view, variant="4", description="2")
         assert view.modifier().total == -14 + 4 + 2
 
     async def test_every_situation_option_is_a_real_engine_keyword(self):
@@ -471,8 +483,8 @@ class TestSavingFromTheGuidedFlow:
     async def test_it_stores_the_menu_choices(self, db):
         view = InventionFlowView(skill=18, invoker_id=1)
         await _choose(view.complexity_select, _interaction(), "amazing")
-        await _choose(view.situation_select, _interaction(), "one_tl_above")
-        await _choose(view.variant_select, _interaction(), "2")
+        await _adjust(view, tl_gap="3", variant="2")
+        await _choose(view.situation_select, _interaction(), "new_technology")
 
         await self._submit(db, view)
 
@@ -480,8 +492,9 @@ class TestSavingFromTheGuidedFlow:
             found = (await service.list_projects(s, 1, 99))[0]
             assert found.complexity == "amazing"
             assert found.skill == 18
-            assert found.modifiers_json["situations"] == ["one_tl_above"]
+            assert found.modifiers_json["situations"] == ["new_technology"]
             assert found.modifiers_json["variant_bonus"] == 2
+            assert found.modifiers_json["tl_gap"] == 3
 
     async def test_the_stored_modifiers_rebuild_the_same_number(self, db):
         """Storing the GM's calls rather than the total is only worth it if the
@@ -489,7 +502,7 @@ class TestSavingFromTheGuidedFlow:
         view = InventionFlowView(skill=18, invoker_id=1)
         await _choose(view.complexity_select, _interaction(), "complex")
         await _choose(view.situation_select, _interaction(), "working_model")
-        await _choose(view.description_select, _interaction(), "1")
+        await _adjust(view, tl_gap="2", description="1")
         expected = view.target()
 
         await self._submit(db, view)
@@ -501,6 +514,7 @@ class TestSavingFromTheGuidedFlow:
             Complexity[found.complexity.upper()],
             variant_bonus=stored["variant_bonus"],
             description_bonus=stored["description_bonus"],
+            tl_gap=stored["tl_gap"],
             **{k: True for k in stored["situations"]},
         )
         assert crafting.effective_target(found.skill, rebuilt) == expected

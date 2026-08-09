@@ -56,7 +56,6 @@ _SITUATIONS = (
     ("working_model", "I have a working model to copy"),
     ("device_exists", "It exists, but I have no model"),
     ("new_technology", "The basic technology is new to the campaign"),
-    ("one_tl_above", "It is one TL above me"),
 )
 
 
@@ -88,6 +87,10 @@ class InventionFlowView(discord.ui.View):
         self.situations: set[str] = set()
         self.variant_bonus = 0
         self.description_bonus = 0
+        #: How many TLs above the inventor. Graded rather than a yes/no, because
+        #: the anchor scene is a TL+3 superscience item and a boolean cannot say
+        #: so — sealed probe 1 puts that at -15, not -5.
+        self.tl_gap = 0
 
     # The flow belongs to whoever opened it; a shared message otherwise lets a
     # bystander rewrite the GM's calls mid-decision.
@@ -110,6 +113,7 @@ class InventionFlowView(discord.ui.View):
             self.complexity or Complexity.AVERAGE,
             variant_bonus=self.variant_bonus,
             description_bonus=self.description_bonus,
+            tl_gap=self.tl_gap,
             **{name: name in self.situations for name, _ in _SITUATIONS},
         )
 
@@ -127,6 +131,7 @@ class InventionFlowView(discord.ui.View):
             "situations": sorted(self.situations),
             "variant_bonus": self.variant_bonus,
             "description_bonus": self.description_bonus,
+            "tl_gap": self.tl_gap,
         }
 
     def summary_embed(self) -> discord.Embed:
@@ -206,33 +211,11 @@ class InventionFlowView(discord.ui.View):
         self.situations = set(select.values)
         await self._refresh(interaction)
 
-    @discord.ui.select(
-        placeholder="Is it a variant of something that exists? (GM's call)",
-        options=[discord.SelectOption(label="No", value="0")]
-        + [
-            discord.SelectOption(label=f"Yes, +{n}", value=str(n))
-            for n in range(1, 6)
-        ],
-    )
-    async def variant_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select
+    @discord.ui.button(label="GM adjustments…", style=discord.ButtonStyle.secondary)
+    async def adjust_btn(
+        self, interaction: discord.Interaction, button: discord.ui.Button
     ) -> None:
-        self.variant_bonus = int(select.values[0])
-        await self._refresh(interaction)
-
-    @discord.ui.select(
-        placeholder="Did the player explain it well? (GM's call)",
-        options=[
-            discord.SelectOption(label="No bonus", value="0"),
-            discord.SelectOption(label="Clear, +1", value="1"),
-            discord.SelectOption(label="Clever, +2", value="2"),
-        ],
-    )
-    async def description_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select
-    ) -> None:
-        self.description_bonus = int(select.values[0])
-        await self._refresh(interaction)
+        await interaction.response.send_modal(GmAdjustmentsModal(self))
 
     @discord.ui.button(label="Roll it (secret)", style=discord.ButtonStyle.primary)
     async def roll_btn(
@@ -287,6 +270,72 @@ class InventionFlowView(discord.ui.View):
             )
             return
         await interaction.response.send_modal(StartProjectModal(self))
+
+
+class GmAdjustmentsModal(discord.ui.Modal, title="GM adjustments"):
+    """The three graded calls B473 leaves to the GM.
+
+    A modal rather than three more selects: Discord allows five action rows and
+    the flow already spends two on menus and one on buttons. It also suits the
+    values better — the TL gap is an integer with no natural ceiling, and a
+    select would have to guess where to stop.
+    """
+
+    tl_gap = discord.ui.TextInput(
+        label="TLs above the inventor (0 = same TL)",
+        placeholder="0",
+        required=False,
+        default="0",
+        max_length=2,
+    )
+    variant_bonus = discord.ui.TextInput(
+        label="Variant of an existing item? (+0 to +5)",
+        placeholder="0",
+        required=False,
+        default="0",
+        max_length=1,
+    )
+    description_bonus = discord.ui.TextInput(
+        label="Clear or clever description? (+0 to +2)",
+        placeholder="0",
+        required=False,
+        default="0",
+        max_length=1,
+    )
+
+    def __init__(self, view: InventionFlowView) -> None:
+        super().__init__()
+        self.flow = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            gap = int(self.tl_gap.value or "0")
+            variant = int(self.variant_bonus.value or "0")
+            description = int(self.description_bonus.value or "0")
+        except ValueError:
+            await interaction.response.send_message(
+                "Those need to be whole numbers.", ephemeral=True
+            )
+            return
+
+        flow = self.flow
+        try:
+            # Let the engine's own bounds do the validating — a second copy of
+            # "+1 to +5" here is a second thing to keep true.
+            crafting.concept_modifier(
+                flow.complexity or Complexity.AVERAGE,
+                variant_bonus=variant,
+                description_bonus=description,
+                tl_gap=gap,
+            )
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        flow.tl_gap = gap
+        flow.variant_bonus = variant
+        flow.description_bonus = description
+        await flow._refresh(interaction)
 
 
 class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
@@ -404,7 +453,8 @@ class CraftingCog(commands.Cog):
     @app_commands.describe(
         complexity="How hard the GM rated it",
         retail_price="What one finished item sells for",
-        one_tl_above="It is one TL above the inventor",
+        tl_gap="How many TLs above the inventor it is (0 = same TL)",
+        tl_cost_multiplier="GM override for the TL surcharge (B474 prints x3 for one step)",
         reuses_facilities="There are usable facilities left from a related project",
         inventors="How many people are each attempting Prototype rolls",
     )
@@ -422,9 +472,10 @@ class CraftingCog(commands.Cog):
         # optional and so never reaches that guard.
         complexity: str,
         retail_price: int,
-        one_tl_above: bool = False,
+        tl_gap: int = 0,
         reuses_facilities: bool = False,
         inventors: int = 1,
+        tl_cost_multiplier: int | None = None,
     ) -> None:
         if retail_price < 0:
             await respond(interaction, "Retail price cannot be negative.", ephemeral=True)
@@ -432,12 +483,21 @@ class CraftingCog(commands.Cog):
         if not 1 <= inventors <= 20:
             await respond(interaction, "Inventors should be 1 to 20.", ephemeral=True)
             return
+        if not 0 <= tl_gap <= 10:
+            await respond(interaction, "TL gap should be 0 to 10.", ephemeral=True)
+            return
+        if tl_cost_multiplier is not None and not 1 <= tl_cost_multiplier <= 100:
+            await respond(
+                interaction, "TL cost multiplier should be 1 to 100.", ephemeral=True
+            )
+            return
 
         rating = _COMPLEXITY_BY_VALUE[complexity]
         costs = crafting.invention_costs(
             rating,
             retail_price,
-            one_tl_above=one_tl_above,
+            tl_gap=tl_gap,
+            tl_cost_multiplier=tl_cost_multiplier,
             reuses_facilities=reuses_facilities,
             inventors=inventors,
         )

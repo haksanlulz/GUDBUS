@@ -51,6 +51,25 @@ FACILITY_PENALTY_RANGE = (-10, 0)
 DESCRIPTION_BONUS_RANGE = (0, 2)
 VARIANT_BONUS_RANGE = (0, 5)
 
+#: B473: "-5 if the device is one TL above the inventor's TL", applied per step.
+#:
+#: ⚠️ RAW covers ONE step and says so — the rules "cover realistic innovation at
+#: the inventor's tech level – or one TL in advance of that, at most", and past
+#: that B473 hands off to Gadgeteering. The per-step extension is the operator's,
+#: from sealed probe 1: a TL+3 superscience item at effective skill 16 targets
+#: **-18**, which is 16 - 14 (Complex) - 15 (three steps) - 5 (new tech). It was
+#: confirmed twice in one probe — the prototype target -14 carries the identical
+#: gap — so the linear reading is measured rather than assumed.
+TL_GAP_PENALTY_EACH = -5
+
+#: B474: "Triple these costs if the invention is one TL above the inventor's TL."
+#: Same one-step caveat, and unlike the roll penalty this one does NOT extend
+#: cleanly: probe 1's own figures need x7 on facilities and x5 on the attempt,
+#: which no single multiplier produces. So the multiplier stays the book's 3 and
+#: is a GM-supplied parameter past one step, rather than a curve fitted to two
+#: points. See GAUNTLET §5 — an operator ruling is owed.
+TL_COST_MULTIPLIER = 3
+
 #: B474: the prototype explosion. "at least 2d damage" — a floor, not a roll to
 #: be taken literally, which is why the caller is told it is a minimum.
 DISASTER_DAMAGE = DiceSpec(count=2, sides=6, modifier=0)
@@ -177,7 +196,7 @@ def concept_modifier(
     device_exists: bool = False,
     variant_bonus: int = 0,
     new_technology: bool = False,
-    one_tl_above: bool = False,
+    tl_gap: int = 0,
     description_bonus: int = 0,
 ) -> ModifierBreakdown:
     """B473's modifier list for the Concept roll.
@@ -188,6 +207,12 @@ def concept_modifier(
     """
     _check_range("variant_bonus", variant_bonus, VARIANT_BONUS_RANGE)
     _check_range("description_bonus", description_bonus, DESCRIPTION_BONUS_RANGE)
+    if tl_gap < 0:
+        raise ValueError(
+            f"tl_gap is how far the invention is ABOVE the inventor's TL, got "
+            f"{tl_gap}; inventing BELOW your TL reduces complexity instead "
+            f"(see reinvented_complexity)"
+        )
 
     terms: list[tuple[str, int]] = []
 
@@ -213,8 +238,13 @@ def concept_modifier(
         # "regardless of TL" — this is about the campaign, not the inventor, so
         # it stacks with the TL penalty below rather than replacing it.
         terms.append(("basic technology new to the campaign", -5))
-    if one_tl_above:
-        terms.append(("device is one TL above the inventor", -5))
+    if tl_gap:
+        label = (
+            "device is one TL above the inventor"
+            if tl_gap == 1
+            else f"device is {tl_gap} TLs above the inventor"
+        )
+        terms.append((label, tl_gap * TL_GAP_PENALTY_EACH))
     if description_bonus:
         terms.append(("clear or clever description", description_bonus))
 
@@ -280,7 +310,8 @@ def invention_costs(
     complexity: Complexity,
     retail_price: int,
     *,
-    one_tl_above: bool = False,
+    tl_gap: int = 0,
+    tl_cost_multiplier: int | None = None,
     reuses_facilities: bool = False,
     inventors: int = 1,
 ) -> InventionCosts:
@@ -289,13 +320,29 @@ def invention_costs(
     The TL surcharge is two separate sentences applying to the same condition —
     facilities and the per-attempt charge both triple. Production is priced off
     retail and is not among them.
+
+    ``tl_cost_multiplier`` defaults to the book's 3 whenever the invention is
+    above the inventor's TL at all. It is a parameter because B474 only prices a
+    ONE-step gap and probe 1's TL+3 figures do not follow from any single
+    multiplier — fitting one to two points would be the fabrication this engine
+    is meant to avoid, so the GM supplies it instead.
     """
     if inventors < 1:
         raise ValueError(f"an invention needs at least one inventor, got {inventors}")
+    if tl_gap < 0:
+        raise ValueError(f"tl_gap cannot be negative, got {tl_gap}")
+    if tl_cost_multiplier is not None and tl_cost_multiplier < 1:
+        raise ValueError(
+            f"tl_cost_multiplier must be at least 1, got {tl_cost_multiplier}"
+        )
 
-    facilities = complexity.facility_cost
-    if one_tl_above:
-        facilities *= 3
+    multiplier = 1
+    if tl_gap:
+        multiplier = (
+            TL_COST_MULTIPLIER if tl_cost_multiplier is None else tl_cost_multiplier
+        )
+
+    facilities = complexity.facility_cost * multiplier
     if reuses_facilities:
         # "Divide costs by 10 if the inventor has appropriate facilities left
         # over from a related project of equal or higher complexity."
@@ -304,7 +351,7 @@ def invention_costs(
     # facilities cost 'up front'" — assistants are not inventors.
     facilities *= inventors
 
-    per_attempt = retail_price * 3 if one_tl_above else retail_price
+    per_attempt = retail_price * multiplier
 
     return InventionCosts(
         facilities=facilities,
@@ -317,7 +364,8 @@ def invention_costs(
 def rebuild_facilities_cost(
     complexity: Complexity,
     *,
-    one_tl_above: bool = False,
+    tl_gap: int = 0,
+    tl_cost_multiplier: int | None = None,
     reuses_facilities: bool = False,
 ) -> int:
     """B474: after an explosion the facilities "must be rebuilt at full cost".
@@ -327,7 +375,12 @@ def rebuild_facilities_cost(
     where it did not. Silently honouring it would refund a disaster.
     """
     cost = complexity.facility_cost
-    return cost * 3 if one_tl_above else cost
+    if not tl_gap:
+        return cost
+    multiplier = (
+        TL_COST_MULTIPLIER if tl_cost_multiplier is None else tl_cost_multiplier
+    )
+    return cost * multiplier
 
 
 # --- time -------------------------------------------------------------------
