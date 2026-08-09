@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 
 # Imported for their side effect: each module registers its tables on the
 # shared metadata, and a table that is not imported is not inspectable.
+from gurps_bot.db import crafting as _crafting  # noqa: F401
 from gurps_bot.db import notes as _notes  # noqa: F401
 from gurps_bot.db import study as _study  # noqa: F401
 from gurps_bot.db import timers as _timers  # noqa: F401
@@ -36,6 +37,7 @@ from gurps_bot.db.notes import Note
 from gurps_bot.db.timers import Timer
 from gurps_bot.services.admin import cleanup_guild_data
 from gurps_bot.services.combat import add_npc_combatant, start_combat
+from gurps_bot.services.crafting import record_attempt, start_project
 
 GUILD = 555_000
 OTHER_GUILD = 555_001
@@ -48,6 +50,7 @@ EXPECTED_GUILD_SCOPED = {
     "active_characters",
     "campaign_settings",
     "combats",
+    "crafting_projects",
     "notes",
     "timers",
 }
@@ -106,6 +109,18 @@ class TestLeavingAGuildClearsIt:
             await add_npc_combatant(
                 s, combat, name="M", basic_speed=5.0, hp=10, fp=10, ht=10
             )
+            # Seeded with a charge, not bare: the ledger is a child table with
+            # no guild_id of its own, so purging only the parent would leave it
+            # orphaned and this test would never notice.
+            project = await start_project(
+                s,
+                discord_user_id=USER,
+                guild_id=guild_id,
+                name=f"engine{guild_id}",
+                complexity="average",
+                skill=14,
+            )
+            await record_attempt(s, project, amount=100, outcome="failure")
             await s.commit()
 
     async def _rows_for(self, session_factory, guild_id: int) -> dict[str, int]:

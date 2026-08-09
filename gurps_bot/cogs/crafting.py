@@ -29,6 +29,13 @@ from discord.ext import commands
 from gurps_bot.mechanics import crafting
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Stage
+from gurps_bot.services.crafting import (
+    charge_history,
+    finish_project,
+    get_project,
+    list_projects,
+    spent_by_kind,
+)
 from gurps_bot.ui.respond import respond
 
 if TYPE_CHECKING:
@@ -108,6 +115,19 @@ class InventionFlowView(discord.ui.View):
 
     def target(self) -> int:
         return crafting.effective_target(self.skill, self.modifier())
+
+    def stored_modifiers(self) -> dict:
+        """The GM's calls, in the shape a resumed project can re-render.
+
+        Stored rather than the resulting integer: a project picked up weeks
+        later shows the same itemised breakdown, and a bare "-27" is a number
+        nobody can argue with.
+        """
+        return {
+            "situations": sorted(self.situations),
+            "variant_bonus": self.variant_bonus,
+            "description_bonus": self.description_bonus,
+        }
 
     def summary_embed(self) -> discord.Embed:
         modifier = self.modifier()
@@ -257,6 +277,92 @@ class InventionFlowView(discord.ui.View):
         # strongest routing available while the bot has no GM identity.
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
+    @discord.ui.button(label="Save as project", style=discord.ButtonStyle.secondary)
+    async def save_btn(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
+        if self.complexity is None:
+            await interaction.response.send_message(
+                "Pick how hard it is first.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(StartProjectModal(self))
+
+
+class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
+    """The name and price the menus cannot ask for.
+
+    B473 has the player describe the invention to the GM, so the name is
+    genuinely the player's text rather than a value the bot could offer. Retail
+    price drives the per-attempt charge and the copy cost, and only the GM knows
+    what the finished item is worth.
+    """
+
+    project_name = discord.ui.TextInput(
+        label="What is it?", placeholder="portable mansion", max_length=200,
+    )
+    retail_price = discord.ui.TextInput(
+        label="Retail price of one finished item ($)",
+        placeholder="250000",
+        required=False,
+        default="0",
+    )
+
+    def __init__(self, view: InventionFlowView) -> None:
+        super().__init__()
+        self.view = view
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        from gurps_bot.services.crafting import start_project
+        from gurps_bot.services.limits import StorageLimitExceeded
+        from gurps_bot.utils.sanitize import sanitize_name
+
+        try:
+            price = int(self.retail_price.value or "0")
+        except ValueError:
+            await respond(
+                interaction, "Retail price must be a whole number.", ephemeral=True
+            )
+            return
+        if price < 0:
+            await respond(interaction, "Retail price cannot be negative.", ephemeral=True)
+            return
+
+        name = sanitize_name(self.project_name.value)
+        if not name:
+            await respond(
+                interaction,
+                "That name is empty once special characters are removed.",
+                ephemeral=True,
+            )
+            return
+
+        view = self.view
+        try:
+            async with interaction.client.db() as session:
+                project = await start_project(
+                    session,
+                    discord_user_id=interaction.user.id,
+                    guild_id=interaction.guild_id,
+                    name=name,
+                    complexity=view.complexity.name.lower(),
+                    skill=view.skill,
+                    retail_price=price,
+                    modifiers=view.stored_modifiers(),
+                )
+                await session.commit()
+                project_id = project.id
+        except StorageLimitExceeded as exc:
+            await respond(interaction, str(exc), ephemeral=True)
+            return
+
+        await respond(
+            interaction,
+            f"Started **{name}** as project `{project_id}`. "
+            f"`/craft project id:{project_id}` to pick it back up.",
+            ephemeral=True,
+        )
+
 
 class CraftingCog(commands.Cog):
     "GURPS Invention (Concept, Prototype, Testing, Production)."
@@ -371,6 +477,121 @@ class CraftingCog(commands.Cog):
         )
         embed.set_footer(text="B474")
         await respond(interaction, embed=embed)
+
+    @craft.command(name="projects", description="Your crafting projects in this server")
+    @app_commands.describe(include_finished="Also show abandoned and completed ones")
+    async def projects(
+        self, interaction: discord.Interaction, include_finished: bool = False
+    ) -> None:
+        async with interaction.client.db() as session:
+            found = await list_projects(
+                session,
+                interaction.user.id,
+                interaction.guild_id,
+                include_finished=include_finished,
+            )
+
+        if not found:
+            await respond(
+                interaction,
+                "No crafting projects here yet. `/craft invent` starts one.",
+                ephemeral=True,
+            )
+            return
+
+        embed = discord.Embed(title="Crafting projects", colour=_INVENTION)
+        for project in found:
+            embed.add_field(
+                name=f"`{project.id}` {project.name}",
+                value=(
+                    f"{project.complexity.capitalize()} · **{project.stage}** · "
+                    f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
+                ),
+                inline=False,
+            )
+        embed.set_footer(text="B473-474")
+        await respond(interaction, embed=embed, ephemeral=True)
+
+    @craft.command(name="project", description="One project: stage, time, and what it has cost")
+    @app_commands.describe(id="The project id from /craft projects")
+    async def project(self, interaction: discord.Interaction, id: int) -> None:
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(
+                    interaction, f"No project `{id}` of yours.", ephemeral=True
+                )
+                return
+            spent = await spent_by_kind(session, found.id)
+            history = await charge_history(session, found.id)
+
+        embed = discord.Embed(
+            title=found.name,
+            description=(
+                f"{found.complexity.capitalize()} {found.domain} · "
+                f"stage **{found.stage}** · skill {found.skill}"
+            ),
+            colour=_INVENTION,
+        )
+        embed.add_field(
+            name="Progress",
+            value=f"{found.attempts} attempt(s) over {found.elapsed_days} day(s)",
+            inline=False,
+        )
+        # Three figures, still apart. Summing them here would undo the whole
+        # point of storing them as typed rows.
+        embed.add_field(
+            name="Spent so far",
+            value="\n".join(
+                f"{kind}: ${amount:,}" for kind, amount in sorted(spent.items())
+            )
+            or "nothing yet",
+            inline=False,
+        )
+        if history:
+            recent = history[-5:]
+            embed.add_field(
+                name=f"Last {len(recent)} of {len(history)} charge(s)",
+                value="\n".join(
+                    f"`{c.kind}` ${c.amount:,}"
+                    + (f" — {c.outcome}" if c.outcome else "")
+                    for c in recent
+                ),
+                inline=False,
+            )
+        # `flawed_theory` is deliberately absent from this embed. B473 makes the
+        # Concept roll secret so the player cannot learn it, and a project view
+        # they can run themselves is the last place it should leak.
+        embed.set_footer(text="B473-474")
+        await respond(interaction, embed=embed, ephemeral=True)
+
+    @craft.command(name="abandon", description="End a project — the spending stays on record")
+    @app_commands.describe(id="The project id from /craft projects")
+    async def abandon(self, interaction: discord.Interaction, id: int) -> None:
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(
+                    interaction, f"No project `{id}` of yours.", ephemeral=True
+                )
+                return
+            if found.is_finished:
+                await respond(
+                    interaction,
+                    f"`{id}` is already {found.stage}.",
+                    ephemeral=True,
+                )
+                return
+            name = found.name
+            await finish_project(session, found, "abandoned")
+            await session.commit()
+
+        await respond(
+            interaction,
+            f"Abandoned **{name}**. Its charge history stays — the money was "
+            f"still spent.",
+            ephemeral=True,
+        )
 
 
 async def setup(bot: commands.Bot) -> None:

@@ -57,11 +57,24 @@ def _build_pre_migration_db(db_path, drop_tables: list[str], drop_columns: dict)
 
 @pytest.fixture
 def legacy_db(tmp_path):
-    """A DB at the revision just before campaign_settings existed."""
+    """A DB at the revision just before campaign_settings existed.
+
+    ⚠️ `drop_tables` must name EVERY table created after `a7d3e9c1f2b4`, not
+    just the one this file is about. `_build_pre_migration_db` runs `create_all`
+    over whatever metadata is left, so a table omitted here gets built into a
+    database stamped three revisions in its past — and `bootstrap.main` then
+    runs that table's migration and dies on "already exists". That is the very
+    incident these tests exist for, staged by the fixture rather than the code:
+    adding `crafting_projects` in 2026-08-09 broke four tests here that way, and
+    the code under test was fine.
+
+    So this list grows with every new-table migration. It is not a list of
+    interesting tables; it is "what did not exist at a7d3e9c1f2b4".
+    """
     db = tmp_path / "gurps_bot.db"
     _build_pre_migration_db(
         db,
-        drop_tables=["campaign_settings"],
+        drop_tables=["campaign_settings", "crafting_charges", "crafting_projects"],
         drop_columns={"combatants": "parries_by_weapon"},
     )
     con = sqlite3.connect(db)

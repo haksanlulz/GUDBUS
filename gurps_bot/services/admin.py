@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gurps_bot.services.campaign import purge_guild_campaign_settings
 from gurps_bot.services.characters import purge_guild_active_characters
 from gurps_bot.services.combat import purge_guild_combats
+from gurps_bot.services.crafting import purge_guild_crafting_projects
 from gurps_bot.services.notes import purge_guild_notes
 from gurps_bot.services.timers import purge_guild_timers
 
@@ -22,7 +23,8 @@ async def cleanup_guild_data(session: AsyncSession, guild_id: int) -> None:
     """Purge every guild-scoped row for a guild the bot has left.
 
     Removes the guild's active-character selections, combats (and their
-    combatants), notes, timers, and house rules. Characters are global (keyed
+    combatants), notes, timers, house rules, and crafting projects (with
+    their charge ledgers). Characters are global (keyed
     by user, no guild_id) and are kept, as are user-scoped study logs, wealth
     and dice macros. Caller commits.
 
@@ -38,3 +40,4 @@ async def cleanup_guild_data(session: AsyncSession, guild_id: int) -> None:
     await purge_guild_notes(session, guild_id)
     await purge_guild_timers(session, guild_id)
     await purge_guild_campaign_settings(session, guild_id)
+    await purge_guild_crafting_projects(session, guild_id)

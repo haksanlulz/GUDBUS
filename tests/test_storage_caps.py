@@ -194,4 +194,5 @@ class TestTheCapsAreDiscoverable:
             "MAX_MACROS_PER_USER",
             "MAX_TIMERS_PER_CHANNEL",
             "MAX_STUDY_LOGS_PER_USER",
+            "MAX_CRAFTING_PROJECTS_PER_USER",
         }, "the cap set changed — is a new user-writable table uncapped?"

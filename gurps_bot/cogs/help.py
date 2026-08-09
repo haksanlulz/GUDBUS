@@ -1,4 +1,8 @@
-"""`/help` — orientation for a bot with 96 commands.
+"""`/help` — orientation for a bot with more commands than anyone will read.
+
+(This line used to state a count. It said 96 while the tree served 102, because
+nothing pinned it — the README's count IS pinned, by `tests/test_readme.py`, so
+it stays the one place that carries the number.)
 
 Descriptions are read from the live command tree rather than restated here.
 That is the whole design: help that repeats a command's description is a second
@@ -81,7 +85,8 @@ TOPICS: dict[str, tuple[str, str, tuple[str, ...]]] = {
     "crafting": (
         "Making things",
         "Invent what no catalog carries, and price the attempt before you start.",
-        ("craft invent", "craft costs"),
+        ("craft invent", "craft costs", "craft projects", "craft project",
+         "craft abandon"),
     ),
     "tracking": (
         "Between sessions",

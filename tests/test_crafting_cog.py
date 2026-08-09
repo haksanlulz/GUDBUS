@@ -283,3 +283,251 @@ class TestInventEntryPoint:
         interaction = _interaction()
         await cog.invent.callback(cog, interaction, skill)
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+# --- the project surface ----------------------------------------------------
+#
+# These need a real database: the commands are thin, and what is worth asserting
+# is that they route through the service and keep the money apart end to end.
+
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from gurps_bot.cogs.crafting import StartProjectModal
+from gurps_bot.db import crafting as _crafting_models  # noqa: F401
+from gurps_bot.db.models import Base
+from gurps_bot.services import crafting as service
+
+
+@pytest_asyncio.fixture
+async def db():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    await engine.dispose()
+
+
+def _interaction_with_db(db, user_id: int = 1, guild_id: int = 99) -> MagicMock:
+    interaction = _interaction(user_id)
+    interaction.guild_id = guild_id
+    interaction.client.db = db
+    return interaction
+
+
+async def _seed_project(db, **kwargs):
+    async with db() as s:
+        project = await service.start_project(
+            s,
+            discord_user_id=kwargs.pop("discord_user_id", 1),
+            guild_id=kwargs.pop("guild_id", 99),
+            name=kwargs.pop("name", "portable mansion"),
+            complexity=kwargs.pop("complexity", "amazing"),
+            skill=kwargs.pop("skill", 18),
+            retail_price=kwargs.pop("retail_price", 250_000),
+            **kwargs,
+        )
+        await s.commit()
+        return project.id
+
+
+class TestProjectsList:
+    async def test_an_empty_list_says_how_to_start_one(self, db):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.projects.callback(cog, interaction, False)
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert "/craft invent" in kwargs["content"]
+        assert kwargs["ephemeral"] is True
+
+    async def test_it_lists_your_live_projects(self, db):
+        await _seed_project(db, name="mansion")
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.projects.callback(cog, interaction, False)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert any("mansion" in f.name for f in embed.fields)
+
+    async def test_it_does_not_list_another_users(self, db):
+        await _seed_project(db, discord_user_id=2, name="theirs")
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db, user_id=1)
+        await cog.projects.callback(cog, interaction, False)
+        assert "content" in interaction.response.send_message.await_args.kwargs
+
+
+class TestProjectDetail:
+    async def test_a_missing_project_says_so_rather_than_erroring(self, db):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.project.callback(cog, interaction, 404)
+        assert "404" in interaction.response.send_message.await_args.kwargs["content"]
+
+    async def test_the_spend_is_broken_out_by_kind(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_charge(s, project, kind="facilities", amount=500_000)
+            await service.record_attempt(s, project, amount=250_000, outcome="failure")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.project.callback(cog, interaction, project_id)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        spent = next(f for f in embed.fields if f.name == "Spent so far")
+        assert "facilities: $500,000" in spent.value
+        assert "attempt: $250,000" in spent.value
+        assert "$750,000" not in spent.value  # never summed
+
+    async def test_the_history_shows_what_each_charge_bought(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_attempt(s, project, amount=250_000, outcome="failure")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.project.callback(cog, interaction, project_id)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        assert any("failure" in (f.value or "") for f in embed.fields)
+
+    async def test_the_flawed_theory_never_reaches_the_embed(self, db):
+        """B473 makes the Concept roll secret so the player cannot learn it.
+
+        A project view the player runs themselves is the last place it may leak.
+        """
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.mark_flawed_theory(s, project)
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.project.callback(cog, interaction, project_id)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        rendered = " ".join(
+            [embed.title or "", embed.description or ""]
+            + [f"{f.name} {f.value}" for f in embed.fields]
+        ).lower()
+        assert "flaw" not in rendered
+        assert "theory" not in rendered
+
+    async def test_another_user_cannot_read_it(self, db):
+        project_id = await _seed_project(db, discord_user_id=2)
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db, user_id=1)
+        await cog.project.callback(cog, interaction, project_id)
+        assert "content" in interaction.response.send_message.await_args.kwargs
+
+
+class TestAbandon:
+    async def test_it_ends_the_project_and_keeps_the_history(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_attempt(s, project, amount=10, outcome="failure")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        await cog.abandon.callback(cog, _interaction_with_db(db), project_id)
+
+        async with db() as s:
+            found = await service.get_project(s, project_id, 1)
+            assert found.stage == "abandoned"
+            assert len(await service.charge_history(s, project_id)) == 1
+
+    async def test_abandoning_twice_says_so(self, db):
+        project_id = await _seed_project(db)
+        cog = CraftingCog(MagicMock())
+        await cog.abandon.callback(cog, _interaction_with_db(db), project_id)
+        interaction = _interaction_with_db(db)
+        await cog.abandon.callback(cog, interaction, project_id)
+        assert "already" in interaction.response.send_message.await_args.kwargs["content"]
+
+    async def test_another_user_cannot_abandon_it(self, db):
+        project_id = await _seed_project(db, discord_user_id=2)
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db, user_id=1)
+        await cog.abandon.callback(cog, interaction, project_id)
+        async with db() as s:
+            found = await service.get_project(s, project_id, 2)
+            assert found.stage == "concept"
+
+
+class TestSavingFromTheGuidedFlow:
+    """The anchor scene has to become a project without retyping anything."""
+
+    async def _submit(self, db, view, name="portable mansion", price="250000"):
+        modal = StartProjectModal(view)
+        modal.project_name._value = name
+        modal.retail_price._value = price
+        interaction = _interaction_with_db(db)
+        await modal.on_submit(interaction)
+        return interaction
+
+    async def test_it_stores_the_menu_choices(self, db):
+        view = InventionFlowView(skill=18, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "amazing")
+        await _choose(view.situation_select, _interaction(), "one_tl_above")
+        await _choose(view.variant_select, _interaction(), "2")
+
+        await self._submit(db, view)
+
+        async with db() as s:
+            found = (await service.list_projects(s, 1, 99))[0]
+            assert found.complexity == "amazing"
+            assert found.skill == 18
+            assert found.modifiers_json["situations"] == ["one_tl_above"]
+            assert found.modifiers_json["variant_bonus"] == 2
+
+    async def test_the_stored_modifiers_rebuild_the_same_number(self, db):
+        """Storing the GM's calls rather than the total is only worth it if the
+        total can be recovered from them."""
+        view = InventionFlowView(skill=18, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "complex")
+        await _choose(view.situation_select, _interaction(), "working_model")
+        await _choose(view.description_select, _interaction(), "1")
+        expected = view.target()
+
+        await self._submit(db, view)
+
+        async with db() as s:
+            found = (await service.list_projects(s, 1, 99))[0]
+        stored = found.modifiers_json
+        rebuilt = crafting.concept_modifier(
+            Complexity[found.complexity.upper()],
+            variant_bonus=stored["variant_bonus"],
+            description_bonus=stored["description_bonus"],
+            **{k: True for k in stored["situations"]},
+        )
+        assert crafting.effective_target(found.skill, rebuilt) == expected
+
+    async def test_a_bad_price_is_refused_without_creating_anything(self, db):
+        view = InventionFlowView(skill=18, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        interaction = await self._submit(db, view, price="lots")
+
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+        async with db() as s:
+            assert await service.list_projects(s, 1, 99) == []
+
+    async def test_a_name_that_sanitizes_to_nothing_is_refused(self, db):
+        view = InventionFlowView(skill=18, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        # "@@@", not "!!!" — sanitize_name keeps ordinary punctuation (GURPS
+        # trait names like "Vow (Chastity)" depend on that), so "!!!" survives
+        # and would never reach the guard this is testing.
+        await self._submit(db, view, name="@@@")
+
+        async with db() as s:
+            assert await service.list_projects(s, 1, 99) == []
+
+    async def test_saving_before_choosing_asks_first(self, db):
+        view = InventionFlowView(skill=18, invoker_id=1)
+        interaction = _interaction_with_db(db)
+        await view.save_btn.callback(interaction)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+        interaction.response.send_modal.assert_not_called()

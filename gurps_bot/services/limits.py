@@ -39,6 +39,12 @@ MAX_TIMERS_PER_CHANNEL = 50
 #: mode is a refusal to add rather than losing history.
 MAX_STUDY_LOGS_PER_USER = 1000
 
+#: Crafting projects (B473-474) are long-lived and few — a campaign runs one or
+#: two at a time. Counted including finished ones, so abandoning everything is
+#: not a way around the cap; deleting is. Each project also drags a charge
+#: ledger, which is the row count that actually grows.
+MAX_CRAFTING_PROJECTS_PER_USER = 50
+
 # Deliberately NOT capped: note body length.
 #
 # Storage is uncapped and only the *display* is truncated — that is a design
