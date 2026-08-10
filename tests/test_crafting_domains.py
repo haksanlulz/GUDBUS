@@ -11,14 +11,15 @@ domain has its own facility ladder, its own reading of "multiple units", its own
 even means. Every test below names one such rule and asserts the two
 implemented domains give different answers to it.
 
-⬜ **Three domains still missing** — alchemy, enchantment, mundane crafting —
-so this scan is real but not yet complete. Its population is 2 of 5, and the
-count is stated here rather than left for a reader to assume otherwise. Each
-new domain should add its column to these tests, and the ones most likely to
-break the current shape are the ones ATTACK.md flags: alchemy shares one roll
-across a batch, crafting reads the roll as QUALITY rather than success or
-quantity, and enchantment's "assistant" means two different things inside a
-single spell.
+⬜ **Two domains still missing** — enchantment and mundane crafting — so this
+scan is real but not yet complete. Its population is 3 of 5, and the count is
+stated here rather than left for a reader to assume otherwise.
+
+⚑ Adding alchemy broke the two-domain shape exactly as ATTACK.md predicted it
+would. Two of these tests had been written as "invention does X, repair does
+not", which reads as a rule and was really a coincidence of a population of
+two — alchemy has a facility ladder like invention's and a batch concept like
+neither. They are now three-way comparisons.
 """
 
 from __future__ import annotations
@@ -27,6 +28,7 @@ import inspect
 
 from gurps_bot import mechanics
 from gurps_bot.mechanics import crafting as invention
+from gurps_bot.mechanics import crafting_alchemy as alchemy
 from gurps_bot.mechanics import crafting_repair as repair
 from gurps_bot.mechanics.crafting import Complexity
 from gurps_bot.mechanics.crafting_repair import RepairTier
@@ -36,6 +38,7 @@ from gurps_bot.mechanics.crafting_repair import RepairTier
 DOMAIN_MODULES = {
     "invention": invention,
     "repair": repair,
+    "alchemy": alchemy,
 }
 
 #: What the arc will eventually hold. Named so the gap is a number rather than
@@ -119,30 +122,93 @@ class TestTheDomainsDisagree:
                     f"item's cost, not by an invention rating"
                 )
 
-    def test_multiple_units_are_not_a_shared_concept(self):
-        """ATTACK.md: repair repeats the full roll and full cost per unit, while
-        alchemy shares one roll across a batch. Neither module offers a batch
-        parameter, and that absence is the correct state rather than an
-        oversight — the two readings cannot share one."""
-        for module in DOMAIN_MODULES.values():
-            for name, obj in vars(module).items():
-                if not inspect.isfunction(obj):
-                    continue
-                params = inspect.signature(obj).parameters
-                for batch_word in ("batch", "doses", "units"):
-                    assert batch_word not in params, (
-                        f"{module.__name__}.{name} takes {batch_word!r} — "
-                        f"'multiple units' means something different in every "
-                        f"domain, so a shared batch parameter is wrong in at "
-                        f"least one"
-                    )
+    def test_multiple_units_means_three_different_things(self):
+        """⚑ This test used to assert that NO domain takes a batch parameter.
 
-    def test_assistants_belong_to_invention_alone_so_far(self):
-        """Five meanings across five domains is the reason there is no shared
-        helper. Repair's B484 core simply has none, and inventing one would be
-        the sixth meaning."""
+        That was true, and it was not a rule — it was a coincidence of a
+        population of two. Adding alchemy broke it on the first run, which is
+        the Rule 25 lesson arriving inside the scan written to enforce it.
+
+        The real statement is that the three domains read "multiple units"
+        three ways, so no shared parameter can serve them:
+        """
+        # Alchemy: one shared roll, cost multiplied by the whole batch.
+        assert alchemy.batch_materials_cost(50, 4) == 200
+        assert alchemy.batch_penalty(4) == -3
+
+        # Invention: no batch concept at all. Copies come AFTER a prototype and
+        # are priced per copy, which is production, not batching.
+        for name, obj in vars(invention).items():
+            if inspect.isfunction(obj):
+                params = inspect.signature(obj).parameters
+                assert "doses" not in params and "batch" not in params, (
+                    f"invention.{name} grew a batch parameter — B473-474 has no "
+                    f"such concept"
+                )
+
+        # Repair: full roll and full cost per unit, so batching is a no-op
+        # rather than a discount, and the module offers no parameter for it.
+        for name, obj in vars(repair).items():
+            if inspect.isfunction(obj):
+                params = inspect.signature(obj).parameters
+                assert "doses" not in params and "batch" not in params, (
+                    f"repair.{name} grew a batch parameter — repairs do not batch"
+                )
+
+    def test_alchemy_has_two_batch_penalties_and_they_differ(self):
+        """Even INSIDE one domain the rule is not one number: the brew roll is
+        -1 per extra dose, the disaster-avoidance roll is -1 per dose."""
+        assert alchemy.batch_penalty(3) == -2
+        assert alchemy.disaster_roll_penalty(3) == -3
+
+    def test_an_assistant_means_opposite_things_in_two_domains(self):
+        """ATTACK.md counts five meanings across five domains. Two are here,
+        and they point in opposite directions — which is why there is no shared
+        helper and no shared parameter name.
+        """
+        # Invention: each skilled assistant ADDS to the inventor's roll.
+        assert invention.ASSISTANT_BONUS_EACH > 0
         assert invention.ASSISTANT_BONUS_CAP == 4
+
+        # Alchemy: the LOWEST-skill worker makes the final roll, so a weaker
+        # helper lowers it.
+        assert alchemy.final_roller_skill([18, 10]) == 10
+        assert not hasattr(alchemy, "ASSISTANT_BONUS_EACH")
+
+        # Repair's Basic Set core has no assistant rule at all, and inventing
+        # one would be a sixth meaning.
         assert not hasattr(repair, "ASSISTANT_BONUS_CAP")
+        assert not hasattr(repair, "final_roller_skill")
+
+    def test_three_facility_ladders_three_shapes(self):
+        """The invariant's headline example, now with three subjects.
+
+        Invention: a GM-discretion range with no rungs. Alchemy: four named
+        rungs, one of them derived from TL. Repair: no facility concept at all —
+        it defers to B345, which is a general rule rather than a crafting one.
+        """
+        assert invention.FACILITY_PENALTY_RANGE == (-10, 0)
+        assert alchemy.lab_modifier(alchemy.LabQuality.PROFESSIONAL) == 1
+        assert alchemy.lab_modifier(alchemy.LabQuality.CUTTING_EDGE, 8) == 4
+        assert not hasattr(repair, "lab_modifier")
+        assert not hasattr(repair, "FACILITY_PENALTY_RANGE")
+
+    def test_only_one_domain_suppresses_critical_successes(self):
+        """Alchemy: "either the process works or it doesn't". The others use
+        the core engine's criticals, so `checks.py` serves none of the three
+        unmodified."""
+        import pytest
+
+        with pytest.raises(ValueError):
+            alchemy.resolve_brew("critical_success")
+        assert invention.bugs_from_prototype(0, critical_success=True).is_clean
+
+    def test_only_one_domain_cares_where_you_are_standing(self):
+        """Mana is alchemy's alone. A shared "environment" parameter would be
+        meaningless in the other two."""
+        assert not alchemy.can_brew(alchemy.Mana.NONE)
+        for module in (invention, repair):
+            assert not hasattr(module, "Mana")
 
     def test_neither_domain_exposes_a_generic_entry_point(self):
         """The shape the invariant forbids, checked directly: a `craft(domain=…)`
