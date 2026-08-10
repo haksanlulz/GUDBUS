@@ -545,3 +545,113 @@ class TestSavingFromTheGuidedFlow:
         await view.save_btn.callback(interaction)
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
         interaction.response.send_modal.assert_not_called()
+
+
+# --- choosing a method ------------------------------------------------------
+
+
+class TestTheMethodIsChoosable:
+    """Gadgeteering has to be reachable, or the slice did not land.
+
+    The oracle's own words: "A slice nobody can find did not land."
+    """
+
+    async def test_new_inventions_is_the_default(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        from gurps_bot.mechanics.crafting import Method
+
+        assert view.method is Method.NEW_INVENTIONS
+
+    async def test_every_method_option_resolves_to_a_real_method(self):
+        from gurps_bot.mechanics.crafting import Method
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        for option in view.method_select.options:
+            await _choose(view.method_select, _interaction(), option.value)
+            assert view.method in Method
+
+    async def test_switching_method_changes_the_target(self):
+        """Complex is -14 under B473 and -4 under B475. Same everything else."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "complex")
+        assert view.target() == 14 - 14
+
+        await _choose(view.method_select, _interaction(), "GADGETEERING")
+        assert view.target() == 14 - 4
+
+    async def test_a_gadgeteer_ignores_the_new_technology_penalty(self):
+        """B475 says ignore it. The menu still offers it, so the flow has to
+        drop it rather than pass it to an engine that refuses the argument."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await _choose(view.situation_select, _interaction(), "new_technology")
+        await _choose(view.method_select, _interaction(), "GADGETEERING")
+
+        # Simple is 0 for a gadgeteer, and the -5 must not appear.
+        assert view.target() == 14
+
+    async def test_the_dropped_penalty_is_stated_not_silent(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await _choose(view.situation_select, _interaction(), "new_technology")
+        await _choose(view.method_select, _interaction(), "GADGETEERING")
+
+        embed = view.summary_embed()
+        assert any(f.name == "Ignored" for f in embed.fields)
+
+    async def test_new_inventions_does_not_claim_to_ignore_anything(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await _choose(view.situation_select, _interaction(), "new_technology")
+
+        embed = view.summary_embed()
+        assert not any(f.name == "Ignored" for f in embed.fields)
+        assert view.target() == 14 - 6 - 5
+
+    async def test_the_embed_names_the_method_in_play(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await _choose(view.method_select, _interaction(), "QUICK_GADGETEERING")
+        assert "Quick Gadgeteering" in view.summary_embed().description
+
+    async def test_the_method_is_stored_with_the_project(self, db):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "complex")
+        await _choose(view.method_select, _interaction(), "GADGETEERING")
+
+        modal = StartProjectModal(view)
+        modal.project_name._value = "ray gun"
+        modal.retail_price._value = "1000"
+        await modal.on_submit(_interaction_with_db(db))
+
+        async with db() as s:
+            found = (await service.list_projects(s, 1, 99))[0]
+            assert found.modifiers_json["method"] == "GADGETEERING"
+
+    async def test_the_stored_method_rebuilds_the_same_target(self, db):
+        """A gadgeteering project resumed later must not silently re-render
+        under the harsher New Inventions ladder."""
+        from gurps_bot.mechanics.crafting import Method
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "amazing")
+        await _choose(view.method_select, _interaction(), "GADGETEERING")
+        await _adjust(view, tl_gap="2")
+        expected = view.target()
+
+        modal = StartProjectModal(view)
+        modal.project_name._value = "mansion"
+        modal.retail_price._value = "0"
+        await modal.on_submit(_interaction_with_db(db))
+
+        async with db() as s:
+            found = (await service.list_projects(s, 1, 99))[0]
+        stored = found.modifiers_json
+        assert stored["method"] == Method.GADGETEERING.name
+        rebuilt = crafting.gadgeteer_concept_modifier(
+            Complexity[found.complexity.upper()],
+            variant_bonus=stored["variant_bonus"],
+            description_bonus=stored["description_bonus"],
+            tl_gap=stored["tl_gap"],
+        )
+        assert crafting.effective_target(found.skill, rebuilt) == expected

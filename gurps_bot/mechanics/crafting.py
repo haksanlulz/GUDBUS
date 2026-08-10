@@ -51,24 +51,26 @@ FACILITY_PENALTY_RANGE = (-10, 0)
 DESCRIPTION_BONUS_RANGE = (0, 2)
 VARIANT_BONUS_RANGE = (0, 5)
 
-#: B473: "-5 if the device is one TL above the inventor's TL", applied per step.
+#: "-5 per TL above the inventor's own", applied per step.
 #:
-#: ⚠️ RAW covers ONE step and says so — the rules "cover realistic innovation at
-#: the inventor's tech level – or one TL in advance of that, at most", and past
-#: that B473 hands off to Gadgeteering. The per-step extension is the operator's,
-#: from sealed probe 1: a TL+3 superscience item at effective skill 16 targets
-#: **-18**, which is 16 - 14 (Complex) - 15 (three steps) - 5 (new tech). It was
-#: confirmed twice in one probe — the prototype target -14 carries the identical
-#: gap — so the linear reading is measured rather than assumed.
+#: ⚑ **This is RAW, and the page that prints it is B475, not B474.** B473's New
+#: Inventions covers at most one TL in advance and prices that step at a flat
+#: -5; B475's Gadgeteering lifts the cap in the same breath as it keeps the
+#: number — "A gadgeteer is not limited to inventions only one TL advanced. He
+#: may attempt to create a device of any TL, at a flat -5 per TL above his own."
+#:
+#: An earlier revision of this constant called the per-step reading "the
+#: operator's extension", inferred from sealed probe 1 because only B473-474 had
+#: been read. It was printed in the book one page later the whole time. Reading
+#: the neighbouring section is what settled it.
 TL_GAP_PENALTY_EACH = -5
 
 #: B474: "Triple these costs if the invention is one TL above the inventor's TL."
-#: Same one-step caveat, and unlike the roll penalty this one does NOT extend
-#: cleanly: probe 1's own figures need x7 on facilities and x5 on the attempt,
-#: which no single multiplier produces. So the multiplier stays the book's 3 and
-#: is a GM-supplied parameter past one step, rather than a curve fitted to two
-#: points. See GAUNTLET §5 — an operator ruling is owed.
+#: New Inventions only, and only for the one step it contemplates. Gadgeteering
+#: replaces this wholesale with a base-plus-increment table and a doubling
+#: accumulation — see ``gadgeteer_facility_cost`` and ``gadgeteer_attempt_cost``.
 TL_COST_MULTIPLIER = 3
+
 
 #: B474: the prototype explosion. "at least 2d damage" — a floor, not a roll to
 #: be taken literally, which is why the caller is told it is a minimum.
@@ -112,6 +114,79 @@ class Complexity(Enum):
         self.facility_cost = facility_cost
         self.prototype_time = TimeSpec(dice=dice, unit=unit)
 
+
+class Method(Enum):
+    """How an invention is being attempted. NOT interchangeable.
+
+    One domain, three methods, and they disagree on nearly every number that
+    matters: the complexity penalty, whether the new-technology penalty exists,
+    how far above your TL you may reach, how facilities are priced, how the
+    per-attempt charge scales, how long a prototype takes, and whether a major
+    bug is even possible. ``tests/test_crafting_methods.py`` asserts the
+    disagreements rather than trusting this docstring.
+
+    The gadgeteering methods additionally require an advantage — Gadgeteer
+    (B56), or Quick Gadgeteer — so which method applies is a fact about the
+    character, not a preference.
+    """
+
+    NEW_INVENTIONS = "New Inventions"
+    GADGETEERING = "Gadgeteering"
+    QUICK_GADGETEERING = "Quick Gadgeteering"
+
+
+#: B475: "There is no penalty at all for a Simple invention, and only -2 for an
+#: Average one, -4 for a Complex one, or -8 for an Amazing one." Far milder than
+#: B473's -6/-10/-14/-22 — the single biggest difference between the methods.
+GADGETEER_CONCEPT_PENALTY = {
+    Complexity.SIMPLE: 0,
+    Complexity.AVERAGE: -2,
+    Complexity.COMPLEX: -4,
+    Complexity.AMAZING: -8,
+}
+
+#: B475's facilities table. Base Cost matches B474's figures exactly; what is
+#: new is the TL Increment, added once per TL above the campaign TL — which is
+#: what replaces New Inventions' flat "triple".
+GADGETEER_FACILITY_BASE = {
+    Complexity.SIMPLE: 50_000,
+    Complexity.AVERAGE: 100_000,
+    Complexity.COMPLEX: 250_000,
+    Complexity.AMAZING: 500_000,
+}
+GADGETEER_FACILITY_TL_INCREMENT = {
+    Complexity.SIMPLE: 100_000,
+    Complexity.AVERAGE: 250_000,
+    Complexity.COMPLEX: 500_000,
+    Complexity.AMAZING: 1_000_000,
+}
+
+#: B476, Quick Gadgeteering: the penalty on the **scrounging** roll for parts.
+#:
+#: ⚠️ Not a Concept or Prototype penalty, despite reading like one. The
+#: two-column extraction breaks the sentence "These rolls are at no" and resumes
+#: it a paragraph later at "modifier for a Simple gadget, -2 for an Average
+#: one…", which lands the list under a heading it does not belong to. Third
+#: column-scramble trap in this chapter; the other two are noted in
+#: ``concept_modifier`` and the Testing rules.
+QUICK_SCROUNGING_PENALTY = {
+    Complexity.SIMPLE: 0,
+    Complexity.AVERAGE: -2,
+    Complexity.COMPLEX: -6,
+    Complexity.AMAZING: -10,
+}
+
+#: B476: a quick gadgeteer assembles in minutes or hours, not days or months.
+QUICK_ASSEMBLY_TIME = {
+    Complexity.SIMPLE: TimeSpec(DiceSpec(2, 6, 0), "minutes"),
+    Complexity.AVERAGE: TimeSpec(DiceSpec(1, 6, -2), "hours"),
+    Complexity.COMPLEX: TimeSpec(DiceSpec(1, 6, 0), "hours"),
+    Complexity.AMAZING: TimeSpec(DiceSpec(4, 6, 0), "hours"),
+}
+
+#: B476: "If the gadgeteer must buy the needed items, calculate facilities and
+#: prototype costs as for a regular gadgeteer, and then divide by 100."
+QUICK_PURCHASE_DIVISOR = 100
 
 #: Ascending, so "one step easier" is an index step.
 _COMPLEXITY_ORDER = (
@@ -275,6 +350,191 @@ def prototype_modifier(
         terms.append(("less than the best tools and facilities", facility_penalty))
 
     return ModifierBreakdown(terms=tuple(terms))
+
+
+def gadgeteer_concept_modifier(
+    complexity: Complexity,
+    *,
+    tl_gap: int = 0,
+    program_complexity: int | None = None,
+    working_model: bool = False,
+    device_exists: bool = False,
+    variant_bonus: int = 0,
+    description_bonus: int = 0,
+) -> ModifierBreakdown:
+    """B475 Concept, for a character with the Gadgeteer advantage.
+
+    Three departures from B473, and each is a rule rather than a discount:
+
+    * the complexity penalty is its own much milder ladder;
+    * "**Ignore the -5** for a technology that is totally new to the campaign" —
+      so this function takes no ``new_technology`` argument at all, rather than
+      accepting one and quietly dropping it;
+    * for software, "use Complexity (**not twice Complexity**)" — the exact
+      inverse of B473's rule for the same case.
+
+    The TL gap is uncapped here: B473's one-step ceiling is a New Inventions
+    limit, and B475 removes it.
+    """
+    if tl_gap < 0:
+        raise ValueError(f"tl_gap cannot be negative, got {tl_gap}")
+    _check_range("variant_bonus", variant_bonus, VARIANT_BONUS_RANGE)
+    _check_range("description_bonus", description_bonus, DESCRIPTION_BONUS_RANGE)
+
+    terms: list[tuple[str, int]] = []
+
+    if program_complexity is not None:
+        if program_complexity < 1:
+            raise ValueError(f"program Complexity starts at 1, got {program_complexity}")
+        # B475: the rating itself, where B473 doubles it.
+        terms.append((
+            f"Complexity {program_complexity} program", -program_complexity,
+        ))
+    else:
+        terms.append((
+            f"{complexity.label} gadget", GADGETEER_CONCEPT_PENALTY[complexity],
+        ))
+
+    if working_model:
+        terms.append(("working model to copy", 5))
+    elif device_exists:
+        terms.append(("device exists, no model", 2))
+    if variant_bonus:
+        terms.append(("variant on an existing item", variant_bonus))
+    if tl_gap:
+        terms.append((
+            f"{tl_gap} TL(s) above the gadgeteer", tl_gap * TL_GAP_PENALTY_EACH,
+        ))
+    if description_bonus:
+        terms.append(("clear or clever description", description_bonus))
+
+    return ModifierBreakdown(terms=tuple(terms))
+
+
+def gadgeteer_facility_cost(
+    complexity: Complexity, tl_gap: int = 0, *, reuses_facilities: bool = False
+) -> int:
+    """B475: "Use Base Cost for an item at the campaign TL, and add the amount
+    under TL Increment for each TL beyond that."
+
+    Additive, not multiplicative — which is what New Inventions' flat "triple"
+    is replaced by, and it is the figure sealed probe 1 reports. B475's own
+    worked example is a Complex gadget three TLs up: $250,000 + 3 x $500,000 =
+    **$1,750,000**, which is the probe's number exactly.
+
+    The reuse discount is narrower here than in B474: it wants a prior project
+    of equal or higher complexity **and tech level**, where New Inventions asks
+    only for complexity. The caller decides whether it applies; this applies it.
+    """
+    if tl_gap < 0:
+        raise ValueError(f"tl_gap cannot be negative, got {tl_gap}")
+    cost = (
+        GADGETEER_FACILITY_BASE[complexity]
+        + GADGETEER_FACILITY_TL_INCREMENT[complexity] * tl_gap
+    )
+    return cost // 10 if reuses_facilities else cost
+
+
+def gadgeteer_attempt_cost(retail_price: int, tl_gap: int = 0) -> int:
+    """B475: "start with the item's retail price at its native TL, double this
+    for each TL of difference, and **accumulate** the cost".
+
+    Accumulate, not merely double: the book's example spends $4,000 + $8,000 +
+    $16,000 + $32,000 = $60,000 for three TLs, i.e. every rung is paid, not just
+    the top one. That is ``retail x (2**(tl_gap + 1) - 1)``, and it grows fast
+    enough that the distinction matters at the first TL rather than the fourth.
+    """
+    if retail_price < 0:
+        raise ValueError(f"retail_price cannot be negative, got {retail_price}")
+    if tl_gap < 0:
+        raise ValueError(f"tl_gap cannot be negative, got {tl_gap}")
+    return retail_price * (2 ** (tl_gap + 1) - 1)
+
+
+def gadgeteer_bugs_from_prototype(margin: int, critical_success: bool = False) -> BugLoad:
+    """B475 Testing and Bugs, for a gadgeteer.
+
+    "success by 3 or more results in no bugs, while a lesser success gives 1d/2
+    minor bugs. **There is no chance at all of a major bug.**" That last clause
+    is the whole difference and it is absolute — a gadgeteer's prototype cannot
+    carry the catastrophic kind, so no margin, and no critical, produces one.
+
+    Above the gadgeteer's own TL the minor bugs are then rolled on B476's Gadget
+    Bugs Table. That table is deliberately NOT reproduced here: it is effect
+    prose, which is the arc's hardest non-goal. Cite the page and let the reader
+    own the book.
+    """
+    if margin < 0:
+        raise ValueError(
+            "a failed Prototype roll produces no prototype, so it has no bug load"
+        )
+    if critical_success or margin >= 3:
+        return BugLoad(major_dice=None, minor_dice=None)
+    return BugLoad(major_dice=None, minor_dice=DiceSpec(1, 6, 0), minor_halved=True)
+
+
+def gadget_bugs_are_rolled_on_the_table(gadgeteer_tl: int, gadget_tl: int) -> bool:
+    """B475: "If the device is above the gadgeteer's TL, roll once on the Gadget
+    Bugs Table for each 'minor' bug."
+
+    Returns whether the table applies. What is ON the table stays in the book —
+    see the note in ``gadgeteer_bugs_from_prototype``.
+    """
+    return gadget_tl > gadgeteer_tl
+
+
+def gadgeteer_production_price(retail_price: int, tl_gap: int = 0) -> int:
+    """B475 Production: "use the tech level-adjusted retail price in all
+    calculations".
+
+    The book is explicit that this is the accumulated figure and not the native
+    one — "In the example above, retail price would be $60,000 (not $4,000) for
+    production purposes" — so a copy of a TL+3 gadget is priced off $60,000.
+    """
+    return gadgeteer_attempt_cost(retail_price, tl_gap)
+
+
+def quick_assembly_time(complexity: Complexity) -> TimeSpec:
+    """B476: minutes and hours, where every other method deals in days.
+
+    ⚠️ The Average entry carries a printed exception the dice cannot express:
+    "1d-2 hours (a roll of 1 or 2 indicates a **30-minute** assembly time)". The
+    spec returned here is the dice; :func:`quick_assembly_is_half_an_hour`
+    answers the exception, because a caller that only reads the dice would
+    render "0 hours" or "-1 hours" for a third of all rolls.
+    """
+    return QUICK_ASSEMBLY_TIME[complexity]
+
+
+def quick_assembly_is_half_an_hour(complexity: Complexity, rolled: int) -> bool:
+    """B476's parenthetical on the Average row, as a rule rather than a note."""
+    return complexity is Complexity.AVERAGE and rolled in (1, 2)
+
+
+def quick_scrounged_project_cost(rolled_1d: int) -> int:
+    """B476: "the total cost for the project is only (1d-1) x $100, with a roll
+    of 1 indicating no cost".
+
+    One figure for the WHOLE project, where every other method bills facilities
+    and attempts separately — which is why this returns a bare int rather than
+    an ``InventionCosts``: there is nothing to keep apart.
+    """
+    if not 1 <= rolled_1d <= 6:
+        raise ValueError(f"a 1d roll is 1..6, got {rolled_1d}")
+    return (rolled_1d - 1) * 100
+
+
+def quick_purchased_costs(
+    complexity: Complexity, retail_price: int, tl_gap: int = 0
+) -> tuple[int, int]:
+    """B476: if he has to buy the parts, "calculate facilities and prototype
+    costs as for a regular gadgeteer, and then divide by 100".
+
+    Returns ``(facilities, per_attempt)`` — still two figures, still not summed.
+    """
+    facilities = gadgeteer_facility_cost(complexity, tl_gap)
+    attempt = gadgeteer_attempt_cost(retail_price, tl_gap)
+    return facilities // QUICK_PURCHASE_DIVISOR, attempt // QUICK_PURCHASE_DIVISOR
 
 
 def effective_target(skill: int, modifier: ModifierBreakdown) -> int:

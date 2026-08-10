@@ -28,7 +28,7 @@ from discord.ext import commands
 
 from gurps_bot.mechanics import crafting
 from gurps_bot.mechanics.checks import Outcome, check
-from gurps_bot.mechanics.crafting import Complexity, Stage
+from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
     charge_history,
     finish_project,
@@ -84,6 +84,7 @@ class InventionFlowView(discord.ui.View):
         self.skill = skill
         self.invoker_id = invoker_id
         self.complexity: Complexity | None = None
+        self.method = Method.NEW_INVENTIONS
         self.situations: set[str] = set()
         self.variant_bonus = 0
         self.description_bonus = 0
@@ -109,13 +110,22 @@ class InventionFlowView(discord.ui.View):
             item.disabled = True
 
     def modifier(self) -> crafting.ModifierBreakdown:
-        return crafting.concept_modifier(
-            self.complexity or Complexity.AVERAGE,
+        complexity = self.complexity or Complexity.AVERAGE
+        situations = {name: name in self.situations for name, _ in _SITUATIONS}
+        shared = dict(
             variant_bonus=self.variant_bonus,
             description_bonus=self.description_bonus,
             tl_gap=self.tl_gap,
-            **{name: name in self.situations for name, _ in _SITUATIONS},
         )
+        if self.method is Method.NEW_INVENTIONS:
+            return crafting.concept_modifier(complexity, **shared, **situations)
+
+        # B475 tells a gadgeteer to ignore the new-technology penalty outright,
+        # and the engine refuses the argument rather than accepting and dropping
+        # it — so the menu choice is discarded HERE, visibly, and the embed says
+        # so. Silently passing it through would be a -5 nobody could find.
+        situations.pop("new_technology", None)
+        return crafting.gadgeteer_concept_modifier(complexity, **shared, **situations)
 
     def target(self) -> int:
         return crafting.effective_target(self.skill, self.modifier())
@@ -128,6 +138,7 @@ class InventionFlowView(discord.ui.View):
         nobody can argue with.
         """
         return {
+            "method": self.method.name,
             "situations": sorted(self.situations),
             "variant_bonus": self.variant_bonus,
             "description_bonus": self.description_bonus,
@@ -140,6 +151,7 @@ class InventionFlowView(discord.ui.View):
 
         embed = discord.Embed(
             title=f"{Stage.CONCEPT.name} roll — {self.complexity.label} invention",
+            description=f"Using **{self.method.value}** rules",
             colour=_INVENTION,
         )
         embed.add_field(
@@ -158,6 +170,16 @@ class InventionFlowView(discord.ui.View):
                 value=(
                     "That is a real target, not an error — a natural 3 or 4 still "
                     "succeeds, and nothing else will."
+                ),
+                inline=False,
+            )
+        if self.method is not Method.NEW_INVENTIONS and "new_technology" in self.situations:
+            # Say it rather than silently dropping a -5 the player picked.
+            embed.add_field(
+                name="Ignored",
+                value=(
+                    "A gadgeteer ignores the penalty for technology new to the "
+                    "campaign, so that choice is not applied (B475)."
                 ),
                 inline=False,
             )
@@ -194,6 +216,33 @@ class InventionFlowView(discord.ui.View):
         self, interaction: discord.Interaction, select: discord.ui.Select
     ) -> None:
         self.complexity = _COMPLEXITY_BY_VALUE[select.values[0]]
+        await self._refresh(interaction)
+
+    @discord.ui.select(
+        placeholder="Which rules? (Gadgeteer advantage required for the last two)",
+        options=[
+            discord.SelectOption(
+                label="New Inventions",
+                value=Method.NEW_INVENTIONS.name,
+                description="B473 — realistic, at most one TL ahead",
+                default=True,
+            ),
+            discord.SelectOption(
+                label="Gadgeteering",
+                value=Method.GADGETEERING.name,
+                description="B475 — needs the Gadgeteer advantage; any TL",
+            ),
+            discord.SelectOption(
+                label="Quick Gadgeteering",
+                value=Method.QUICK_GADGETEERING.name,
+                description="B476 — needs Quick Gadgeteer; minutes, not months",
+            ),
+        ],
+    )
+    async def method_select(
+        self, interaction: discord.Interaction, select: discord.ui.Select
+    ) -> None:
+        self.method = Method[select.values[0]]
         await self._refresh(interaction)
 
     @discord.ui.select(
