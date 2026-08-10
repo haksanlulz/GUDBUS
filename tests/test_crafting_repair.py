@@ -195,3 +195,67 @@ class TestScopeIsStatedNotImplied:
         the exact failure the sealed probe exists to catch."""
         assert not hasattr(repair, "escalate_damage_tier")
         assert not hasattr(repair, "critical_failure_tier")
+
+
+class TestSealedProbeThreeExercisesAnUnbuiltLayer:
+    """Probe 3 re-verify, 2026-08-10. Seal hash checked; only probe 3 read.
+
+    **The result is a negative, and it is the useful kind.** Probe 3 is a
+    tech-line case — Armoury (Beam Weapons)/TL9 on a TL10 weapon — and it does
+    not exercise this module at all. B484-485 and the tech-book repair rules are
+    not the same rule set with more detail; they are different models:
+
+        axis        probe 3: TL mismatch, familiarity, workspace ladder
+                    B484:    the item's PRICE
+        tiers       probe 3: Major -2 / Severe -5, graded penalties
+                    B484:    minor / major / beyond repair, a triage
+        parts       probe 3: a flat figure
+                    B484:    1d x 10% of the item's price
+        time        probe 3: 3d hours / workers
+                    B484:    thirty minutes, flat, not rolled
+
+    So the honest verdict is **not "the module fails probe 3"** and **not "the
+    module passes"** — the probe's subject was never built. Recording it as a
+    pass would be the fail-open; recording it as a failure would blame this
+    module for a scope it declares it does not cover.
+
+    ⚑ What re-verifying DID buy: the probe's workspace ladder turned out to be
+    four-fifths of **B345 Equipment Modifiers**, which B484 cites by page and
+    which this module had been passing through as an opaque GM integer. That
+    gap was real, found in the book rather than taken from the probe, and is
+    now `mechanics/equipment_quality.py`.
+
+    ⬜ Probe 3 stays UNSPENT as a check on the tech-book layer. Its rules must
+    come from Low/High/Ultra-Tech, not from the probe — implementing from a
+    held-out check destroys it, which is how probes 4 and 5 became
+    differentials.
+    """
+
+    def test_this_module_has_no_workspace_ladder_of_its_own(self):
+        """It defers to B345, which is a general success-roll rule."""
+        assert not hasattr(repair, "WORKSPACE_LADDER")
+        assert not hasattr(repair, "workspace_modifier")
+
+    def test_it_has_no_tl_or_familiarity_modifier(self):
+        """B484 does not print them; B168/B169 own them and probe 3 uses them.
+        Adding them here from the probe would be writing rules from a check."""
+        assert not hasattr(repair, "tl_mismatch_modifier")
+        assert not hasattr(repair, "familiarity_modifier")
+
+    def test_the_tiers_are_triage_not_a_penalty_ladder(self):
+        """Probe 3's Major/Severe are numbers you add. B484's tiers select
+        which rules apply, and only one of them carries a modifier at all."""
+        assert repair.MAJOR_REPAIR_PENALTY == -2
+        assert not hasattr(repair, "SEVERE_REPAIR_PENALTY")
+        assert {t.name for t in RepairTier} == {"MINOR", "MAJOR", "BEYOND_REPAIR"}
+
+    def test_the_b345_ladder_is_reachable_from_the_book_not_the_probe(self):
+        """The one thing the re-verify actually changed, wired to its source."""
+        from gurps_bot.mechanics import equipment_quality
+        from gurps_bot.mechanics.equipment_quality import EquipmentQuality
+
+        # Armoury is technological: improvised is -5, not -2.
+        assert equipment_quality.modifier(EquipmentQuality.IMPROVISED) == -5
+        assert equipment_quality.modifier(EquipmentQuality.BASIC) == 0
+        assert equipment_quality.modifier(EquipmentQuality.GOOD) == 1
+        assert equipment_quality.modifier(EquipmentQuality.FINE) == 2

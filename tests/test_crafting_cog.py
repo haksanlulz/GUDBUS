@@ -722,12 +722,37 @@ class TestRepairCommand:
         assert "+1" in next(f for f in cheap.fields if f.name == "Modifiers").value
         assert "-3" in next(f for f in dear.fields if f.name == "Modifiers").value
 
-    async def test_the_gm_modifiers_are_passed_through(self):
+    async def test_the_workspace_ladder_reaches_the_roll(self):
+        """B484 cites B345 rather than restating it, so the workspace is a
+        menu of the book's rungs, not a number the player has to know."""
+        improvised = (
+            await self._run(price=500, workspace="IMPROVISED")
+        ).response.send_message.await_args.kwargs["embed"]
+        fine = (
+            await self._run(price=500, workspace="FINE")
+        ).response.send_message.await_args.kwargs["embed"]
+
+        # Armoury is technological, so improvised is -5 rather than -2.
+        assert "-5" in next(f for f in improvised.fields if f.name == "Workspace").value
+        assert "+2" in next(f for f in fine.fields if f.name == "Workspace").value
+
+    async def test_the_time_spent_modifier_is_still_the_gms(self):
         embed = (
-            await self._run(price=500, equipment=-2, time_spent=1)
+            await self._run(price=500, time_spent=1)
         ).response.send_message.await_args.kwargs["embed"]
         modifiers = next(f for f in embed.fields if f.name == "Modifiers").value
-        assert "B345" in modifiers and "B346" in modifiers
+        assert "B346" in modifiers
+
+    async def test_the_best_workspace_needs_a_tech_level_rather_than_guessing(self):
+        """B345 makes BEST depend on TL, so the command must ask instead of
+        handing back a confidently wrong +2."""
+        interaction = await self._run(price=500, workspace="BEST")
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+        embed = (
+            await self._run(price=500, workspace="BEST", tech_level=10)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert "+5" in next(f for f in embed.fields if f.name == "Workspace").value
 
     async def test_the_attempt_time_does_not_depend_on_the_item(self):
         cheap = (
@@ -746,8 +771,8 @@ class TestRepairCommand:
         [
             {"price": -1},
             {"max_hp": 0},
-            {"equipment": 99},
             {"time_spent": -99},
+            {"workspace": "NONSENSE"},
         ],
     )
     async def test_nonsense_input_is_refused(self, kwargs):

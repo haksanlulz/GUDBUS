@@ -26,7 +26,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from gurps_bot.mechanics import crafting, crafting_repair
+from gurps_bot.mechanics import crafting, crafting_repair, equipment_quality
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
@@ -592,9 +592,16 @@ class CraftingCog(commands.Cog):
         price="What the item costs new — repair difficulty scales off this, not off complexity",
         current_hp="Its HP now (0 or less needs spare parts)",
         max_hp="Its HP undamaged",
-        equipment="Equipment modifier, the GM's call (B345)",
+        workspace="Quality of the shop or toolkit (B345)",
         time_spent="Time-spent modifier, the GM's call (B346)",
         destroyed="It failed its HT roll to avoid destruction",
+        tech_level="Your TL — only needed for the best-available workspace (B345)",
+    )
+    @app_commands.choices(
+        workspace=[
+            app_commands.Choice(name=q.value, value=q.name)
+            for q in equipment_quality.EquipmentQuality
+        ]
     )
     async def repair(
         self,
@@ -602,9 +609,10 @@ class CraftingCog(commands.Cog):
         price: int,
         current_hp: int,
         max_hp: int,
-        equipment: int = 0,
+        workspace: str = equipment_quality.EquipmentQuality.BASIC.name,
         time_spent: int = 0,
         destroyed: bool = False,
+        tech_level: int | None = None,
     ) -> None:
         if price < 0:
             await respond(interaction, "Price cannot be negative.", ephemeral=True)
@@ -612,10 +620,21 @@ class CraftingCog(commands.Cog):
         if max_hp < 1:
             await respond(interaction, "Max HP should be at least 1.", ephemeral=True)
             return
-        if not -10 <= equipment <= 10 or not -10 <= time_spent <= 10:
+        if not -10 <= time_spent <= 10:
             await respond(
-                interaction, "Those modifiers should be -10 to +10.", ephemeral=True
+                interaction, "The time-spent modifier should be -10 to +10.",
+                ephemeral=True,
             )
+            return
+        try:
+            quality = equipment_quality.EquipmentQuality[workspace]
+            # Armoury, Electronics Repair, Machinist and Mechanic are all
+            # technological skills, so the harsher half of B345's split applies.
+            equipment = equipment_quality.modifier(
+                quality, technological=True, tech_level=tech_level
+            )
+        except (KeyError, ValueError) as exc:
+            await respond(interaction, str(exc) or "Unknown workspace.", ephemeral=True)
             return
 
         tier = crafting_repair.repair_tier(current_hp, max_hp, destroyed=destroyed)
@@ -643,6 +662,11 @@ class CraftingCog(commands.Cog):
         )
         embed.add_field(
             name="Modifiers", value=_breakdown_lines(modifier) or "none", inline=False
+        )
+        embed.add_field(
+            name="Workspace",
+            value=f"{quality.value} ({_fmt_mod(equipment)}) — B345",
+            inline=False,
         )
         embed.add_field(
             name="Roll",
