@@ -1,0 +1,289 @@
+"""GAUNTLET §3: crafting rules are per-DOMAIN data, never one shared abstraction.
+
+The scan the arc has owed since 2026-08-01. It could not be written honestly
+until a second domain existed: a differential whose population is one subject
+cannot fail, and would have read green while proving nothing (Rule 25). Repair
+is that second domain, so this file finally has something to disagree about.
+
+The invariant's own wording, from the sealed probes laid side by side: each
+domain has its own facility ladder, its own reading of "multiple units", its own
+"assistant", its own skill-selection rule, and its own answer to what the roll
+even means. Every test below names one such rule and asserts the two
+implemented domains give different answers to it.
+
+⬜ **Three domains still missing** — alchemy, enchantment, mundane crafting —
+so this scan is real but not yet complete. Its population is 2 of 5, and the
+count is stated here rather than left for a reader to assume otherwise. Each
+new domain should add its column to these tests, and the ones most likely to
+break the current shape are the ones ATTACK.md flags: alchemy shares one roll
+across a batch, crafting reads the roll as QUALITY rather than success or
+quantity, and enchantment's "assistant" means two different things inside a
+single spell.
+"""
+
+from __future__ import annotations
+
+import inspect
+
+from gurps_bot import mechanics
+from gurps_bot.mechanics import crafting as invention
+from gurps_bot.mechanics import crafting_repair as repair
+from gurps_bot.mechanics.crafting import Complexity
+from gurps_bot.mechanics.crafting_repair import RepairTier
+
+#: The domains implemented so far, with the module that owns each. A domain
+#: added without a row here is a domain nothing compares.
+DOMAIN_MODULES = {
+    "invention": invention,
+    "repair": repair,
+}
+
+#: What the arc will eventually hold. Named so the gap is a number rather than
+#: an impression.
+PLANNED_DOMAINS = ("invention", "repair", "alchemy", "enchantment", "crafting")
+
+
+class TestThePopulationIsHonest:
+    """FAIL CLOSED, and Rule 25's specific shape: a differential is only worth
+    reading if its subjects can disagree."""
+
+    def test_there_are_at_least_two_domains_to_compare(self):
+        assert len(DOMAIN_MODULES) >= 2, (
+            "one domain cannot disagree with itself — every assertion below "
+            "would pass by construction"
+        )
+
+    def test_the_scan_reports_its_own_coverage(self):
+        missing = [d for d in PLANNED_DOMAINS if d not in DOMAIN_MODULES]
+        assert missing, (
+            "PLANNED_DOMAINS and DOMAIN_MODULES agree — if every domain really "
+            "has landed, delete this test and say so in GAUNTLET §3 rather than "
+            "letting it keep asserting a gap that closed"
+        )
+        assert len(DOMAIN_MODULES) < len(PLANNED_DOMAINS)
+
+    def test_each_domain_owns_its_own_module(self):
+        """Separate modules are the structural half of the invariant. One module
+        with a `domain=` switch is the shape this forbids."""
+        assert len({m.__name__ for m in DOMAIN_MODULES.values()}) == len(DOMAIN_MODULES)
+
+
+class TestTheDomainsDisagree:
+    def test_they_modify_the_roll_on_unrelated_axes(self):
+        """Invention asks about FACILITIES; repair asks about the item's PRICE.
+
+        Both are "how hard is this", and a shared enum would have to pick one.
+        """
+        assert invention.FACILITY_PENALTY_RANGE == (-10, 0)
+        assert not hasattr(repair, "FACILITY_PENALTY_RANGE")
+        assert repair.price_modifier(500) == 1
+        assert not hasattr(invention, "price_modifier")
+
+    def test_repair_can_give_a_BONUS_where_invention_only_penalises(self):
+        """B484's cheap-item +1 has no counterpart in B473-474's facility rule,
+        which runs -1 to -10 and stops at zero."""
+        assert repair.price_modifier(500) > 0
+        low, high = invention.FACILITY_PENALTY_RANGE
+        assert high == 0
+
+    def test_the_roll_means_different_things(self):
+        """Invention: succeeded or not. Repair: how much.
+
+        This is the finding ATTACK.md calls the one no single probe contains,
+        and it is why `hp_restored` returns an int while the invention outcomes
+        return structures describing what happened.
+        """
+        assert repair.hp_restored(4) == 4  # a quantity
+        bugs = invention.bugs_from_prototype(margin=4)
+        assert not isinstance(bugs, int)  # an outcome
+
+    def test_time_is_not_on_the_same_scale_or_even_rolled(self):
+        """Invention time is dice by complexity, days to months. A repair
+        attempt is thirty minutes, flat, and not rolled at all."""
+        spec = repair.minor_repair_time()
+        assert spec.dice.min == spec.dice.max  # no variance: not a roll
+        for complexity in Complexity:
+            proto = complexity.prototype_time
+            assert proto.dice.min != proto.dice.max
+            assert proto.unit != spec.unit
+
+    def test_complexity_governs_one_domain_and_is_absent_from_the_other(self):
+        """Repair has no complexity concept whatsoever — the item's price does
+        that work — so a shared `Complexity` parameter would be dead weight in
+        half the family."""
+        assert "complexity" in inspect.signature(invention.invention_costs).parameters
+        for name, obj in vars(repair).items():
+            if inspect.isfunction(obj):
+                assert "complexity" not in inspect.signature(obj).parameters, (
+                    f"repair.{name} takes a complexity — repair is priced by the "
+                    f"item's cost, not by an invention rating"
+                )
+
+    def test_multiple_units_are_not_a_shared_concept(self):
+        """ATTACK.md: repair repeats the full roll and full cost per unit, while
+        alchemy shares one roll across a batch. Neither module offers a batch
+        parameter, and that absence is the correct state rather than an
+        oversight — the two readings cannot share one."""
+        for module in DOMAIN_MODULES.values():
+            for name, obj in vars(module).items():
+                if not inspect.isfunction(obj):
+                    continue
+                params = inspect.signature(obj).parameters
+                for batch_word in ("batch", "doses", "units"):
+                    assert batch_word not in params, (
+                        f"{module.__name__}.{name} takes {batch_word!r} — "
+                        f"'multiple units' means something different in every "
+                        f"domain, so a shared batch parameter is wrong in at "
+                        f"least one"
+                    )
+
+    def test_assistants_belong_to_invention_alone_so_far(self):
+        """Five meanings across five domains is the reason there is no shared
+        helper. Repair's B484 core simply has none, and inventing one would be
+        the sixth meaning."""
+        assert invention.ASSISTANT_BONUS_CAP == 4
+        assert not hasattr(repair, "ASSISTANT_BONUS_CAP")
+
+    def test_neither_domain_exposes_a_generic_entry_point(self):
+        """The shape the invariant forbids, checked directly: a `craft(domain=…)`
+        or `do_crafting(...)` front door would erase every difference above."""
+        for module in DOMAIN_MODULES.values():
+            for banned in ("craft", "do_crafting", "resolve", "run_domain"):
+                assert not hasattr(module, banned), (
+                    f"{module.__name__}.{banned} looks like a shared front door "
+                    f"across domains that agree on nothing"
+                )
+
+
+#: Invention's rule DATA. Sharing any of it with another domain is the
+#: abstraction the invariant forbids; sharing the presentation containers is
+#: not, and they are deliberately absent from this list.
+_INVENTION_RULE_DATA = (
+    "GADGETEER_CONCEPT_PENALTY",
+    "GADGETEER_FACILITY_BASE",
+    "GADGETEER_FACILITY_TL_INCREMENT",
+    "QUICK_SCROUNGING_PENALTY",
+    "QUICK_ASSEMBLY_TIME",
+    "FACILITY_PENALTY_RANGE",
+    "ASSISTANT_BONUS_EACH",
+    "ASSISTANT_BONUS_CAP",
+    "TL_COST_MULTIPLIER",
+    "TL_GAP_PENALTY_EACH",
+    "DESCRIPTION_BONUS_RANGE",
+    "VARIANT_BONUS_RANGE",
+)
+
+
+def _borrowed_rule_data(source: str) -> list[str]:
+    """Invention rule-data names appearing in another domain's source."""
+    return [name for name in _INVENTION_RULE_DATA if name in source]
+
+
+#: Invention's rule DATA. Sharing any of it with another domain is the
+#: abstraction the invariant forbids; the presentation containers
+#: (``ModifierBreakdown``, ``TimeSpec``) are deliberately absent from this list.
+#: ``test_the_name_list_covers_every_rule_constant_invention_exports`` keeps it
+#: honest — the first version was hand-written, missed ``ASSISTANT_BONUS_CAP``,
+#: and let a planted violation through.
+_INVENTION_RULE_DATA = (
+    "GADGETEER_CONCEPT_PENALTY",
+    "GADGETEER_FACILITY_BASE",
+    "GADGETEER_FACILITY_TL_INCREMENT",
+    "QUICK_SCROUNGING_PENALTY",
+    "QUICK_ASSEMBLY_TIME",
+    "QUICK_PURCHASE_DIVISOR",
+    "FACILITY_PENALTY_RANGE",
+    "ASSISTANT_BONUS_EACH",
+    "ASSISTANT_BONUS_CAP",
+    "ASSISTANT_MIN_SKILL",
+    "TL_COST_MULTIPLIER",
+    "TL_GAP_PENALTY_EACH",
+    "DESCRIPTION_BONUS_RANGE",
+    "VARIANT_BONUS_RANGE",
+    "TESTING_PENALTY",
+    "BUG_SURFACE_MARGIN",
+    "DISASTER_DAMAGE",
+    "STAGES",
+    # Private, and included precisely because it is: a domain reaching for
+    # another domain's underscore-prefixed rule data is a worse violation than
+    # one reaching for its public data, not an exempt one. Found by the derived
+    # check below rather than by remembering it.
+    "_COMPLEXITY_ORDER",
+)
+
+
+def _borrowed_rule_data(source: str) -> list[str]:
+    """Invention rule-data names appearing in another domain's source."""
+    return [name for name in _INVENTION_RULE_DATA if name in source]
+
+
+class TestTheSharedPiecesAreDeliberate:
+    """Not everything may differ, or the invariant becomes an excuse.
+
+    Two things ARE shared, and both are presentation rather than rule. Naming
+    them here keeps the line visible: a third arrival should have to justify
+    itself against this list.
+    """
+
+    def test_the_modifier_container_is_shared(self):
+        mod = repair.repair_modifier(500, RepairTier.MINOR)
+        assert isinstance(mod, invention.ModifierBreakdown)
+
+    def test_the_time_container_is_shared(self):
+        assert isinstance(repair.minor_repair_time(), invention.TimeSpec)
+
+    def test_no_rule_DATA_is_shared(self):
+        """The container may be common; the numbers may not. Repair must not
+        read any of invention's ladders."""
+        borrowed = _borrowed_rule_data(inspect.getsource(repair))
+        assert not borrowed, (
+            f"crafting_repair reads {borrowed} — that is invention's rule data, "
+            f"and sharing it is the abstraction this scan forbids"
+        )
+
+    def test_the_data_scan_sees_a_planted_violation(self):
+        """Verify the instrument before trusting its clean reading (Rule 22).
+
+        Runs the real checker over source that DOES borrow. An earlier draft of
+        this test asserted that a string I had just written contained a
+        substring of itself — tautological, and it passed while the checker it
+        was supposed to vouch for had a gap in its name list.
+        """
+        planted = (
+            "from gurps_bot.mechanics.crafting import ASSISTANT_BONUS_CAP\n"
+            "def bonus():\n"
+            "    return ASSISTANT_BONUS_CAP\n"
+        )
+        assert _borrowed_rule_data(planted) == ["ASSISTANT_BONUS_CAP"]
+
+    def test_the_data_scan_ignores_the_sanctioned_imports(self):
+        """The presentation containers must NOT register — no false-positive tax."""
+        clean = "from gurps_bot.mechanics.crafting import ModifierBreakdown, TimeSpec\n"
+        assert _borrowed_rule_data(clean) == []
+
+    def test_the_name_list_covers_every_rule_constant_invention_exports(self):
+        """The gap that let the first mutant through.
+
+        The hand-written list held ASSISTANT_BONUS_EACH and not
+        ASSISTANT_BONUS_CAP, so a planted import of the latter sailed past. A
+        list maintained by hand against a module that keeps growing is the
+        fail-open; derive it instead and let this test catch the next addition.
+        """
+        exported = {
+            name
+            for name, value in vars(invention).items()
+            if name.isupper() and isinstance(value, (int, dict, tuple))
+        }
+        missing = exported - set(_INVENTION_RULE_DATA)
+        assert not missing, (
+            f"invention exports rule constants the domain scan does not know "
+            f"about: {sorted(missing)}. Add them to _INVENTION_RULE_DATA, or a "
+            f"future domain can borrow them unnoticed."
+        )
+
+
+class TestBothDomainsAreReachableFromTheMechanicsPackage:
+    def test_they_are_siblings(self):
+        assert invention.__name__ == "gurps_bot.mechanics.crafting"
+        assert repair.__name__ == "gurps_bot.mechanics.crafting_repair"
+        assert mechanics.__name__ == "gurps_bot.mechanics"

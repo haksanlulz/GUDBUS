@@ -655,3 +655,101 @@ class TestTheMethodIsChoosable:
             tl_gap=stored["tl_gap"],
         )
         assert crafting.effective_target(found.skill, rebuilt) == expected
+
+
+# --- /craft repair ----------------------------------------------------------
+
+
+class TestRepairCommand:
+    """B484 at the surface. The domain has to be findable or it did not land."""
+
+    async def _run(self, **kwargs):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        await cog.repair.callback(
+            cog,
+            interaction,
+            kwargs.pop("price", 50_000),
+            kwargs.pop("current_hp", 5),
+            kwargs.pop("max_hp", 10),
+            **kwargs,
+        )
+        return interaction
+
+    async def test_a_damaged_item_gets_the_minor_tier(self):
+        embed = (await self._run()).response.send_message.await_args.kwargs["embed"]
+        assert "Minor repairs" in embed.title
+
+    async def test_zero_hp_gets_the_major_tier_and_a_parts_range(self):
+        embed = (
+            await self._run(current_hp=0, price=1_000)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert "Major repairs" in embed.title
+        parts = next(f for f in embed.fields if f.name == "Spare parts first")
+        assert "$100" in parts.value and "$600" in parts.value
+
+    async def test_a_minor_repair_is_not_told_to_buy_parts(self):
+        embed = (await self._run()).response.send_message.await_args.kwargs["embed"]
+        assert not any(f.name == "Spare parts first" for f in embed.fields)
+
+    async def test_a_destroyed_item_says_replace_and_offers_no_roll(self):
+        embed = (
+            await self._run(destroyed=True, price=2_500)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert "Beyond repair" in embed.title
+        assert "$2,500" in embed.fields[0].value
+        assert not any(f.name == "Roll" for f in embed.fields)
+
+    async def test_five_times_max_hp_is_also_destruction(self):
+        embed = (
+            await self._run(current_hp=-50, max_hp=10)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert "Beyond repair" in embed.title
+
+    async def test_the_roll_reports_a_quantity_not_a_pass_fail(self):
+        """The domain's distinctive rule, at the surface."""
+        embed = (await self._run()).response.send_message.await_args.kwargs["embed"]
+        success = next(f for f in embed.fields if f.name == "On a success")
+        assert "per point of margin" in success.value
+
+    async def test_the_price_ladder_reaches_the_embed(self):
+        cheap = (
+            await self._run(price=500)
+        ).response.send_message.await_args.kwargs["embed"]
+        dear = (
+            await self._run(price=5_000_000)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert "+1" in next(f for f in cheap.fields if f.name == "Modifiers").value
+        assert "-3" in next(f for f in dear.fields if f.name == "Modifiers").value
+
+    async def test_the_gm_modifiers_are_passed_through(self):
+        embed = (
+            await self._run(price=500, equipment=-2, time_spent=1)
+        ).response.send_message.await_args.kwargs["embed"]
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers").value
+        assert "B345" in modifiers and "B346" in modifiers
+
+    async def test_the_attempt_time_does_not_depend_on_the_item(self):
+        cheap = (
+            await self._run(price=100)
+        ).response.send_message.await_args.kwargs["embed"]
+        dear = (
+            await self._run(price=9_000_000)
+        ).response.send_message.await_args.kwargs["embed"]
+        assert (
+            next(f for f in cheap.fields if f.name == "Per attempt").value
+            == next(f for f in dear.fields if f.name == "Per attempt").value
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"price": -1},
+            {"max_hp": 0},
+            {"equipment": 99},
+            {"time_spent": -99},
+        ],
+    )
+    async def test_nonsense_input_is_refused(self, kwargs):
+        interaction = await self._run(**kwargs)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True

@@ -26,7 +26,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from gurps_bot.mechanics import crafting
+from gurps_bot.mechanics import crafting, crafting_repair
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
@@ -585,6 +585,94 @@ class CraftingCog(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="B474")
+        await respond(interaction, embed=embed)
+
+    @craft.command(name="repair", description="What it takes to repair a damaged item (B484)")
+    @app_commands.describe(
+        price="What the item costs new — repair difficulty scales off this, not off complexity",
+        current_hp="Its HP now (0 or less needs spare parts)",
+        max_hp="Its HP undamaged",
+        equipment="Equipment modifier, the GM's call (B345)",
+        time_spent="Time-spent modifier, the GM's call (B346)",
+        destroyed="It failed its HT roll to avoid destruction",
+    )
+    async def repair(
+        self,
+        interaction: discord.Interaction,
+        price: int,
+        current_hp: int,
+        max_hp: int,
+        equipment: int = 0,
+        time_spent: int = 0,
+        destroyed: bool = False,
+    ) -> None:
+        if price < 0:
+            await respond(interaction, "Price cannot be negative.", ephemeral=True)
+            return
+        if max_hp < 1:
+            await respond(interaction, "Max HP should be at least 1.", ephemeral=True)
+            return
+        if not -10 <= equipment <= 10 or not -10 <= time_spent <= 10:
+            await respond(
+                interaction, "Those modifiers should be -10 to +10.", ephemeral=True
+            )
+            return
+
+        tier = crafting_repair.repair_tier(current_hp, max_hp, destroyed=destroyed)
+        embed = discord.Embed(
+            title=f"{tier.value} — ${price:,} item",
+            colour=_INVENTION,
+        )
+
+        if tier is crafting_repair.RepairTier.BEYOND_REPAIR:
+            embed.add_field(
+                name="Beyond repair",
+                value=(
+                    f"Replace it at full price: "
+                    f"**${crafting_repair.replacement_cost(price):,}**. B484 gives "
+                    f"no salvage credit and no roll."
+                ),
+                inline=False,
+            )
+            embed.set_footer(text="B484")
+            await respond(interaction, embed=embed)
+            return
+
+        modifier = crafting_repair.repair_modifier(
+            price, tier, equipment_modifier=equipment, time_spent_modifier=time_spent
+        )
+        embed.add_field(
+            name="Modifiers", value=_breakdown_lines(modifier) or "none", inline=False
+        )
+        embed.add_field(
+            name="Roll",
+            value=(
+                f"Your repair skill {_fmt_mod(modifier.total)} — the GM picks which "
+                f"skill (Armoury, Electronics Repair, Mechanic…)"
+            ),
+            inline=False,
+        )
+        # The distinctive rule of this domain: the roll returns a quantity.
+        embed.add_field(
+            name="On a success",
+            value="Restores **1 HP per point of margin**, minimum 1.",
+            inline=False,
+        )
+        time_spec = crafting_repair.minor_repair_time()
+        embed.add_field(
+            name="Per attempt",
+            value=f"{time_spec.dice.modifier} {time_spec.unit}, whatever the item",
+            inline=False,
+        )
+        if tier is crafting_repair.RepairTier.MAJOR:
+            low = crafting_repair.major_repair_parts_cost(price, 1)
+            high = crafting_repair.major_repair_parts_cost(price, 6)
+            embed.add_field(
+                name="Spare parts first",
+                value=f"1d×10% of ${price:,} — **${low:,} to ${high:,}**",
+                inline=False,
+            )
+        embed.set_footer(text="B484")
         await respond(interaction, embed=embed)
 
     @craft.command(name="projects", description="Your crafting projects in this server")
