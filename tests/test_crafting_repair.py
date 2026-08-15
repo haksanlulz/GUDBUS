@@ -186,8 +186,15 @@ class TestMoneyAndTime:
 class TestScopeIsStatedNotImplied:
     """A partial implementation that does not say so reads as a complete one."""
 
-    def test_the_module_names_the_tech_books_as_unread(self):
-        assert "Low/High/Ultra-Tech" in (repair.__doc__ or "")
+    def test_the_module_says_which_books_were_read_and_what_they_held(self):
+        """This test used to pin the words "Low/High/Ultra-Tech" as UNREAD.
+        They were read on 2026-08-15 and the finding was that the tech line
+        prints no repair procedure at all — each book points back at B484-485
+        by page. The scope claim has to move with the scope, which is the only
+        reason this test exists."""
+        doc = repair.__doc__ or ""
+        assert "High-Tech" in doc and "Ultra-Tech" in doc
+        assert "B484" in doc or "B485" in doc
 
     def test_the_critical_failure_escalation_is_not_implemented(self):
         """ATTACK.md records it from probe-3 elicitation and B484-485 does not
@@ -259,3 +266,123 @@ class TestSealedProbeThreeExercisesAnUnbuiltLayer:
         assert equipment_quality.modifier(EquipmentQuality.BASIC) == 0
         assert equipment_quality.modifier(EquipmentQuality.GOOD) == 1
         assert equipment_quality.modifier(EquipmentQuality.FINE) == 2
+
+
+class TestTheTechLineLayer:
+    """Added 2026-08-15, with sealed probe 3 still unread.
+
+    The layer is thin because the books are: High-Tech and Ultra-Tech were both
+    read for a repair procedure and both defer to B484-485 by page. What they
+    do print is equipment, environment and tech level.
+    """
+
+    def _mod(self, **kwargs):
+        return repair.repair_modifier(5_000, RepairTier.MINOR, **kwargs)
+
+    def test_a_tl_gap_reaches_the_roll(self):
+        from gurps_bot.mechanics import tech_level
+
+        gap = tech_level.tl_gap(skill_tl=9, equipment_tl=10)
+        assert self._mod(tech_level_gap=gap).total == -5
+
+    def test_it_is_the_iq_based_ladder_because_repair_skills_are_iq_based(self):
+        """-5 for one TL up, not the -1 a DX-based operating skill would take.
+        Armoury, Electronics Repair, Machinist and Mechanic are all IQ-based,
+        so this is the rule that governs, and it is four points harsher."""
+        from gurps_bot.mechanics import tech_level
+        from gurps_bot.mechanics.tech_level import SkillClass
+
+        governing = tech_level.tl_gap(skill_tl=9, equipment_tl=10)
+        wrong_rule = tech_level.tl_gap(
+            skill_tl=9, equipment_tl=10, skill_class=SkillClass.OTHER
+        )
+        assert governing.penalty == -5
+        assert wrong_rule.penalty == -1
+
+    def test_an_impossible_gap_is_refused_rather_than_priced(self):
+        from gurps_bot.mechanics import tech_level
+
+        gap = tech_level.tl_gap(skill_tl=9, equipment_tl=13)
+        with pytest.raises(ValueError):
+            self._mod(tech_level_gap=gap)
+
+    def test_unfamiliarity_stacks_with_the_gap_rather_than_replacing_it(self):
+        from gurps_bot.mechanics import tech_level
+
+        gap = tech_level.tl_gap(skill_tl=9, equipment_tl=10)
+        assert self._mod(tech_level_gap=gap, unfamiliar=True).total == -7
+
+    @pytest.mark.parametrize(
+        "emp,expected",
+        [
+            (repair.EmpDamage.NONE, 0),
+            (repair.EmpDamage.SOLID_STATE, -10),
+            (repair.EmpDamage.OTHER_DEVICE, -4),
+        ],
+    )
+    def test_the_emp_split_is_the_rule(self, emp, expected):
+        """High-Tech prints two numbers, not one: solid-state gear is
+        "likely to be permanently damaged" at -10 while everything else is
+        "at only -4"."""
+        assert self._mod(emp=emp).total == expected
+
+    def test_a_clean_repair_is_unchanged_by_any_of_it(self):
+        """The whole layer is opt-in; nothing about the Basic Set core moved."""
+        assert self._mod().total == 0
+
+
+class TestRoboticWorkshops:
+    def test_it_rolls_for_itself_at_thirteen(self):
+        assert repair.robotic_workshop_skill(10) == 13
+
+    @pytest.mark.parametrize("tl,expected", [(10, 13), (11, 14), (12, 15)])
+    def test_plus_one_per_tl_over_ten(self, tl, expected):
+        assert repair.robotic_workshop_skill(tl) == expected
+
+    def test_below_tl10_it_does_not_exist(self):
+        with pytest.raises(ValueError):
+            repair.robotic_workshop_skill(9)
+
+
+class TestRepairPaste:
+    """Ultra-Tech's nanopaste — the one printed mechanism in this family that
+    can leave the item worse than it found it."""
+
+    @pytest.mark.parametrize("rolled,hp", [(1, -1), (2, 0), (3, 1), (6, 4)])
+    def test_it_heals_1d_minus_2(self, rolled, hp):
+        assert repair.repair_paste(rolled).hp == hp
+
+    def test_a_negative_result_damages_the_item(self):
+        """"If the result is negative, the nano botched the job, inflicting
+        damage instead of repairing it." A non-negative HP type would delete
+        this rule, which is why the field is signed."""
+        result = repair.repair_paste(1)
+        assert result.made_it_worse
+        assert result.hp < 0
+
+    def test_an_ordinary_application_takes_an_hour(self):
+        assert repair.repair_paste(4).hours == 1.0
+
+    def test_a_skilled_hand_halves_the_time_and_adds_a_point(self):
+        plain = repair.repair_paste(4)
+        skilled = repair.repair_paste(4, skilled_success=True)
+        assert skilled.hp == plain.hp + 1
+        assert skilled.hours == plain.hours / 2
+
+    def test_the_skill_roll_is_a_bonus_not_a_requirement(self):
+        """"Repair paste does not require any skill to use" — so the unskilled
+        path has to work, and it does."""
+        assert repair.repair_paste(5).hp == 3
+
+    @pytest.mark.parametrize("rolled,damage", [(1, 0), (2, -1), (6, -5)])
+    def test_the_wrong_paste_only_ever_damages(self, rolled, damage):
+        assert repair.wrong_repair_paste(rolled).hp == damage
+
+    def test_the_wrong_paste_never_heals(self):
+        for rolled in range(1, 7):
+            assert repair.wrong_repair_paste(rolled).hp <= 0
+
+    def test_a_sealed_object_is_immune(self):
+        """"It cannot damage sealed objects" — a real out, not a rounding
+        case."""
+        assert repair.wrong_repair_paste(6, sealed=True).hp == 0

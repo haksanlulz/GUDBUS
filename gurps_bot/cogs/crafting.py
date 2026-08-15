@@ -32,6 +32,9 @@ from gurps_bot.mechanics import (
     crafting_repair,
     equipment_quality,
 )
+# Aliased: `/craft repair` already has a `tech_level` parameter, which would
+# shadow the module inside the callback.
+from gurps_bot.mechanics import tech_level as tech_level_rules
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
@@ -600,13 +603,20 @@ class CraftingCog(commands.Cog):
         workspace="Quality of the shop or toolkit (B345)",
         time_spent="Time-spent modifier, the GM's call (B346)",
         destroyed="It failed its HT roll to avoid destruction",
-        tech_level="Your TL — only needed for the best-available workspace (B345)",
+        tech_level="Your TL — for the best-available workspace, and for the item's TL gap",
+        item_tech_level="The item's TL, if it is not from your own (B168)",
+        unfamiliar="You have never worked on this make or model (B169)",
+        emp="Whether an EMP is what broke it",
     )
     @app_commands.choices(
         workspace=[
             app_commands.Choice(name=q.value, value=q.name)
             for q in equipment_quality.EquipmentQuality
-        ]
+        ],
+        emp=[
+            app_commands.Choice(name=e.value, value=e.name)
+            for e in crafting_repair.EmpDamage
+        ],
     )
     async def repair(
         self,
@@ -618,6 +628,9 @@ class CraftingCog(commands.Cog):
         time_spent: int = 0,
         destroyed: bool = False,
         tech_level: int | None = None,
+        item_tech_level: int | None = None,
+        unfamiliar: bool = False,
+        emp: str = crafting_repair.EmpDamage.NONE.name,
     ) -> None:
         if price < 0:
             await respond(interaction, "Price cannot be negative.", ephemeral=True)
@@ -633,6 +646,7 @@ class CraftingCog(commands.Cog):
             return
         try:
             quality = equipment_quality.EquipmentQuality[workspace]
+            emp_damage = crafting_repair.EmpDamage[emp]
             # Armoury, Electronics Repair, Machinist and Mechanic are all
             # technological skills, so the harsher half of B345's split applies.
             equipment = equipment_quality.modifier(
@@ -641,6 +655,36 @@ class CraftingCog(commands.Cog):
         except (KeyError, ValueError) as exc:
             await respond(interaction, str(exc) or "Unknown workspace.", ephemeral=True)
             return
+
+        gap = None
+        if item_tech_level is not None:
+            if tech_level is None:
+                await respond(
+                    interaction,
+                    "To price a TL gap I need your TL too — B168 measures the "
+                    "penalty between the skill and the equipment, so one TL on "
+                    "its own says nothing.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                # Repair skills are IQ-based, which is the harsher of B168's two
+                # rules: one TL up is -5, where an operating skill would take -1.
+                gap = tech_level_rules.tl_gap(
+                    skill_tl=tech_level, equipment_tl=item_tech_level
+                )
+            except ValueError as exc:
+                await respond(interaction, str(exc), ephemeral=True)
+                return
+            if gap.impossible:
+                await respond(
+                    interaction,
+                    f"TL{item_tech_level} gear is {gap.steps} TLs above TL"
+                    f"{tech_level} skill. B168 stops rather than scaling: at four "
+                    f"or more it is impossible, not merely very hard. No roll.",
+                    ephemeral=True,
+                )
+                return
 
         tier = crafting_repair.repair_tier(current_hp, max_hp, destroyed=destroyed)
         embed = discord.Embed(
@@ -663,7 +707,13 @@ class CraftingCog(commands.Cog):
             return
 
         modifier = crafting_repair.repair_modifier(
-            price, tier, equipment_modifier=equipment, time_spent_modifier=time_spent
+            price,
+            tier,
+            equipment_modifier=equipment,
+            time_spent_modifier=time_spent,
+            tech_level_gap=gap,
+            unfamiliar=unfamiliar,
+            emp=emp_damage,
         )
         embed.add_field(
             name="Modifiers", value=_breakdown_lines(modifier) or "none", inline=False

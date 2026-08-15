@@ -273,6 +273,75 @@ class TestCostsStaysThreeFigures:
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
 
+class TestRepairAcrossATechLevelGap:
+    """`/craft repair`'s tech-line layer, wired 2026-08-15.
+
+    ⚠️ Sealed probe 3 was not read while this was written. Its scenario shape
+    is known from ATTACK.md — a TL10 beam weapon worked on with TL9 skill —
+    but its numbers are not, and the point of the exercise is that this code
+    is finished before they are seen.
+    """
+
+    async def _run(self, **kwargs):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        await cog.repair.callback(
+            cog,
+            interaction,
+            kwargs.pop("price", 5_000),
+            kwargs.pop("current_hp", 5),
+            kwargs.pop("max_hp", 10),
+            **kwargs,
+        )
+        return interaction
+
+    async def _embed(self, **kwargs):
+        return (await self._run(**kwargs)).response.send_message.await_args.kwargs[
+            "embed"
+        ]
+
+    async def test_one_tl_above_the_technician_is_minus_five(self):
+        embed = await self._embed(tech_level=9, item_tech_level=10)
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "-5" in modifiers.value
+        assert "B168" in modifiers.value
+
+    async def test_one_tl_below_is_only_minus_one(self):
+        """The asymmetry, at the surface. Obsolete gear is far kinder than
+        advanced gear, and a symmetric implementation cannot say so."""
+        embed = await self._embed(tech_level=9, item_tech_level=8)
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "-1" in modifiers.value
+
+    async def test_four_tls_up_is_refused_as_impossible(self):
+        interaction = await self._run(tech_level=9, item_tech_level=13)
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert kwargs["ephemeral"] is True
+        assert "impossible" in kwargs["content"].lower()
+
+    async def test_an_item_tl_without_your_tl_asks_rather_than_guessing(self):
+        """A gap needs two numbers. Assuming the campaign TL here would be the
+        bot inventing an adjudication."""
+        interaction = await self._run(item_tech_level=10)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+    async def test_no_tl_given_leaves_the_roll_alone(self):
+        embed = await self._embed()
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "B168" not in modifiers.value
+
+    async def test_unfamiliarity_and_the_gap_both_land(self):
+        embed = await self._embed(tech_level=9, item_tech_level=10, unfamiliar=True)
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "B168" in modifiers.value
+        assert "B169" in modifiers.value
+
+    async def test_an_emp_wrecked_circuit_board_is_ten_worse(self):
+        embed = await self._embed(emp="SOLID_STATE")
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "-10" in modifiers.value
+
+
 class TestBrewHonoursProbeTwoAtTheSurface:
     """`/craft brew` — added 2026-08-15, when re-verifying sealed probe 2
     found the alchemy domain had no consumer at all.

@@ -19,14 +19,25 @@ invention are both "crafting" and they agree on almost nothing:
 deliberate: it is a presentation container, not a rule. The rule DATA stays
 here. ``tests/test_crafting_domains.py`` asserts the domains disagree.
 
-⬜ **The tech-book layer is NOT implemented and this module does not pretend
-otherwise.** GAUNTLET's ledger row names Low/High/Ultra-Tech for repair, and
-what is here is only the Basic Set core. In particular the rule that a critical
-failure ESCALATES the damage tier — recorded in ATTACK.md from probe-3
-elicitation — is *not* printed on B484-485 and is not implemented; B485's
-"critical failure requires major repairs" belongs to the Breakdowns rules, a
-different roll. Implementing it from memory is exactly the fabrication the
-sealed probe exists to catch.
+✅ **The tech-book layer landed 2026-08-15, and the finding is that there is
+barely one.** High-Tech and Ultra-Tech were both read for a repair procedure
+and neither has one: each points back here by page. High-Tech's Wear and Care
+section opens by calling itself an expansion of B483-485 and then routes
+repairs to "Repairs, p. B484"; Ultra-Tech's tool-kit entry says to see Repairs
+(p. B485) and Breakdowns (p. B486) for the rules on repairing gadgets. What
+the tech line actually contributes is **equipment, environment and tech
+level** — not a second roll. So this stays one module, and the absence is the
+architectural statement.
+
+⚠️ **The rule that a critical failure ESCALATES the damage tier is still not
+implemented, and is now known to be printed in none of the four books read.**
+It was recorded in ATTACK.md from probe-3 elicitation. B485's "critical
+failure requires major repairs" belongs to Breakdowns — a *maintenance* roll,
+not a repair roll — and Ultra-Tech's repair nanopaste has the only printed
+make-it-worse clause in the family (a negative result damages the item), which
+is a different mechanism at a different scale. Writing it from memory is
+exactly the fabrication sealed probe 3 exists to catch, so it is named here
+and left unbuilt.
 """
 
 from __future__ import annotations
@@ -34,6 +45,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from gurps_bot.mechanics import tech_level
 from gurps_bot.mechanics.crafting import ModifierBreakdown, TimeSpec
 from gurps_bot.mechanics.dice import DiceSpec
 
@@ -103,23 +115,62 @@ def repair_tier(current_hp: int, max_hp: int, destroyed: bool = False) -> Repair
     return RepairTier.MINOR
 
 
+class EmpDamage(Enum):
+    """High-Tech: what an EMP leaves behind, for repair purposes.
+
+    The only environmental repair modifier the tech books print as a number
+    rather than as a GM call, and the split is the rule: solid-state gear is
+    "likely to be permanently damaged" and far worse off than everything else.
+    """
+
+    NONE = "Undamaged by EMP"
+    SOLID_STATE = "EMP-damaged solid-state electronics"
+    OTHER_DEVICE = "EMP-damaged, not solid-state"
+
+
+#: High-Tech: after an EMP, "all repair rolls are at -10. Repairs on other
+#: devices are at only -4."
+EMP_SOLID_STATE_PENALTY = -10
+EMP_OTHER_DEVICE_PENALTY = -4
+
+_EMP_PENALTY = {
+    EmpDamage.NONE: 0,
+    EmpDamage.SOLID_STATE: EMP_SOLID_STATE_PENALTY,
+    EmpDamage.OTHER_DEVICE: EMP_OTHER_DEVICE_PENALTY,
+}
+
+
 def repair_modifier(
     price: int,
     tier: RepairTier,
     *,
     equipment_modifier: int = 0,
     time_spent_modifier: int = 0,
+    tech_level_gap: tech_level.TechLevelGap | None = None,
+    unfamiliar: bool = False,
+    emp: EmpDamage = EmpDamage.NONE,
 ) -> ModifierBreakdown:
     """The repair roll's modifiers.
 
     ``equipment_modifier`` and ``time_spent_modifier`` are B345 and B346, which
     B484 cites rather than restates — they are GM-supplied here for the same
     reason every other adjudication is.
+
+    ``tech_level_gap`` is the tech-line layer, and it is B168 rather than any
+    tech book: repair skills are IQ-based, so a mismatch costs -5 for the first
+    step **up** and -1 for the first step down. Build it with
+    ``mechanics.tech_level.tl_gap``; an impossible gap is refused here rather
+    than priced, because the book stops instead of scaling.
     """
     if tier is RepairTier.BEYOND_REPAIR:
         raise ValueError(
             "a destroyed item is beyond repair — B484 says replace it at full "
             "cost, so there is no roll to modify"
+        )
+    if tech_level_gap is not None and tech_level_gap.impossible:
+        raise ValueError(
+            "B168 stops at four TLs above the skill: the job is impossible, "
+            "not merely very hard, so there is no roll to modify"
         )
 
     terms: list[tuple[str, int]] = []
@@ -128,6 +179,18 @@ def repair_modifier(
         terms.append((f"item price ${price:,}", modifier))
     if tier is RepairTier.MAJOR:
         terms.append(("major repair", MAJOR_REPAIR_PENALTY))
+    if tech_level_gap is not None and tech_level_gap.penalty:
+        direction = "above" if tech_level_gap.equipment_is_higher else "below"
+        terms.append((
+            f"{abs(tech_level_gap.steps)} TL {direction} your skill (B168)",
+            tech_level_gap.penalty,
+        ))
+    if unfamiliar:
+        # B169 is explicit that this stacks with the TL penalty rather than
+        # replacing it, and that only this half can be practised away.
+        terms.append(("unfamiliar equipment (B169)", tech_level.UNFAMILIAR_PENALTY))
+    if _EMP_PENALTY[emp]:
+        terms.append((emp.value, _EMP_PENALTY[emp]))
     if equipment_modifier:
         terms.append(("equipment (B345)", equipment_modifier))
     if time_spent_modifier:
@@ -163,12 +226,14 @@ def minor_repair_time() -> TimeSpec:
 def major_repair_parts_cost(original_price: int, rolled_1d: int) -> int:
     """B484: spare parts "cost 1dx10% of its original price".
 
-    ⚠️ The 10th-printing markdown renders this as "1d — 10%", an em-dash where
-    a multiplication sign belongs. Read as ``1d x 10%`` — i.e. 10% to 60% — on
-    two grounds: it is the only reading that produces a cost, and the same
-    extraction mangles "-5xHP" and "1dx10 minutes" identically in the same
-    chapter. **Confirm against the PDF before this figure is trusted at a
-    table**; it is the one number in this module inferred from a damaged glyph.
+    ✅ **Confirmed against the PDF 2026-08-15; this docstring used to ask for
+    exactly that check.** The 10th-printing markdown renders it "1d — 10%", an
+    em-dash where a multiplication sign belongs, and the reading was inferred.
+    The PDF's text layer encodes the character as the byte 0xA5, and every
+    unambiguous occurrence of that byte in the same volume is a multiplication
+    sign: "(150 + 30) x (1.2 - 1) = 36 lbs", "x0.50", "2xBL cubic feet per
+    hour", "30x gives +5". One glyph, one meaning, checked where the arithmetic
+    could speak for itself rather than where it was in doubt.
     """
     if original_price < 0:
         raise ValueError(f"original_price cannot be negative, got {original_price}")
@@ -205,6 +270,96 @@ def hired_technician() -> HiredTechnician:
         skill_dice=HIRED_TECHNICIAN_SKILL_DICE,
         skill_base=HIRED_TECHNICIAN_SKILL_BASE,
     )
+
+
+#: Ultra-Tech's robotic workshop: "skill 13 in whatever skill and specialty the
+#: workshop is designed for; add +1 per TL over TL10."
+ROBOTIC_WORKSHOP_SKILL = 13
+ROBOTIC_WORKSHOP_TL = 10
+
+#: "If a human technician is directing a robotic workshop, it is as good as a
+#: portable workshop, with an additional +1" — so the machine stops being a
+#: substitute technician and becomes equipment plus an assistant.
+ROBOTIC_WORKSHOP_ASSISTANT_BONUS = 1
+
+
+def robotic_workshop_skill(tech_level_of_workshop: int) -> int:
+    """What a robotic workshop can do unattended.
+
+    ⚑ This is the family's fourth reading of "assistant", and it is unlike the
+    other three: invention's assistants add to the inventor's roll, alchemy's
+    weakest hand takes the roll over, enchantment's cost the caster — and this
+    one **rolls in place of a person entirely**, with its own flat skill, when
+    nobody is directing it.
+    """
+    if tech_level_of_workshop < ROBOTIC_WORKSHOP_TL:
+        raise ValueError(
+            f"robotic workshops start at TL{ROBOTIC_WORKSHOP_TL}, got "
+            f"TL{tech_level_of_workshop}"
+        )
+    return ROBOTIC_WORKSHOP_SKILL + (tech_level_of_workshop - ROBOTIC_WORKSHOP_TL)
+
+
+@dataclass(frozen=True, slots=True)
+class PasteResult:
+    """What an application of repair nanopaste did.
+
+    ``hp`` is signed on purpose. Ultra-Tech's paste is the one printed repair
+    mechanism in the family that can leave the item worse than it found it —
+    "if the result is negative, the nano botched the job, inflicting damage
+    instead of repairing it" — so collapsing it to a non-negative "HP healed"
+    would delete the rule.
+    """
+
+    hp: int
+    hours: float
+
+    @property
+    def made_it_worse(self) -> bool:
+        return self.hp < 0
+
+
+#: Ultra-Tech: an application "repairs 1d-2 HP after an hour".
+PASTE_HP = DiceSpec(1, 6, -2)
+PASTE_HOURS = 1.0
+
+#: "If the wrong repair paste is sprayed on an item, it will take an hour to
+#: inflict 1d-1 HP damage." Always damage, never a repair.
+WRONG_PASTE_DAMAGE = DiceSpec(1, 6, -1)
+
+#: "A successful roll made against an appropriate repair skill + 2 will halve
+#: the time required for repair paste to work, and add +1 to the HP that it
+#: heals." The skill roll is a bonus on top, not a requirement — the paste
+#: "does not require any skill to use".
+PASTE_SKILL_BONUS = 2
+PASTE_ASSISTED_EXTRA_HP = 1
+PASTE_ASSISTED_TIME_MULTIPLIER = 0.5
+
+
+def repair_paste(rolled_1d: int, *, skilled_success: bool = False) -> PasteResult:
+    """One application of dedicated, programmable or universal repair paste."""
+    if not 1 <= rolled_1d <= 6:
+        raise ValueError(f"a 1d roll is 1..6, got {rolled_1d}")
+
+    hp = rolled_1d + PASTE_HP.modifier
+    hours = PASTE_HOURS
+    if skilled_success:
+        hp += PASTE_ASSISTED_EXTRA_HP
+        hours *= PASTE_ASSISTED_TIME_MULTIPLIER
+    return PasteResult(hp=hp, hours=hours)
+
+
+def wrong_repair_paste(rolled_1d: int, *, sealed: bool = False) -> PasteResult:
+    """The wrong paste on the wrong item.
+
+    Sealed objects are exempt — "It cannot damage sealed objects" — which is a
+    real out, not a rounding case, so it is a parameter rather than a footnote.
+    """
+    if not 1 <= rolled_1d <= 6:
+        raise ValueError(f"a 1d roll is 1..6, got {rolled_1d}")
+    if sealed:
+        return PasteResult(hp=0, hours=PASTE_HOURS)
+    return PasteResult(hp=-(rolled_1d + WRONG_PASTE_DAMAGE.modifier), hours=PASTE_HOURS)
 
 
 def maintenance_ht_repairs(ht_points_lost: int) -> int:
