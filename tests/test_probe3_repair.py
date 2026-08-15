@@ -34,9 +34,18 @@ Why the printed reading is taken as governing, stated so it can be overruled:
   extend to other skills, or even to IQ-based rolls for DX-based skills". It
   goes out of its way to deny exactly this relief to exactly this case.
 
-⬜ **OPERATOR RULING OWED**, because the code cannot settle it: is the -1 a
-house rule, a planted error, or a rule from a book not yet read? The code
-follows the printed text and is not changed by this file.
+✅ **OPERATOR RULING 2026-08-15: the -1 is a PLANTED ERROR. The book wins.**
+So condition 1 is CAUGHT, not failed — the probe was built to see whether a
+deliberately wrong TL penalty would be coded from the check instead of from
+the book, and it was not. The code is unchanged by the ruling because it was
+already right; what changes is the reading of the result.
+
+⚑ Worth stating plainly, because it is the one thing this probe was for: the
+catch did NOT come from reasoning about the rules. It came from opening the
+Basic Set skill list to see what attribute Armoury runs on. The 2026-08-06
+entry recorded that every earlier catch worked the same way and every miss did
+not — probe 5's materials figure passed unchallenged twice while it was being
+reasoned about, and fell the moment LTC3 p. 22 was actually read.
 """
 
 from __future__ import annotations
@@ -74,7 +83,13 @@ def _modifier(**kwargs):
 
 
 class TestConditionOneTheTarget:
-    """"Target 9 at a basic workspace for the stated inputs." """
+    """"Target 9 at a basic workspace for the stated inputs."
+
+    Operator-ruled a planted error 2026-08-15, so these assertions record a
+    CATCH. They deliberately assert the disagreement rather than the probe's
+    number: if a future session "fixes" the TL penalty to match the probe,
+    every test here goes red, which is the point.
+    """
 
     def test_this_code_says_five_not_nine(self):
         basic = equipment_quality.modifier(EquipmentQuality.BASIC, technological=True)
