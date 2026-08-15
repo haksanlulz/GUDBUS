@@ -172,28 +172,102 @@ def disaster_roll_penalty(doses: int) -> int:
     return -doses
 
 
+def default_technique_level(alchemy_skill: int) -> int:
+    """Where an unbought elixir technique sits: Alchemy-1, Hard."""
+    return alchemy_skill + TECHNIQUE_DEFAULT
+
+
+def is_mastered(technique: int, alchemy_skill: int) -> bool:
+    """A technique bought up to its base skill is mastered.
+
+    ⚑ This is a DERIVATION, and it has to stay one. The -6 for brewing blind
+    is conditional on not having mastered the elixir, and mastery is already
+    on the character sheet — a bot that asks "have you mastered it?" is asking
+    the user to restate two numbers it was given.
+    """
+    return technique >= alchemy_skill
+
+
+def blind_brewing_penalty(
+    technique: int,
+    alchemy_skill: int,
+    *,
+    formulary: bool = False,
+    teacher: bool = False,
+) -> int:
+    """-6, and the three separate ways out of it.
+
+    Mastery, a formulary, or supervision — any one is enough, which is why
+    the mastered case never needs to know whether a book was present.
+    """
+    if is_mastered(technique, alchemy_skill) or formulary or teacher:
+        return 0
+    return UNMASTERED_PENALTY
+
+
 def brewing_modifier(
     *,
+    alchemy_skill: int,
+    technique: int | None = None,
     lab: LabQuality = LabQuality.BASIC,
     tech_level: int | None = None,
     doses: int = 1,
-    unmastered: bool = False,
-    technique_default: bool = False,
+    formulary: bool = False,
+    teacher: bool = False,
 ) -> ModifierBreakdown:
-    """What modifies the final Alchemy roll."""
+    """What modifies the final Alchemy roll, relative to base Alchemy skill.
+
+    ⚠️ ``unmastered=`` used to be a parameter here and is deliberately gone.
+    Handing the module its own conclusion is the same defect as a ``quality=``
+    argument on a craft call: the rule lives here, so the verdict does too.
+    Sealed probe 2 caught it on re-verify — everything else in the domain
+    passed, and this one condition had no implementation at all.
+    """
+    if technique is None:
+        technique = default_technique_level(alchemy_skill)
+
     terms: list[tuple[str, int]] = []
+
+    step = technique - alchemy_skill
+    if step:
+        terms.append(("elixir technique", step))
 
     modifier = lab_modifier(lab, tech_level)
     if modifier:
         terms.append((lab.value, modifier))
-    if technique_default:
-        terms.append(("elixir technique at default", TECHNIQUE_DEFAULT))
-    if unmastered:
-        terms.append(("no formulary and no teacher", UNMASTERED_PENALTY))
+
+    blind = blind_brewing_penalty(
+        technique, alchemy_skill, formulary=formulary, teacher=teacher
+    )
+    if blind:
+        terms.append(("brewing blind: no mastery, no book, no teacher", blind))
+
     if doses > 1:
         terms.append((f"{doses} doses in the batch", batch_penalty(doses)))
 
     return ModifierBreakdown(terms=tuple(terms))
+
+
+def effective_target(
+    *,
+    alchemy_skill: int,
+    technique: int | None = None,
+    lab: LabQuality = LabQuality.BASIC,
+    tech_level: int | None = None,
+    doses: int = 1,
+    formulary: bool = False,
+    teacher: bool = False,
+) -> int:
+    """The number the final roll is made against — a return value, not an ask."""
+    return alchemy_skill + brewing_modifier(
+        alchemy_skill=alchemy_skill,
+        technique=technique,
+        lab=lab,
+        tech_level=tech_level,
+        doses=doses,
+        formulary=formulary,
+        teacher=teacher,
+    ).total
 
 
 def final_roller_skill(skills: list[int]) -> int:

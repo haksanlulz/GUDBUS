@@ -273,6 +273,104 @@ class TestCostsStaysThreeFigures:
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
 
+class TestBrewHonoursProbeTwoAtTheSurface:
+    """`/craft brew` — added 2026-08-15, when re-verifying sealed probe 2
+    found the alchemy domain had no consumer at all.
+
+    Six of its seven conditions passed at module level and the module was
+    imported by nothing but its own tests, so conditions 4 (mastery is
+    inferred, never asked) and 7 (mana is an input) had no surface on which
+    they could be honoured or broken. A domain nobody can reach is not a
+    domain that passes.
+    """
+
+    async def _run(self, **kwargs):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        await cog.brew.callback(
+            cog,
+            interaction,
+            kwargs.pop("alchemy_skill", 12),
+            kwargs.pop("cost_per_dose", 200),
+            **kwargs,
+        )
+        return interaction
+
+    async def _embed(self, **kwargs):
+        return (await self._run(**kwargs)).response.send_message.await_args.kwargs[
+            "embed"
+        ]
+
+    async def test_the_sealed_scenario_reaches_eleven(self):
+        embed = await self._embed(doses=2, technique=12, formulary=True)
+        roll = next(f for f in embed.fields if f.name == "Roll against")
+        assert "11" in roll.value
+
+    async def test_the_command_never_asks_whether_you_mastered_it(self):
+        """Condition 4. The two numbers that decide mastery are already
+        parameters, so a third question would be asking the user to restate
+        what the bot was handed."""
+        import inspect
+
+        params = set(inspect.signature(CraftingCog.brew.callback).parameters)
+        assert not {"unmastered", "mastered", "blind"} & params
+
+    async def test_taking_the_formulary_away_changes_nothing_when_mastered(self):
+        with_book = await self._embed(doses=2, technique=12, formulary=True)
+        without = await self._embed(doses=2, technique=12, formulary=False)
+        assert (
+            next(f for f in with_book.fields if f.name == "Roll against").value
+            == next(f for f in without.fields if f.name == "Roll against").value
+        )
+
+    async def test_an_unmastered_brewer_alone_takes_the_six(self):
+        embed = await self._embed(doses=2, technique=11, formulary=False)
+        assert "4" in next(f for f in embed.fields if f.name == "Roll against").value
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        assert "-6" in modifiers.value
+
+    async def test_materials_multiply_and_time_does_not(self):
+        embed = await self._embed(doses=2, technique=12, weeks=1.0)
+        materials = next(f for f in embed.fields if f.name == "Materials")
+        time = next(f for f in embed.fields if f.name == "Time")
+        assert "$400" in materials.value
+        assert "1 week" in time.value
+        assert "2 weeks" not in time.value
+
+    async def test_no_mana_is_refused_rather_than_priced(self):
+        interaction = await self._run(mana="NONE")
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+    async def test_low_mana_doubles_the_clock(self):
+        embed = await self._embed(mana="LOW", weeks=1.0)
+        time = next(f for f in embed.fields if f.name == "Time")
+        assert "2 weeks" in time.value
+
+    async def test_very_high_mana_says_every_failure_is_critical(self):
+        embed = await self._embed(mana="VERY_HIGH")
+        assert any("every** failure" in (f.value or "") for f in embed.fields)
+
+    async def test_the_disaster_roll_is_per_dose_not_per_extra_dose(self):
+        """The off-by-one this domain is built to survive: the brew roll is
+        -1 per EXTRA dose, the disaster roll -1 per dose."""
+        embed = await self._embed(doses=3, technique=12)
+        modifiers = next(f for f in embed.fields if f.name == "Modifiers")
+        failure = next(f for f in embed.fields if f.name == "On a failure")
+        assert "-2" in modifiers.value
+        assert "-3" in failure.value
+
+    async def test_a_weaker_helper_takes_over_the_roll(self):
+        embed = await self._embed(technique=12, helper_skill=9)
+        assert any(f.name == "Who rolls" for f in embed.fields)
+
+    @pytest.mark.parametrize(
+        "kwargs", [{"doses": 0}, {"cost_per_dose": -1}, {"weeks": 0}]
+    )
+    async def test_nonsense_input_is_refused(self, kwargs):
+        interaction = await self._run(**kwargs)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
 class TestInventEntryPoint:
     async def test_it_asks_for_the_one_thing_only_the_player_knows(self):
         """Skill is the parameter; everything else is a menu. If a second

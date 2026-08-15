@@ -258,11 +258,60 @@ class TestTheWeakestWorkerRolls:
             alchemy.final_roller_skill([])
 
 
-class TestFormulariesAndSecrets:
-    def test_no_book_and_no_teacher_is_minus_six(self):
+class TestMasteryIsDerivedAndNeverAsked:
+    """Sealed probe 2, condition 4 — and it failed on re-verify 2026-08-15.
+
+    ``brewing_modifier`` took ``unmastered: bool``: the caller handed the
+    module its conclusion. That is the same disease as a ``quality=``
+    argument — the module owns the rule, so it must own the verdict. A
+    technique bought up to its base skill is mastered, so the -6 cannot
+    apply, and nothing should have to be asked to know that.
+    """
+
+    def test_a_technique_at_base_skill_is_mastered(self):
+        assert alchemy.is_mastered(technique=12, alchemy_skill=12)
+
+    def test_a_technique_at_default_is_not(self):
+        assert not alchemy.is_mastered(technique=11, alchemy_skill=12)
+
+    def test_mastery_alone_retires_the_penalty_with_no_book_in_sight(self):
+        assert (
+            alchemy.blind_brewing_penalty(
+                technique=12, alchemy_skill=12, formulary=False, teacher=False
+            )
+            == 0
+        )
+
+    @pytest.mark.parametrize("formulary,teacher", [(True, False), (False, True)])
+    def test_either_a_book_or_a_teacher_also_retires_it(self, formulary, teacher):
+        assert (
+            alchemy.blind_brewing_penalty(
+                technique=11, alchemy_skill=12, formulary=formulary, teacher=teacher
+            )
+            == 0
+        )
+
+    def test_unmastered_and_alone_is_the_minus_six(self):
         assert alchemy.UNMASTERED_PENALTY == -6
-        mod = alchemy.brewing_modifier(unmastered=True)
-        assert mod.total == -6
+        assert (
+            alchemy.blind_brewing_penalty(
+                technique=11, alchemy_skill=12, formulary=False, teacher=False
+            )
+            == -6
+        )
+
+    def test_the_conclusion_cannot_be_passed_in(self):
+        """The regression guard. If ``unmastered=`` ever comes back as a
+        parameter, the caller can assert a rule the module is supposed to
+        decide, and probe 2's condition 4 silently reopens."""
+        import inspect
+
+        params = inspect.signature(alchemy.brewing_modifier).parameters
+        assert "unmastered" not in params
+        assert "mastered" not in params
+
+
+class TestFormulariesAndSecrets:
 
     def test_most_elixirs_default_to_alchemy_minus_one(self):
         assert alchemy.TECHNIQUE_DEFAULT == -1
@@ -284,13 +333,79 @@ class TestFormulariesAndSecrets:
 class TestTheBrewingModifier:
     def test_it_assembles_the_terms(self):
         mod = alchemy.brewing_modifier(
-            lab=LabQuality.PROFESSIONAL, doses=3, technique_default=True
+            alchemy_skill=12, lab=LabQuality.PROFESSIONAL, doses=3, formulary=True
         )
+        # professional lab +1, technique sits at its Alchemy-1 default, two
+        # extra doses -2. The formulary is what keeps the -6 out of it, and
+        # this test had to be told so: written against the old signature it
+        # expected -2 and got -8, because a defaulted technique with no book
+        # really is brewing blind.
         assert mod.total == 1 - 1 - 2
         labels = [label for label, _ in mod.terms]
         assert any("doses" in label for label in labels)
 
     def test_a_basic_lab_contributes_nothing_and_says_nothing(self):
-        mod = alchemy.brewing_modifier(lab=LabQuality.BASIC)
+        mod = alchemy.brewing_modifier(alchemy_skill=12, technique=12)
         assert mod.total == 0
         assert mod.terms == ()
+
+
+class TestProbeTwoEndToEnd:
+    """The sealed scenario, run as one call.
+
+    Alchemy 12 · elixir technique raised to 12 · basic lab · formulary in
+    hand · 2 doses · standard mana · $200/dose · 1 week.
+    """
+
+    def test_the_effective_target_is_eleven(self):
+        assert (
+            alchemy.effective_target(
+                alchemy_skill=12,
+                technique=12,
+                lab=LabQuality.BASIC,
+                doses=2,
+                formulary=True,
+            )
+            == 11
+        )
+
+    def test_the_formulary_was_never_needed(self):
+        """Mastery already covers it, so the answer must not move when the
+        book is taken away — condition 4's whole point."""
+        with_book = alchemy.effective_target(
+            alchemy_skill=12, technique=12, lab=LabQuality.BASIC, doses=2,
+            formulary=True,
+        )
+        without = alchemy.effective_target(
+            alchemy_skill=12, technique=12, lab=LabQuality.BASIC, doses=2,
+            formulary=False,
+        )
+        assert with_book == without == 11
+
+    def test_the_materials_are_four_hundred(self):
+        assert alchemy.batch_materials_cost(200, 2) == 400
+
+    def test_the_batch_takes_one_week_not_two(self):
+        """Batch time does not multiply. Asserted by signature, because the
+        durable version of this rule is that there is nowhere to put the
+        doses — a number that cannot be passed cannot be multiplied by."""
+        import inspect
+
+        assert "doses" not in inspect.signature(
+            alchemy.brewing_time_multiplier
+        ).parameters
+        assert alchemy.brewing_time_multiplier(Mana.NORMAL) == 1.0
+
+    def test_an_unmastered_brewer_without_the_book_is_ten_worse(self):
+        """The same scenario with the -6 live — pins that the derivation is
+        actually reachable, not merely present."""
+        assert (
+            alchemy.effective_target(
+                alchemy_skill=12,
+                technique=11,
+                lab=LabQuality.BASIC,
+                doses=2,
+                formulary=False,
+            )
+            == 4
+        )

@@ -26,7 +26,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from gurps_bot.mechanics import crafting, crafting_repair, equipment_quality
+from gurps_bot.mechanics import (
+    crafting,
+    crafting_alchemy,
+    crafting_repair,
+    equipment_quality,
+)
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
@@ -697,6 +702,150 @@ class CraftingCog(commands.Cog):
                 inline=False,
             )
         embed.set_footer(text="B484")
+        await respond(interaction, embed=embed)
+
+    @craft.command(name="brew", description="Brewing a batch of elixirs (GURPS Magic ch. 28)")
+    @app_commands.describe(
+        alchemy_skill="Your Alchemy skill",
+        cost_per_dose="What the elixir's materials cost per dose, from its own entry",
+        doses="How many doses in the batch",
+        technique="Your level in this elixir's technique (default: Alchemy-1)",
+        lab="The laboratory you are working in",
+        mana="Local mana level — it changes the time, the duration and the failures",
+        weeks="The elixir's printed brewing time, in weeks",
+        formulary="You have the written formula to hand",
+        teacher="A master alchemist is supervising",
+        helper_skill="The lowest Alchemy skill among anyone helping",
+        tech_level="Your TL — only needed for a cutting-edge lab",
+    )
+    @app_commands.choices(
+        lab=[
+            app_commands.Choice(name=q.value, value=q.name)
+            for q in crafting_alchemy.LabQuality
+        ],
+        mana=[
+            app_commands.Choice(name=m.value, value=m.name) for m in crafting_alchemy.Mana
+        ],
+    )
+    async def brew(
+        self,
+        interaction: discord.Interaction,
+        alchemy_skill: int,
+        cost_per_dose: int,
+        doses: int = 1,
+        technique: int | None = None,
+        lab: str = crafting_alchemy.LabQuality.BASIC.name,
+        mana: str = crafting_alchemy.Mana.NORMAL.name,
+        weeks: float = 1.0,
+        formulary: bool = False,
+        teacher: bool = False,
+        helper_skill: int | None = None,
+        tech_level: int | None = None,
+    ) -> None:
+        if doses < 1:
+            await respond(interaction, "A batch is at least one dose.", ephemeral=True)
+            return
+        if cost_per_dose < 0:
+            await respond(
+                interaction, "Cost per dose cannot be negative.", ephemeral=True
+            )
+            return
+        if weeks <= 0:
+            await respond(
+                interaction, "Brewing time should be more than zero.", ephemeral=True
+            )
+            return
+        try:
+            quality = crafting_alchemy.LabQuality[lab]
+            mana_level = crafting_alchemy.Mana[mana]
+        except KeyError:
+            await respond(interaction, "Unknown laboratory or mana level.", ephemeral=True)
+            return
+
+        if not crafting_alchemy.can_brew(mana_level):
+            await respond(
+                interaction,
+                "Elixirs cannot be made or used in a no-mana area at all.",
+                ephemeral=True,
+            )
+            return
+
+        # The weakest pair of hands makes the final roll — alchemy's reading of
+        # "assistant", and the opposite of invention's.
+        roller = alchemy_skill
+        if helper_skill is not None:
+            roller = crafting_alchemy.final_roller_skill([alchemy_skill, helper_skill])
+
+        try:
+            modifier = crafting_alchemy.brewing_modifier(
+                alchemy_skill=roller,
+                technique=technique,
+                lab=quality,
+                tech_level=tech_level,
+                doses=doses,
+                formulary=formulary,
+                teacher=teacher,
+            )
+        except ValueError as exc:
+            await respond(interaction, str(exc), ephemeral=True)
+            return
+
+        target = roller + modifier.total
+        embed = discord.Embed(
+            title=f"Brewing {doses} dose{'s' if doses > 1 else ''}",
+            colour=_INVENTION,
+        )
+        embed.add_field(
+            name="Modifiers", value=_breakdown_lines(modifier) or "none", inline=False
+        )
+        embed.add_field(name="Roll against", value=f"**{target}**", inline=False)
+        if helper_skill is not None and roller < alchemy_skill:
+            embed.add_field(
+                name="Who rolls",
+                value=(
+                    f"The lowest-skill alchemist who touched the batch — {roller}, "
+                    f"not your {alchemy_skill}."
+                ),
+                inline=False,
+            )
+        embed.add_field(
+            name="Materials",
+            value=f"**${crafting_alchemy.batch_materials_cost(cost_per_dose, doses):,}** "
+            f"(${cost_per_dose:,} x {doses})",
+            inline=False,
+        )
+        elapsed = weeks * crafting_alchemy.brewing_time_multiplier(mana_level)
+        embed.add_field(
+            name="Time",
+            value=(
+                f"**{elapsed:g} week{'s' if elapsed != 1 else ''}** for the whole "
+                f"batch — batch size drives the cost and the penalty, not the clock."
+            ),
+            inline=False,
+        )
+        if crafting_alchemy.every_failure_is_critical(mana_level):
+            embed.add_field(
+                name="Very high mana",
+                value="Half the brewing time, but **every** failure is critical.",
+                inline=False,
+            )
+        if mana_level is crafting_alchemy.Mana.LOW:
+            embed.add_field(
+                name="Low mana",
+                value="Twice the time, and the elixir works half as long.",
+                inline=False,
+            )
+        embed.add_field(
+            name="On a failure",
+            value=(
+                "Ruined ingredients, and the money with them. There are **no "
+                "critical successes** in alchemy. A critical failure takes a "
+                f"second technique roll at **{crafting_alchemy.disaster_roll_penalty(doses)}** "
+                "(one per dose, not per extra dose) before any disaster fires."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="GURPS Magic ch. 28")
         await respond(interaction, embed=embed)
 
     @craft.command(name="projects", description="Your crafting projects in this server")
