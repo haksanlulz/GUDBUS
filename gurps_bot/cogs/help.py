@@ -86,7 +86,8 @@ TOPICS: dict[str, tuple[str, str, tuple[str, ...]]] = {
         "Making things",
         "Invent what no catalog carries, and price the attempt before you start.",
         ("craft invent", "craft costs", "craft repair", "craft make",
-         "craft brew", "craft projects", "craft project", "craft abandon"),
+         "craft brew", "craft enchant", "craft projects", "craft project",
+         "craft abandon"),
     ),
     "tracking": (
         "Between sessions",

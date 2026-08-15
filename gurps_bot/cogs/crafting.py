@@ -29,6 +29,7 @@ from discord.ext import commands
 from gurps_bot.mechanics import (
     crafting,
     crafting_alchemy,
+    crafting_enchantment,
     crafting_mundane,
     crafting_repair,
     equipment_quality,
@@ -753,6 +754,138 @@ class CraftingCog(commands.Cog):
                 inline=False,
             )
         embed.set_footer(text="B484")
+        await respond(interaction, embed=embed)
+
+    @craft.command(
+        name="enchant", description="Enchanting an item: Power, time, and the ceremonial thresholds"
+    )
+    @app_commands.describe(
+        enchant_skill="Your skill with the Enchant spell",
+        spell_skill="Your skill with the spell going into the item",
+        energy="The enchantment's energy cost, from its own entry",
+        method="Quick and Dirty burns energy; Slow and Sure burns the calendar",
+        assistants="Other qualified mages helping (each is -1 to your roll)",
+        hp_spent="HP you spend to power it (each is a further -1)",
+        bystanders="Anyone but you and your assistants within 10 yards",
+        mana="Where the finished item will be USED",
+    )
+    @app_commands.choices(
+        method=[
+            app_commands.Choice(name=m.value, value=m.name)
+            for m in crafting_enchantment.Method
+        ],
+        mana=[
+            app_commands.Choice(name=m.value, value=m.name)
+            for m in crafting_enchantment.Mana
+        ],
+    )
+    async def enchant(
+        self,
+        interaction: discord.Interaction,
+        enchant_skill: int,
+        spell_skill: int,
+        energy: int,
+        method: str = crafting_enchantment.Method.SLOW_AND_SURE.name,
+        assistants: int = 0,
+        hp_spent: int = 0,
+        bystanders: bool = False,
+        mana: str = crafting_enchantment.Mana.NORMAL.name,
+    ) -> None:
+        try:
+            chosen = crafting_enchantment.Method[method]
+            where = crafting_enchantment.Mana[mana]
+            modifier = crafting_enchantment.enchanting_modifier(
+                assistants=assistants, hp_spent=hp_spent, bystanders=bystanders
+            )
+            base = crafting_enchantment.enchanting_skill(enchant_skill, spell_skill)
+            hours = crafting_enchantment.quick_and_dirty_hours(energy)
+            days = crafting_enchantment.slow_and_sure_days(energy, max(assistants + 1, 1))
+        except (KeyError, ValueError) as exc:
+            await respond(interaction, str(exc) or "Unknown option.", ephemeral=True)
+            return
+
+        effective = base + modifier.total
+        cap = crafting_enchantment.assistant_cap(base)
+
+        embed = discord.Embed(title="Enchanting", colour=_INVENTION)
+        embed.add_field(
+            name="Base skill",
+            value=(
+                f"**{base}** — the lower of Enchant {enchant_skill} and the spell "
+                f"{spell_skill}. No averaging."
+            ),
+            inline=False,
+        )
+        if modifier.terms:
+            embed.add_field(
+                name="Modifiers", value=_breakdown_lines(modifier), inline=False
+            )
+
+        if assistants > cap:
+            embed.add_field(
+                name="⚠️ Too many hands",
+                value=(
+                    f"At skill {base} you may bring **{cap}**. {assistants} would put "
+                    f"you at {effective}, and below 15 the enchantment simply will "
+                    f"not work."
+                ),
+                inline=False,
+            )
+        elif effective < crafting_enchantment.MINIMUM_EFFECTIVE_SKILL:
+            embed.add_field(
+                name="⚠️ Below 15",
+                value=(
+                    f"Effective skill {effective}. Everyone involved needs 15 or "
+                    f"better in **both** spells."
+                ),
+                inline=False,
+            )
+
+        embed.add_field(
+            name="Roll against, and the item's Power",
+            value=(
+                f"**{effective}** — one number, not two. The roll says whether it "
+                f"worked; how good it is was decided before the dice."
+            ),
+            inline=False,
+        )
+
+        power = crafting_enchantment.power_in_play(effective, where)
+        if power is None:
+            works = f"**No magic item works in a no-mana region**, whatever its Power."
+        else:
+            verdict = "works" if crafting_enchantment.item_works(effective, where) else (
+                "**will not work**"
+            )
+            works = f"Power {power} where it is used — it {verdict} (15 is the floor)."
+            if where is crafting_enchantment.Mana.LOW:
+                works += " Low mana costs 5, so 20 is the real threshold there."
+        embed.add_field(name="Where it will be used", value=works, inline=False)
+
+        embed.add_field(
+            name="Thresholds",
+            value=(
+                "Ceremonial: a **16 always fails** and **17-18 is always a critical "
+                "failure**, however high your skill. A critical failure destroys the "
+                "item and every material in it."
+            ),
+            inline=False,
+        )
+
+        if chosen is crafting_enchantment.Method.QUICK_AND_DIRTY:
+            timing = (
+                f"**{hours} hour{'s' if hours != 1 else ''}** for {energy} energy. "
+                f"Succeed or fail, the energy is spent when the dice land."
+            )
+        else:
+            timing = (
+                f"**{days:g} day{'s' if days != 1 else ''}** of eight-hour work for "
+                f"{energy} energy, split across {assistants + 1}. No FP or HP cost at "
+                f"all — but every assistant must be there every day, a missed day "
+                f"costs two, and losing a mage ends the project."
+            )
+        embed.add_field(name=chosen.value, value=timing, inline=False)
+        embed.set_footer(text="GURPS Magic pp. 16-18")
         await respond(interaction, embed=embed)
 
     @craft.command(
