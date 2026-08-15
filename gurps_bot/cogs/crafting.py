@@ -29,6 +29,7 @@ from discord.ext import commands
 from gurps_bot.mechanics import (
     crafting,
     crafting_alchemy,
+    crafting_mundane,
     crafting_repair,
     equipment_quality,
 )
@@ -752,6 +753,144 @@ class CraftingCog(commands.Cog):
                 inline=False,
             )
         embed.set_footer(text="B484")
+        await respond(interaction, embed=embed)
+
+    @craft.command(
+        name="make", description="Making a mundane item: cost, time, and what the roll means"
+    )
+    @app_commands.describe(
+        list_price="What the finished item sells for",
+        weight="What it weighs, in pounds",
+        cost_per_lb="Your material's cost per pound, from the raw materials table",
+        monthly_pay="The craftsman's monthly pay for this trade",
+        item_class="Which quality ladder the finished piece reads",
+        labor="Routine utilitarian work, or artistic and arms manufacture",
+        materials="Items whose raw materials cost more than their weight suggests",
+        workers="Craftsmen and assistants working together (six is the cap)",
+    )
+    @app_commands.choices(
+        item_class=[
+            app_commands.Choice(name=c.value, value=c.name)
+            for c in crafting_mundane.ItemClass
+        ],
+        labor=[
+            app_commands.Choice(name=k.value, value=k.name)
+            for k in crafting_mundane.LaborKind
+        ],
+        materials=[
+            app_commands.Choice(name=m.name.replace("_", " ").title(), value=m.name)
+            for m in crafting_mundane.MaterialMultiplier
+        ],
+    )
+    async def make(
+        self,
+        interaction: discord.Interaction,
+        list_price: float,
+        weight: float,
+        cost_per_lb: float,
+        monthly_pay: float,
+        item_class: str = crafting_mundane.ItemClass.GENERAL.name,
+        labor: str = crafting_mundane.LaborKind.ROUTINE.name,
+        materials: str = crafting_mundane.MaterialMultiplier.NONE.name,
+        workers: int = 1,
+    ) -> None:
+        try:
+            klass = crafting_mundane.ItemClass[item_class]
+            kind = crafting_mundane.LaborKind[labor]
+            multiplier = crafting_mundane.MaterialMultiplier[materials]
+        except KeyError:
+            await respond(interaction, "Unknown option.", ephemeral=True)
+            return
+
+        try:
+            material_cost = crafting_mundane.materials_cost(
+                weight, cost_per_lb, multiplier
+            )
+            labor_cost = crafting_mundane.labor_cost(list_price, material_cost)
+            rate = crafting_mundane.hourly_labor_rate(monthly_pay, kind)
+            active = crafting_mundane.active_hours(max(labor_cost, 0), rate)
+            elapsed = crafting_mundane.elapsed_hours(active, workers)
+        except ValueError as exc:
+            await respond(interaction, str(exc), ephemeral=True)
+            return
+
+        embed = discord.Embed(title="Making it by hand", colour=_INVENTION)
+
+        if labor_cost < 0:
+            # The materials cost more than the item sells for. Said plainly
+            # rather than clamped silently, because it usually means the wrong
+            # material was picked off the table.
+            embed.add_field(
+                name="⚠️ The materials cost more than the item",
+                value=(
+                    f"${material_cost:,.2f} of materials against a ${list_price:,.2f} "
+                    f"list price. Labour cannot be negative, so either the material "
+                    f"or the weight is wrong for this item."
+                ),
+                inline=False,
+            )
+
+        embed.add_field(
+            name="Materials",
+            value=f"**${material_cost:,.2f}** — {weight:g} lbs at ${cost_per_lb:,.2f}/lb"
+            + (f" x{multiplier.value}" if multiplier.value != 1 else ""),
+            inline=False,
+        )
+        embed.add_field(
+            name="Labour",
+            value=f"**${max(labor_cost, 0):,.2f}** — the list price minus the materials",
+            inline=False,
+        )
+        embed.add_field(
+            name="Time",
+            value=(
+                f"**{active:,.1f} man-hours** at ${rate:,.2f}/hour"
+                + (
+                    f", so **{elapsed:,.1f} hours** with {min(workers, crafting_mundane.MAX_WORKERS)} "
+                    f"working together"
+                    if workers > 1
+                    else ""
+                )
+            ),
+            inline=False,
+        )
+        if workers > crafting_mundane.MAX_WORKERS:
+            embed.add_field(
+                name="Six is the cap",
+                value=(
+                    f"{workers} were named; past six, extra hands do not make it "
+                    f"faster."
+                ),
+                inline=False,
+            )
+
+        # Quality is a return value, so the command shows what the roll will
+        # MEAN rather than asking which quality is wanted.
+        ladder = "\n".join(
+            f"`{label:>16}`  {crafting_mundane.craft_quality(margin, klass).quality.value}"
+            for label, margin in (
+                ("failure by 4+", -4),
+                ("failure by 1-3", -1),
+                ("success by 0-11", 0),
+                ("success by 12-17", 12),
+                ("success by 18+", 18),
+            )
+        )
+        embed.add_field(
+            name=f"Then one roll, on the highest skill present — {klass.value}",
+            value=ladder,
+            inline=False,
+        )
+        embed.add_field(
+            name="What the roll is not",
+            value=(
+                "You do not choose the quality; the margin does. Junk loses at "
+                "least half the raw materials, and a flawed piece still sells "
+                "for up to half price."
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Low-Tech Companion 3 ch. 5")
         await respond(interaction, embed=embed)
 
     @craft.command(name="brew", description="Brewing a batch of elixirs (GURPS Magic ch. 28)")

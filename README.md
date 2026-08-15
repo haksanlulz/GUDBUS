@@ -1,6 +1,6 @@
 # GUDBUS
 
-**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 104 slash commands.
+**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 105 slash commands.
 
 ## Features
 
@@ -123,6 +123,7 @@
 | `/craft invent` | Walk an invention through its Concept roll (B473) |
 | `/craft costs` | What an invention costs to prototype and produce (B474) |
 | `/craft repair` | What it takes to repair a damaged item (B484) |
+| `/craft make` | Making a mundane item: cost, time, and what the roll means (LTC3 ch. 5) |
 | `/craft brew` | Brewing a batch of elixirs (GURPS Magic ch. 28) |
 | `/craft projects` | Your crafting projects in this server |
 | `/craft project` | One project: stage, time, and what it has cost |
