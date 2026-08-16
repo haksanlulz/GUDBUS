@@ -945,3 +945,39 @@ class TestRepairCommand:
     async def test_nonsense_input_is_refused(self, kwargs):
         interaction = await self._run(**kwargs)
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+
+class TestProseAgreesWithTheEngine:
+    """The 7/31 lesson (test_choice_labels): display text and the engine drift
+    apart the moment nothing couples them. These pin the claims this cog makes
+    that the engine can contradict."""
+
+    def test_the_concept_warning_does_not_deny_what_the_engine_does(self):
+        """A Concept critical failure ADVANCES — the flawed theory goes to
+        Prototype and eats prototype money, which is the whole trap B473
+        builds the secrecy around. The summary embed once said it "never
+        becomes a prototype", the trap told backwards."""
+        assert crafting.concept_outcome("critical_failure").advances
+
+        view = InventionFlowView(skill=12, invoker_id=1)
+        view.complexity = Complexity.AVERAGE
+        embed = view.summary_embed()
+        cadence = next(f for f in embed.fields if f.name == "Once per day")
+        assert "never becomes a prototype" not in cadence.value
+
+    def test_no_choice_name_carries_generated_title_caps(self):
+        """Choice names are display strings, authored by hand everywhere but
+        one place — an enum rendered through .title(), which capitalizes
+        conjunctions: "Longbow Or Crossbow". Sentence case is the 7/31 ruling;
+        GURPS proper nouns keep their caps, but "Or" is nobody's proper noun."""
+        import re
+
+        bad = re.compile(r"\b(Or|And|Of|The|In|At|Per)\b")
+        offenders = [
+            (command.name, choice.name)
+            for command in CraftingCog.craft.commands
+            for param in command.parameters
+            for choice in (param.choices or [])
+            if bad.search(choice.name)
+        ]
+        assert offenders == []

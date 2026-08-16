@@ -196,9 +196,9 @@ class InventionFlowView(discord.ui.View):
         embed.add_field(
             name=Stage.CONCEPT.cadence.capitalize(),
             value=(
-                f"The GM rolls this in secret. A failure costs the day and nothing "
-                f"else; a critical failure looks like a success and never becomes a "
-                f"prototype."
+                "The GM rolls this in secret. A failure costs the day and nothing "
+                "else; a critical failure looks like a success, advances, and "
+                "only shows itself after prototype money is spent."
             ),
             inline=False,
         )
@@ -515,7 +515,7 @@ class CraftingCog(commands.Cog):
         tl_gap="How many TLs above the inventor it is (0 = same TL)",
         tl_cost_multiplier="GM override for the TL surcharge (B474 prints x3 for one step)",
         reuses_facilities="There are usable facilities left from a related project",
-        inventors="How many people are each attempting Prototype rolls",
+        inventors="How many inventors — each makes their own Prototype attempts",
     )
     @app_commands.choices(
         complexity=[
@@ -767,7 +767,7 @@ class CraftingCog(commands.Cog):
         assistants="Other qualified mages helping (each is -1 to your roll)",
         hp_spent="HP you spend to power it (each is a further -1)",
         bystanders="Anyone but you and your assistants within 10 yards",
-        mana="Where the finished item will be USED",
+        mana="Where the finished item will be used — not where it is made",
     )
     @app_commands.choices(
         method=[
@@ -852,7 +852,7 @@ class CraftingCog(commands.Cog):
 
         power = crafting_enchantment.power_in_play(effective, where)
         if power is None:
-            works = f"**No magic item works in a no-mana region**, whatever its Power."
+            works = "**No magic item works in a no-mana area**, whatever its Power."
         else:
             verdict = "works" if crafting_enchantment.item_works(effective, where) else (
                 "**will not work**"
@@ -911,7 +911,7 @@ class CraftingCog(commands.Cog):
             for k in crafting_mundane.LaborKind
         ],
         materials=[
-            app_commands.Choice(name=m.name.replace("_", " ").title(), value=m.name)
+            app_commands.Choice(name=m.name.replace("_", " ").capitalize(), value=m.name)
             for m in crafting_mundane.MaterialMultiplier
         ],
     )
