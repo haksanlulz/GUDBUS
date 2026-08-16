@@ -65,7 +65,9 @@ MINIMUM_EFFECTIVE_SKILL = 15
 #: than Power 20 will not work at all in a low-mana zone."
 LOW_MANA_POWER_PENALTY = -5
 
-#: "The caster is at -1 to skill for each assistant."
+#: "The caster is at -1 to skill for each assistant." Printed INSIDE Quick and
+#: Dirty's energy paragraphs (p. 17), and scoped to it — Slow and Sure restates
+#: its own assistant rules on p. 18 and no skill penalty is among them.
 ASSISTANT_PENALTY_EACH = -1
 
 #: "If the caster uses HP to cast the spell, his effective skill is at -1 for
@@ -124,6 +126,11 @@ def assistant_cap(base_skill: int) -> int:
     caster's effective skill to 15. With more assistants, the enchantment
     won't work." So a skill-15 caster may bring none, and each further point
     of skill buys exactly one more pair of hands.
+
+    ⚠️ Quick and Dirty only — the "therefore" derives the cap FROM the -1,
+    which Slow and Sure does not take. A slow circle has no headcount cap;
+    p. 19's Disorganization sidebar contemplates enchantment "on any large
+    scale" outright.
     """
     if base_skill < MINIMUM_EFFECTIVE_SKILL:
         return 0
@@ -132,11 +139,20 @@ def assistant_cap(base_skill: int) -> int:
 
 def enchanting_modifier(
     *,
+    method: Method = Method.QUICK_AND_DIRTY,
     assistants: int = 0,
     hp_spent: int = 0,
     bystanders: bool = False,
 ) -> ModifierBreakdown:
-    """What modifies the enchanting roll.
+    """What modifies the enchanting roll — and every term is Quick and Dirty's.
+
+    All three penalties are printed inside Quick and Dirty Enchantment's
+    energy paragraphs (p. 17). Under Slow and Sure, assistants divide the
+    mage-days and touch no roll, disturbance is the Interruptions box's
+    business, and spending HP is impossible — "There is no FP or HP cost to
+    the enchanters" — so it is refused rather than silently dropped, the
+    B475-gadgeteer precedent. Assistants and bystanders stay legal arguments
+    there (both can be present; they just carry no penalty).
 
     ⚠️ ``hp_spent`` is the caster's own. Assistants may also spend HP and take
     the same -1 each, but "their skill does not affect the item's power, as
@@ -148,6 +164,13 @@ def enchanting_modifier(
         raise ValueError(f"assistants cannot be negative, got {assistants}")
     if hp_spent < 0:
         raise ValueError(f"hp_spent cannot be negative, got {hp_spent}")
+    if method is Method.SLOW_AND_SURE:
+        if hp_spent:
+            raise ValueError(
+                "Slow and Sure has no FP or HP cost — the energy is invested "
+                "gradually, so there is no HP to spend"
+            )
+        return ModifierBreakdown(terms=())
 
     terms: list[tuple[str, int]] = []
     if assistants:
@@ -168,14 +191,20 @@ def effective_skill(
     enchant_skill: int,
     spell_skill: int,
     *,
+    method: Method = Method.QUICK_AND_DIRTY,
     assistants: int = 0,
     hp_spent: int = 0,
     bystanders: bool = False,
 ) -> int:
-    """The number rolled against, which is also the item's Power."""
+    """The number rolled against, which is also the item's Power.
+
+    Under Slow and Sure this is the bare min() — the penalties are Quick and
+    Dirty's, so a big slow circle makes a big item slowly rather than badly.
+    """
     base = enchanting_skill(enchant_skill, spell_skill)
     return base + enchanting_modifier(
-        assistants=assistants, hp_spent=hp_spent, bystanders=bystanders
+        method=method, assistants=assistants, hp_spent=hp_spent,
+        bystanders=bystanders,
     ).total
 
 

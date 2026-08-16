@@ -764,9 +764,9 @@ class CraftingCog(commands.Cog):
         spell_skill="Your skill with the spell going into the item",
         energy="The enchantment's energy cost, from its own entry",
         method="Quick and Dirty burns energy; Slow and Sure burns the calendar",
-        assistants="Other qualified mages helping (each is -1 to your roll)",
-        hp_spent="HP you spend to power it (each is a further -1)",
-        bystanders="Anyone but you and your assistants within 10 yards",
+        assistants="Other qualified mages — Quick and Dirty: -1 each; Slow and Sure: they split the days",
+        hp_spent="HP you spend to power it — Quick and Dirty only, each a further -1",
+        bystanders="Anyone but you and your assistants within 10 yards — a Quick and Dirty concern",
         mana="Where the finished item will be used — not where it is made",
     )
     @app_commands.choices(
@@ -794,8 +794,11 @@ class CraftingCog(commands.Cog):
         try:
             chosen = crafting_enchantment.Method[method]
             where = crafting_enchantment.Mana[mana]
+            # Method-scoped: under Slow and Sure this comes back empty (and
+            # refuses hp_spent outright) — the penalties are Quick and Dirty's.
             modifier = crafting_enchantment.enchanting_modifier(
-                assistants=assistants, hp_spent=hp_spent, bystanders=bystanders
+                method=chosen,
+                assistants=assistants, hp_spent=hp_spent, bystanders=bystanders,
             )
             base = crafting_enchantment.enchanting_skill(enchant_skill, spell_skill)
             hours = crafting_enchantment.quick_and_dirty_hours(energy)
@@ -821,7 +824,9 @@ class CraftingCog(commands.Cog):
                 name="Modifiers", value=_breakdown_lines(modifier), inline=False
             )
 
-        if assistants > cap:
+        # The cap is derived FROM the -1, so it binds Quick and Dirty only —
+        # a slow circle has no headcount ceiling, it just shares the days.
+        if chosen is crafting_enchantment.Method.QUICK_AND_DIRTY and assistants > cap:
             embed.add_field(
                 name="⚠️ Too many hands",
                 value=(

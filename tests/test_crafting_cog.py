@@ -981,3 +981,49 @@ class TestProseAgreesWithTheEngine:
             if bad.search(choice.name)
         ]
         assert offenders == []
+
+
+class TestEnchantMethodsDisagreeOnAssistants:
+    """Settled against the printed page 2026-08-15: every skill penalty in
+    enchanting — assistants, the caster's HP, bystanders — is printed inside
+    Quick and Dirty (p. 17). Slow and Sure's assistants divide the mage-days
+    and touch no roll, and it has no FP or HP cost at all. The cog used to
+    apply the Quick and Dirty penalties to both methods."""
+
+    async def _run(self, **kwargs):
+        from unittest.mock import MagicMock as _MM
+
+        interaction = _interaction()
+        cog = CraftingCog(_MM())
+        defaults = dict(enchant_skill=17, spell_skill=16, energy=100)
+        await cog.enchant.callback(cog, interaction, **{**defaults, **kwargs})
+        return interaction
+
+    def _field(self, interaction, name):
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        return next((f for f in embed.fields if f.name == name), None)
+
+    async def test_slow_and_sure_assistants_do_not_touch_the_roll(self):
+        interaction = await self._run(method="SLOW_AND_SURE", assistants=2)
+        roll = self._field(interaction, "Roll against, and the item's Power")
+        assert "**16**" in roll.value
+        assert self._field(interaction, "Modifiers") is None
+
+    async def test_quick_and_dirty_assistants_still_cost_one_each(self):
+        interaction = await self._run(method="QUICK_AND_DIRTY", assistants=2)
+        roll = self._field(interaction, "Roll against, and the item's Power")
+        assert "**14**" in roll.value
+        assert "2 assistants" in self._field(interaction, "Modifiers").value
+
+    async def test_slow_and_sure_refuses_hp(self):
+        interaction = await self._run(method="SLOW_AND_SURE", hp_spent=2)
+        call = interaction.response.send_message.await_args
+        assert call.kwargs["ephemeral"] is True
+        text = call.kwargs.get("content") or (call.args[0] if call.args else "")
+        assert "no FP or HP" in text
+
+    async def test_the_headcount_cap_is_quick_and_dirty_only(self):
+        crowded = await self._run(method="QUICK_AND_DIRTY", assistants=5)
+        assert self._field(crowded, "⚠️ Too many hands") is not None
+        slow = await self._run(method="SLOW_AND_SURE", assistants=5)
+        assert self._field(slow, "⚠️ Too many hands") is None

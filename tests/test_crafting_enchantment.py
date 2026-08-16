@@ -287,4 +287,44 @@ class TestHpBuysEnergyAndCostsSkill:
 
         params = inspect.signature(ench.enchanting_modifier).parameters
         assert "assistant_hp" not in params
-        assert set(params) == {"assistants", "hp_spent", "bystanders"}
+        assert set(params) == {"method", "assistants", "hp_spent", "bystanders"}
+
+
+class TestThePenaltiesAreQuickAndDirtyOnly:
+    """Settled against the printed page 2026-08-15: the -1 per assistant, the
+    HP-spend -1, the bystander -1 and the derived cap are all printed INSIDE
+    Quick and Dirty Enchantment, continuing its energy paragraphs ("A lone
+    caster is limited to the energy provided by his FP, HP, and one
+    Powerstone..."). Both worked sittings are Quick and Dirty. Slow and Sure
+    (p. 18) restates its own assistant rules — present every day, a missed day
+    costs two, loss of a mage ends the project — has "no FP or HP cost", and
+    restates no skill penalty. The module's own header said this from the
+    start; the code applied the penalties to both methods anyway."""
+
+    def test_slow_and_sure_assistants_touch_no_roll(self):
+        total = ench.enchanting_modifier(
+            method=Method.SLOW_AND_SURE, assistants=3, bystanders=True
+        ).total
+        assert total == 0
+
+    def test_quick_and_dirty_keeps_every_penalty(self):
+        total = ench.enchanting_modifier(
+            method=Method.QUICK_AND_DIRTY, assistants=3, bystanders=True
+        ).total
+        assert total == -4
+
+    def test_quick_and_dirty_is_the_default_the_sittings_run_on(self):
+        assert ench.enchanting_modifier(assistants=1).total == -1
+
+    def test_slow_and_sure_cannot_spend_hp(self):
+        """"There is no FP or HP cost to the enchanters – they invested the
+        energy gradually as the spell progressed." Refused, not dropped."""
+        with pytest.raises(ValueError, match="no FP or HP"):
+            ench.enchanting_modifier(method=Method.SLOW_AND_SURE, hp_spent=2)
+
+    def test_effective_skill_is_bare_under_slow_and_sure(self):
+        bare = ench.effective_skill(
+            enchant_skill=17, spell_skill=16, method=Method.SLOW_AND_SURE,
+            assistants=3,
+        )
+        assert bare == 16
