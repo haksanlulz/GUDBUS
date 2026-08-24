@@ -46,3 +46,11 @@ htmlcov/
 Dockerfile
 .dockerignore
 docker-compose.yml
+
+# Markdown. Nothing at runtime reads a .md file, so none belong in the image.
+# Stated generically on purpose: this file is public, so naming the operator's
+# private docs here would disclose the very filenames .git/info/exclude keeps
+# out of the published repo. A local `docker compose up --build` copies the
+# whole working tree, so without this those docs land in the local image.
+*.md
+!README.md
