@@ -116,6 +116,13 @@ jobs:
 
       - name: Build and push
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        # The action uploads a .dockerbuild build record as a workflow artifact by
+        # default, and on a public repo that artifact is anonymously downloadable and
+        # kept for 90 days. It carries build metadata nobody needs after the run, and
+        # it accumulates one per push. The image itself is the artifact worth keeping.
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
         with:
           context: .
           push: true
