@@ -21,6 +21,8 @@ import pytest
 
 pytest.importorskip("PIL", reason="Pillow is a generator-only dependency")
 
+pytestmark = pytest.mark.slow
+
 TOOLS = Path(__file__).resolve().parent.parent / "tools"
 
 

@@ -28,6 +28,7 @@ import asyncio
 import time
 from datetime import datetime, timedelta, timezone
 
+import pytest
 import pytest_asyncio
 from sqlalchemy import update
 
@@ -47,6 +48,8 @@ from gurps_bot.services.combat import (
     modify_hp,
     start_combat,
 )
+
+pytestmark = pytest.mark.load
 
 GM_BASE = 700_000
 FIRST_GUILD = 990_000

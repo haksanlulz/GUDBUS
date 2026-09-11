@@ -47,6 +47,16 @@ include = ["gurps_bot*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# pytest 9 does not honour --strict-markers when it arrives via addopts (measured
+# 2026-09-11 on 9.0.3: an unregistered mark only warned); the ini key is what fires
+# there. addopts covers pytest 7/8, which predate the key. Drop it once >=9 is required.
+addopts = "--strict-markers"
+strict_markers = true
+markers = [
+    "slow: takes more than a few seconds (renders images, drives a shell script); skipped by the fast tier",
+    "integration: exercises real DB sessions or the full extension tree end to end rather than one unit",
+    "load: concurrency and throughput shapes, many combats or guilds at once",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]

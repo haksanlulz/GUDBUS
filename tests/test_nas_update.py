@@ -24,9 +24,12 @@ import pytest
 SCRIPT = Path(__file__).resolve().parent.parent / "deploy" / "nas-update.sh"
 SHELL = shutil.which("sh") or shutil.which("bash")
 
-pytestmark = pytest.mark.skipif(
-    SHELL is None, reason="no POSIX shell available to run the deploy script"
-)
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.skipif(
+        SHELL is None, reason="no POSIX shell available to run the deploy script"
+    ),
+]
 
 IMAGE_REPO = "ghcr.io/example/gudbus"
 RUNNING_IMG = "sha256:aaaa000000000000000000000000000000000000000000000000000000000000"

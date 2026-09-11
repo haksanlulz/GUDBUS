@@ -21,10 +21,13 @@ import contextlib
 import importlib
 import sys
 
+import pytest
 import discord
 from discord.ext import commands
 
 from gurps_bot.bot import EXTENSIONS, GURPSBot
+
+pytestmark = pytest.mark.integration
 
 
 def _snapshot_extension_modules() -> dict[str, object]:

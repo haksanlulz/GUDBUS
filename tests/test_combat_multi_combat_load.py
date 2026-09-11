@@ -24,6 +24,8 @@ from gurps_bot.services.combat import (
     start_combat,
 )
 
+pytestmark = pytest.mark.load
+
 
 GM_BASE = 700_000
 GUILD_ID = 999_500
