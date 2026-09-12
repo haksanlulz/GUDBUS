@@ -348,6 +348,9 @@ def advance_turn(combat: Combat) -> str | None:
                     f"(HT {con.rolled} vs {effective}{note})."
                 )
             else:
+                # advance_turn is synchronous and works on the loaded ORM row, so
+                # this one stays read-mutate-write; it runs inside the turn-advance
+                # transaction, never concurrently with itself for one combat.
                 next_combatant.status_effects = (
                     list(next_combatant.status_effects or []) + [StatusEffect.UNCONSCIOUS]
                 )
@@ -439,7 +442,10 @@ async def modify_hp(
     warning = ""
     if c.hp_current <= -5 * c.hp_max:
         if StatusEffect.DEAD not in (c.status_effects or []):
-            c.status_effects = list(c.status_effects or []) + [StatusEffect.DEAD]
+            c = await _cas_status_effects(
+                session, combatant_id,
+                lambda e: e if StatusEffect.DEAD in e else e + [StatusEffect.DEAD],
+            )
         warning = f"**{c.name}** is dead (-5xHP)."
     elif c.hp_current <= -c.hp_max:
         warning = f"**{c.name}** must roll HT to survive ({c.hp_current} HP, threshold -{c.hp_max})."
@@ -474,6 +480,55 @@ async def set_maneuver(
     return c
 
 
+# Test seam: awaited after the read and before the compare-and-set in
+# _cas_status_effects, so a test can hold the window open deterministically.
+# Production leaves it None.
+_STATUS_READ_HOOK = None
+
+
+async def _cas_status_effects(
+    session: AsyncSession, combatant_id: int, mutate, *, attempts: int = 16,
+) -> Combatant:
+    """Change status_effects with a compare-and-set instead of read-mutate-write.
+
+    The JSON-list column cannot be updated arithmetically like hp_current, so
+    the write carries the list it read as a WHERE clause and retries when
+    another writer landed in between. The database arbitrates, the same way
+    modify_hp's atomic UPDATE does. Equality on the JSON column is text
+    equality on SQLite (the only dialect this bot ships with); on PostgreSQL
+    the column would need to be JSONB for `=` to exist.
+    """
+    for _ in range(attempts):
+        stmt = select(Combatant).where(Combatant.id == combatant_id)
+        c = (await session.execute(stmt)).scalar_one()
+        old_raw = c.status_effects
+        old = list(old_raw or [])
+        new = mutate(list(old))
+        if _STATUS_READ_HOOK is not None:
+            await _STATUS_READ_HOOK()
+        if new == old:
+            return c
+        guard = (
+            Combatant.status_effects.is_(None)
+            if old_raw is None
+            else Combatant.status_effects == old
+        )
+        result = await session.execute(
+            update(Combatant)
+            .where(Combatant.id == combatant_id, guard)
+            .values(status_effects=new)
+        )
+        if result.rowcount == 1:
+            session.expire(c, ["status_effects"])
+            await session.refresh(c, ["status_effects"])
+            return c
+        session.expire(c, ["status_effects"])
+    raise RuntimeError(
+        f"status_effects compare-and-set gave up after {attempts} attempts "
+        f"for combatant {combatant_id}"
+    )
+
+
 async def add_status(
     session: AsyncSession, combatant_id: int, status: str,
 ) -> Combatant:
@@ -482,31 +537,25 @@ async def add_status(
     if status not in valid:
         raise ValueError(f"Unknown status: {status}. Valid: {', '.join(sorted(valid))}")
 
-    # known race: the JSON-list column is read-mutate-write, so two concurrent
-    # status changes can drop one — rare, cosmetic, GM-recoverable, and an
-    # atomic JSON UPDATE is dialect-specific, so accepted
-    stmt = select(Combatant).where(Combatant.id == combatant_id)
-    result = await session.execute(stmt)
-    c = result.scalar_one()
-    effects = list(c.status_effects or [])
-    if status not in effects:
-        effects.append(status)
-        c.status_effects = effects
-    return c
+    def _add(effects: list) -> list:
+        if status not in effects:
+            effects.append(status)
+        return effects
+
+    return await _cas_status_effects(session, combatant_id, _add)
 
 
 async def remove_status(
     session: AsyncSession, combatant_id: int, status: str,
 ) -> Combatant:
-    """Remove a status effect — same accepted race as add_status."""
-    stmt = select(Combatant).where(Combatant.id == combatant_id)
-    result = await session.execute(stmt)
-    c = result.scalar_one()
-    effects = list(c.status_effects or [])
-    if status in effects:
-        effects.remove(status)
-        c.status_effects = effects
-    return c
+    """Remove a status effect (compare-and-set, see _cas_status_effects)."""
+
+    def _remove(effects: list) -> list:
+        if status in effects:
+            effects.remove(status)
+        return effects
+
+    return await _cas_status_effects(session, combatant_id, _remove)
 
 
 async def set_message_id(
