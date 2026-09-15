@@ -150,3 +150,39 @@ def test_the_worked_session_quotes_the_real_shock_line():
     # that the prose beneath the quote explains.
     (shock,) = injury_effects(9, 25)
     assert shock in _session_text(), shock
+
+
+# --- line counts -----------------------------------------------------------
+#
+# Both figures went stale inside a week of being written, under a date that
+# made them read as freshly measured, beside the very commands that disprove
+# them. Rounding to the nearest thousand is what makes a pin sustainable here:
+# an exact figure reddens on almost every commit, which is how a gate stops
+# being kept green.
+
+_COUNT_ROW = re.compile(r"^- (application code|tests): (\d+)K lines", re.MULTILINE)
+
+#: README label -> directory it counts.
+_COUNTED_TREES = {"application code": "gurps_bot", "tests": "tests"}
+
+
+def _live_kilolines(directory: str) -> int:
+    root = README.parent / directory
+    total = 0
+    for path in sorted(root.rglob("*.py")):
+        with path.open("rb") as handle:
+            total += sum(1 for _ in handle)
+    return round(total / 1000)
+
+
+def test_the_readme_line_counts_match_the_tree():
+    stated = dict(_COUNT_ROW.findall(README.read_text(encoding="utf-8")))
+    assert set(stated) == set(_COUNTED_TREES), (
+        f"README no longer states both line counts: {sorted(stated)}"
+    )
+    for label, directory in _COUNTED_TREES.items():
+        live = _live_kilolines(directory)
+        assert int(stated[label]) == live, (
+            f"README says {stated[label]}K lines of {label}, the tree holds "
+            f"{live}K — update the Counts block."
+        )
