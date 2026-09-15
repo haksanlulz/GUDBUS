@@ -308,7 +308,7 @@ Run everything (about 80 s on a workstation):
 ```bash
 uv run python -m pytest
 ```
-Fast tier, which skips the `slow`, `integration`, and `load` markers — about 85 tests:
+Fast tier, which skips the `slow`, `integration`, and `load` markers:
 ```bash
 uv run python -m pytest -m "not slow and not integration and not load"
 ```
