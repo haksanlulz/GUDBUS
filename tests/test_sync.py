@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,57 @@ class TestVendoredLibrary:
             pytest.skip("snapshot not vendored yet (run tools/sync_gcs_library.py)")
         # --check is a network-free dry run; returns 0 when skills are present.
         assert sync.cmd_check() == 0
+
+
+# ---------------------------------------------------------------------------
+# Every git call is bounded.
+# ---------------------------------------------------------------------------
+class TestGitCallsAreBounded:
+    """A stalled fetch must fail with a message, not hang the deploy.
+
+    ``subprocess.run`` blocks indefinitely on a stalled TCP connection (as
+    opposed to a refused one), and this script shells out to git over the
+    network. deploy.sh runs it at deploy time, which is where an unbounded hang
+    is worst — the deploy simply looks like it is still working.
+    """
+
+    def test_git_passes_an_explicit_timeout(self, monkeypatch):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        sync._git(["ls-remote", "--heads", sync.REPO_URL, "main"])
+        assert seen.get("timeout") == sync.GIT_TIMEOUT_SECONDS
+        assert isinstance(sync.GIT_TIMEOUT_SECONDS, (int, float))
+        assert sync.GIT_TIMEOUT_SECONDS > 0
+
+    def test_a_timeout_becomes_a_runtime_error_naming_the_upstream(self, monkeypatch):
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError) as exc:
+            sync._git(["fetch", "--depth", "1", "origin", sync.PINNED_REF])
+        message = str(exc.value)
+        assert sync.REPO_URL in message, message
+        assert str(sync.GIT_TIMEOUT_SECONDS) in message, message
+
+    def test_the_cli_turns_it_into_a_nonzero_exit_rather_than_a_traceback(
+        self, monkeypatch, capsys
+    ):
+        """main() already funnels exceptions into exit 2 — pin that it still does."""
+
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        assert sync.main(["--verify-upstream"]) == 2
+        assert sync.REPO_URL in capsys.readouterr().err
+
+    def test_there_is_no_retry(self):
+        """A deploy-time tool fails with a message; it does not quietly try again."""
+        source = inspect.getsource(sync._git)
+        assert "for " not in source and "while " not in source, source
