@@ -95,12 +95,23 @@ def upgrade_head(url: str) -> None:
 
 
 def script_head() -> str:
-    """The Alembic head revision THIS code expects (single owner of the lookup)."""
+    """The Alembic head revision THIS code expects (single owner of the lookup).
+
+    Alembic returns None for the head when it finds no revision files at all —
+    a packaging fault rather than a schema one: `script_location` points
+    somewhere wrong, or `versions/` did not make it into the image. Refuse here
+    and name it, because the only caller compares this against a database's
+    stamp, where a None head reads as "your schema is behind the code, head is
+    None": a true refusal pointing at the wrong fix.
+    """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    return ScriptDirectory.from_config(cfg).get_current_head()
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    if head is None:
+        raise SchemaGateError(_no_scripts_refusal())
+    return head
 
 
 async def _inspect_db(url: str) -> tuple[bool, str | None]:
@@ -176,6 +187,22 @@ def _display_url(url: str) -> str:
         return make_url(url).render_as_string(hide_password=True)
     except Exception:  # pragma: no cover - never let formatting break the refusal
         return url
+
+
+def _no_scripts_refusal() -> str:
+    """Message for a tree/image that carries no Alembic revision files at all.
+
+    Says nothing about the database, because the database is not the problem.
+    """
+    return (
+        f"!!  REFUSING TO START: Alembic found no migration scripts, so there\n"
+        f"    is no head revision to compare this database against.\n"
+        f"        alembic.ini: {REPO_ROOT / 'alembic.ini'}\n"
+        f"    This is a packaging fault, not a schema one — the database may be\n"
+        f"    perfectly current. Check that alembic.ini's script_location points\n"
+        f"    at gurps_bot/db/migrations and that its versions/ directory\n"
+        f"    shipped with this build, then relaunch."
+    )
 
 
 def _legacy_refusal(url: str) -> str:

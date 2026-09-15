@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -137,6 +138,60 @@ class TestBootstrapEntryPoint:
         assert "stamp head" in err
         # and it must not have guessed a stamp
         assert asyncio.run(_stamped_revision(url)) is None
+
+
+class TestNoMigrationScriptsAtAll:
+    """A head of None is a packaging fault, and has to say so.
+
+    Alembic returns None for the head when it finds no revision files —
+    `script_location` points somewhere wrong, or `versions/` never made it into
+    the image. That is a different fault from "this database is behind the
+    code", with a different fix, and before this the operator got the stale
+    refusal with `head: None` printed in it.
+
+    The condition cannot occur in a correctly packaged tree, so it is built
+    here out of a real versions-less Alembic config rather than asserted about.
+    """
+
+    def _versionless_root(self, tmp_path: Path) -> Path:
+        (tmp_path / "migrations" / "versions").mkdir(parents=True)
+        (tmp_path / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/migrations\n", encoding="utf-8"
+        )
+        return tmp_path
+
+    def test_script_head_refuses_rather_than_returning_none(
+        self, tmp_path, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(tmp_path))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "alembic.ini" in message, message
+        assert "script_location" in message, message
+        assert "versions" in message, message
+
+    def test_the_gate_names_the_packaging_fault_not_a_stale_schema(
+        self, tmp_path, monkeypatch
+    ):
+        """The whole point: a real stamped DB must not be blamed for this."""
+        from gurps_bot.db import bootstrap
+
+        # Built with the real alembic.ini, so the database itself is fine.
+        url = _url(tmp_path, "stamped.db")
+        assert bootstrap.main(url) == 0
+
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        message = str(exc.value)
+        assert "script_location" in message, message
+        assert "head:     None" not in message, message
+        assert "behind the code" not in message, message
 
 
 class TestDeployScriptRunsMigrations:
