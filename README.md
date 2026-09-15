@@ -131,6 +131,8 @@
 | `/craft abandon` | End a project — the spending stays on record |
 | `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
+| `/campaign show` | Show this server's house rules |
+| `/campaign rule-of-14` | Turn B360's Rule of 14 on (RAW) or off (house rule) |
 | `/skill` | Look up a GURPS skill (facts + page cite) |
 | `/trait` | Look up a GURPS advantage or disadvantage (facts + page cite) |
 | `/spell` | Look up a GURPS spell (facts + page cite) |
@@ -140,6 +142,7 @@
 | `/about` | About this bot — credits, trademark, and privacy |
 | `/support` | Ways to support the bot (donation links + how to help) |
 | `/donate` | Donation links to support the bot's hosting |
+| `/help` | What this bot does, by topic |
 | `/status` | Bot diagnostics |
 | `/sync` | Force a global command re-register (owner) |
 
@@ -243,7 +246,7 @@ Run everything (about 80 s on a workstation):
 ```bash
 uv run python -m pytest
 ```
-Fast tier, which skips the `slow`, `integration`, and `load` markers (3105 of 3188 tests):
+Fast tier, which skips the `slow`, `integration`, and `load` markers — about 85 tests:
 ```bash
 uv run python -m pytest -m "not slow and not integration and not load"
 ```
@@ -252,7 +255,14 @@ Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options]` with 
 Counts, measured 2026-09-11:
 - application code: 20.9K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
 - tests: 28.5K lines (`find tests -name '*.py' | xargs cat | wc -l`)
-- collected tests: 3188 (`uv run python -m pytest --collect-only -q | tail -1`)
+
+The collected-test total is deliberately not printed here. It moved on the very
+next commit after it was written, and a stale number sitting beside the command
+that disproves it is worse than no number:
+
+```bash
+uv run python -m pytest --collect-only -q | tail -1
+```
 
 **Why so many tests.** The mechanics layer is pure: no I/O, no Discord, no database, so every GURPS rule the bot implements is checkable with a two-line test, and there are a lot of rules. The pins are real, not decorative: mutating the natural-17 branch in `gurps_bot/mechanics/checks.py` turns exactly two tests red (`tests/test_checks.py::TestDetermineOutcome::test_crit_failure_on_17_when_target_15_or_less` and `::test_17_always_fails_even_at_high_skill`) and nothing else; removing the minimum-injury floor in `gurps_bot/mechanics/damage.py` turns exactly three red (`tests/test_damage.py::TestMinimumInjuryFloor::test_one_point_small_piercing_floors_to_1`, `::test_penetrating_after_dr_floors_to_1`, and `tests/test_injury_tolerance.py::TestInteractionWithLocationAndFloor::test_minimum_one_injury_floor_survives`).
 
