@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import os
 import re
 import shutil
 import subprocess
@@ -53,11 +54,38 @@ def _utc_now_iso() -> str:
 #: `_pinned_ref_is_fetchable`'s docstring. Ten minutes covers any link that
 #: sustains roughly 350 KB/s, so a cold-cache fetch of a large upstream over a
 #: slow connection still finishes well inside it; the goal is to bound a hang,
-#: not to police throughput. Raise it here if a real link ever trips it.
+#: not to police throughput.
+#:
+#: Overridable at the point of failure, because "edit the constant" is not a
+#: fix where this runs: the Dockerfile calls it inside `docker build` and
+#: deploy/deploy.sh calls it at deploy time, so raising it in the source means
+#: rebuilding the thing that is timing out. `GCS_GIT_TIMEOUT=1800` raises it
+#: for one run. The one regression direction a ceiling has is a slow-but-
+#: working link that used to finish, and that failure is indistinguishable
+#: from an unreachable upstream — so the escape hatch has to exist where the
+#: failure does.
 #:
 #: No retry, deliberately: a manual/deploy-time tool should stop and say so,
 #: because a silent second attempt doubles the wait and buries the cause.
-GIT_TIMEOUT_SECONDS = 600
+_GIT_TIMEOUT_DEFAULT = 600
+
+
+def _timeout_seconds() -> int:
+    raw = os.environ.get("GCS_GIT_TIMEOUT")
+    if raw is None:
+        return _GIT_TIMEOUT_DEFAULT
+    try:
+        seconds = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"GCS_GIT_TIMEOUT must be a whole number of seconds, got {raw!r}"
+        ) from None
+    if seconds <= 0:
+        raise ValueError(f"GCS_GIT_TIMEOUT must be positive, got {seconds}")
+    return seconds
+
+
+GIT_TIMEOUT_SECONDS = _timeout_seconds()
 
 
 def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -83,8 +111,9 @@ def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProces
             f"upstream: {REPO_URL}\n"
             f"A stalled connection blocks indefinitely without this ceiling, so "
             f"this is a refusal to hang rather than a report that git failed. "
-            f"Check reachability of the upstream host and re-run; raise "
-            f"GIT_TIMEOUT_SECONDS if the link is simply slow."
+            f"Check reachability of the upstream host and re-run; set "
+            f"GCS_GIT_TIMEOUT to a larger number of seconds if the link is "
+            f"simply slow."
         ) from exc
 
 

@@ -219,7 +219,46 @@ class TestGitCallsAreBounded:
         assert sync.main(["--verify-upstream"]) == 2
         assert sync.REPO_URL in capsys.readouterr().err
 
-    def test_there_is_no_retry(self):
-        """A deploy-time tool fails with a message; it does not quietly try again."""
-        source = inspect.getsource(sync._git)
-        assert "for " not in source and "while " not in source, source
+    def test_there_is_no_retry(self, monkeypatch):
+        """A deploy-time tool fails with a message; it does not quietly try again.
+
+        Asserted by counting attempts rather than by grepping _git's source
+        for loop keywords: a recursive re-call, a second subprocess.run in the
+        except block, and `return _git(args) if proc.returncode else proc`
+        all carry neither `for ` nor `while `, and a future docstring
+        containing either word would have failed a passing implementation.
+        """
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError):
+            sync._git(["fetch", "--depth", "1", "origin", sync.PINNED_REF])
+        assert len(calls) == 1, calls
+
+    def test_the_ceiling_is_overridable_without_editing_the_file(self, monkeypatch):
+        """The ceiling fires inside `docker build` and deploy/deploy.sh, where
+        raising the constant in the source means rebuilding the thing that is
+        timing out. A slow-but-working link that used to finish is the one
+        regression direction a ceiling has, so the escape hatch has to reach
+        the place the failure happens.
+        """
+        monkeypatch.setenv("GCS_GIT_TIMEOUT", "1800")
+        assert _load_module().GIT_TIMEOUT_SECONDS == 1800
+
+        monkeypatch.delenv("GCS_GIT_TIMEOUT")
+        assert _load_module().GIT_TIMEOUT_SECONDS == 600
+
+    def test_a_garbage_override_is_refused_rather_than_silently_ignored(
+        self, monkeypatch
+    ):
+        """Falling back to the default would hand back the hang the ceiling
+        exists to bound, with the operator believing they had raised it.
+        """
+        monkeypatch.setenv("GCS_GIT_TIMEOUT", "ten minutes")
+        with pytest.raises(ValueError) as exc:
+            _load_module()
+        assert "GCS_GIT_TIMEOUT" in str(exc.value)
