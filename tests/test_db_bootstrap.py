@@ -326,6 +326,45 @@ class TestPackagingFaultsAlembicRaisesOn:
         assert "predates Alembic" not in err, err
 
 
+class TestMultipleHeadsIsNotAPackagingFault:
+    """Two migrations authored on parallel branches leave versions/ with two
+    heads. Alembic raises the same ``CommandError`` type the packaging faults
+    raise, so a plain ``except CommandError`` told the operator to audit
+    alembic.ini and their Docker COPY lines for a build that was fine, and
+    named no merge. Built out of a real two-root versions/ dir.
+    """
+
+    def _two_head_root(self, tmp_path: Path) -> Path:
+        versions = tmp_path / "gurps_bot" / "db" / "migrations" / "versions"
+        versions.mkdir(parents=True)
+        (tmp_path / "gurps_bot" / "db" / "migrations" / "script.py.mako").write_text("", encoding="utf-8")
+        (tmp_path / "gurps_bot" / "db" / "migrations" / "env.py").write_text("", encoding="utf-8")
+        for rev in ("aaaa00000001", "bbbb00000002"):
+            (versions / f"{rev}_root.py").write_text(
+                f'revision = "{rev}"\ndown_revision = None\n'
+                "def upgrade():\n    pass\n\ndef downgrade():\n    pass\n",
+                encoding="utf-8",
+            )
+        (tmp_path / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/gurps_bot/db/migrations\n", encoding="utf-8"
+        )
+        return tmp_path
+
+    def test_script_head_names_the_merge_not_the_packaging(self, tmp_path, monkeypatch):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._two_head_root(tmp_path))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "more than one head" in message, message
+        assert "alembic merge heads" in message, message
+        assert "alembic says:" in message, message
+        # The packaging prescription is wrong here and must not be printed.
+        assert "shipped with this build" not in message, message
+        assert "script_location" not in message, message
+
+
 class TestDeployScriptRunsMigrations:
     def test_deploy_sh_invokes_bootstrap(self):
         # The documented update path used to run no alembic at all; pin the

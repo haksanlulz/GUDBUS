@@ -115,6 +115,12 @@ def script_head() -> str:
       out of BOTH entry points, and past ``run_bot``'s ``except SchemaGateError``,
       so the refusal never reached the log file either.
 
+    ``CommandError`` also carries a THIRD, unrelated fault that is not a
+    packaging one: a correctly shipped ``versions/`` whose migrations resolve to
+    more than one head (two authored on parallel branches, merged). That one is
+    told apart by Alembic's own words and gets its own refusal, because the
+    packaging advice cannot fix it and names no merge.
+
     Both entry points call this BEFORE looking at the database, so the refusal
     is reached whatever state the database is in — see the comments in
     :func:`ensure_schema_current` and :func:`main` for the three ways a
@@ -128,6 +134,17 @@ def script_head() -> str:
     try:
         head = ScriptDirectory.from_config(cfg).get_current_head()
     except CommandError as exc:
+        # get_current_head() raises CommandError for TWO unrelated families:
+        # the packaging ones this function is named for, and BRANCHING - a
+        # correctly packaged tree whose versions/ holds more than one head.
+        # Measured on a two-root versions/ dir: alembic says "The script
+        # directory has multiple heads (due to branching).Please use
+        # get_heads(), or merge the branches using alembic merge.", and the
+        # packaging refusal answered it with "check that alembic.ini shipped
+        # with this build" - advice that cannot fix it, for a build that is
+        # fine, while naming no merge.
+        if "multiple heads" in str(exc):
+            raise SchemaGateError(_multiple_heads_refusal(str(exc))) from exc
         raise SchemaGateError(_no_scripts_refusal(str(exc))) from exc
     if head is None:
         raise SchemaGateError(_no_scripts_refusal())
@@ -231,6 +248,26 @@ def _no_scripts_refusal(detail: str | None = None) -> str:
         "    that its versions/ directory came with it, then relaunch."
     )
     return "\n".join(lines)
+
+
+def _multiple_heads_refusal(detail: str) -> str:
+    """Message for a versions/ tree that resolves to more than one head.
+
+    Not a packaging fault: everything shipped, and two migrations were
+    authored on parallel branches. Says nothing about the database, and
+    nothing about alembic.ini, because neither is the problem.
+    """
+    return (
+        "!!  REFUSING: this build's migrations have more than one head, so\n"
+        "    there is no single revision to compare this database against.\n"
+        f"        migrations: {REPO_ROOT / 'gurps_bot' / 'db' / 'migrations' / 'versions'}\n"
+        f"        alembic says: {detail}\n"
+        "    The build is fine and the database may be perfectly current - two\n"
+        "    migrations were written on parallel branches and merged. List them,\n"
+        "    then join them into one head and commit the merge revision:\n"
+        "        uv run python -m alembic heads\n"
+        "        uv run python -m alembic merge heads -m 'merge branches'"
+    )
 
 
 def _legacy_refusal(url: str) -> str:
