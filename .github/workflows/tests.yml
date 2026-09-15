@@ -53,18 +53,22 @@ jobs:
 
   # Type check, scoped on purpose. pyright has been a declared dev dependency
   # since before 1.0 and nothing ever ran it; a repo-wide gate is not landable
-  # (measured 2026-09-14 on pyright 1.1.409: 191 errors, of which cogs 143 and
-  # ui/services 23 each, mostly discord.py's Interaction.client not carrying
-  # the bot's .db attribute and guild_id: int | None flowing into int params).
+  # (measured 2026-09-15 on pyright 1.1.409: 189 errors — cogs 143, services
+  # 23, ui 23, and none anywhere else — mostly discord.py's Interaction.client
+  # not carrying the bot's .db attribute and guild_id: int | None flowing into
+  # int params).
   #
   # COVERED: gurps_bot/gcs, gurps_bot/utils, gurps_bot/db, gurps_bot/mechanics
   # NOT COVERED: gurps_bot/cogs, gurps_bot/ui, gurps_bot/services, tools, tests
   #
   # That is 4 of the 7 packages under gurps_bot/, named rather than implied so
-  # the coverage claim cannot read as total. mechanics is the one that pays:
-  # it is the pure-rules layer, where a GURPS constant with the wrong type is a
-  # wrong answer at a table. Widen by moving a package up a line once it is
-  # clean; do not add one that is not.
+  # the coverage claim cannot read as total. Not all four were clean when this
+  # landed: gcs and utils were, db came clean one commit earlier (the schema
+  # gate), and mechanics carried 2 reportArgumentType errors in magic.py's
+  # long_distance_modifier that the commit adding this gate fixed. mechanics is
+  # the one that pays: it is the pure-rules layer, where a GURPS constant with
+  # the wrong type is a wrong answer at a table. Widen by moving a package up a
+  # line once it is clean; do not add one that is not.
   typecheck:
     runs-on: ubuntu-latest
     steps:

@@ -194,8 +194,10 @@ class TestTypeCheckGate:
     It was a declared dev dependency in both the PEP-735 group and the .[dev]
     extra since before 1.0, and no workflow, script or test ever invoked it —
     a tool the project pays to install on every fresh clone and never reads.
-    The gate is scoped to the layers that are clean rather than repo-wide, so
-    these assert the scope is real and written down, not that it is total.
+    The gate is scoped rather than repo-wide, so these assert the scope is
+    real and written down, not that it is total. "Scoped to the layers that
+    are clean" overstated it: gcs and utils were clean, db came clean one
+    commit earlier, and mechanics needed a two-error fix in magic.py first.
     """
 
     #: Named here as well as in the workflow comment so a silent narrowing of
