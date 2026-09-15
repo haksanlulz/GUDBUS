@@ -49,6 +49,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # 3) Vendor the pinned GCS reference data (gitignored; required at runtime for
 #    /skill, /spell, etc.), then verify the snapshot matches the pin.
+#
+#    GCS_GIT_TIMEOUT is the per-git-call ceiling in tools/sync_gcs_library.py.
+#    docker build does not inherit the host environment, so without this ARG the
+#    documented escape hatch cannot reach the caller most likely to trip the
+#    ceiling: this fetch pulls the pinned commit WITH blobs (~201 MB) on a cold
+#    cache. Build args are exposed to RUN as environment variables, so declaring
+#    it here is the whole delivery:
+#        docker build --build-arg GCS_GIT_TIMEOUT=1800 .
+#    (compose: pass it under `build: args:`.) The default must stay in step with
+#    _GIT_TIMEOUT_DEFAULT in the script — tests/test_sync.py asserts both.
+ARG GCS_GIT_TIMEOUT=600
 RUN uv run python tools/sync_gcs_library.py \
     && uv run python tools/sync_gcs_library.py --check
 

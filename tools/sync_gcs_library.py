@@ -59,11 +59,18 @@ def _utc_now_iso() -> str:
 #: Overridable at the point of failure, because "edit the constant" is not a
 #: fix where this runs: the Dockerfile calls it inside `docker build` and
 #: deploy/deploy.sh calls it at deploy time, so raising it in the source means
-#: rebuilding the thing that is timing out. `GCS_GIT_TIMEOUT=1800` raises it
-#: for one run. The one regression direction a ceiling has is a slow-but-
-#: working link that used to finish, and that failure is indistinguishable
-#: from an unreachable upstream — so the escape hatch has to exist where the
-#: failure does.
+#: rebuilding the thing that is timing out. The one regression direction a
+#: ceiling has is a slow-but-working link that used to finish, and that failure
+#: is indistinguishable from an unreachable upstream — so the escape hatch has
+#: to exist where the failure does. The two callers take it differently:
+#:
+#:     deploy/deploy.sh   GCS_GIT_TIMEOUT=1800 deploy/deploy.sh
+#:     docker build       docker build --build-arg GCS_GIT_TIMEOUT=1800 .
+#:
+#: `docker build` does not inherit the host environment, so the env-var form is
+#: inert there. The Dockerfile declares a matching `ARG GCS_GIT_TIMEOUT` ahead
+#: of the RUN; Docker passes an ARG to every subsequent RUN in that stage as a
+#: build-time environment variable, which is how it reaches os.environ below.
 #:
 #: No retry, deliberately: a manual/deploy-time tool should stop and say so,
 #: because a silent second attempt doubles the wait and buries the cause.

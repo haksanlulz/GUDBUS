@@ -262,3 +262,48 @@ class TestGitCallsAreBounded:
         with pytest.raises(ValueError) as exc:
             _load_module()
         assert "GCS_GIT_TIMEOUT" in str(exc.value)
+
+    def test_docker_build_can_actually_deliver_the_override(self):
+        """The test above proves the module READS the variable. It cannot see
+        whether the caller the escape hatch names can SEND it, and for a while
+        the primary one could not: `docker build` does not inherit the host
+        environment, so with no `ARG GCS_GIT_TIMEOUT` declared, both
+        `GCS_GIT_TIMEOUT=1800 docker build .` and `--build-arg
+        GCS_GIT_TIMEOUT=1800` changed nothing — on the one path that does the
+        cold-cache ~201 MB fetch.
+
+        Ordering matters as much as presence: an ARG only reaches RUN
+        instructions after it in the same build stage.
+        """
+        dockerfile = (_TOOLS_SCRIPT.parent.parent / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        lines = dockerfile.splitlines()
+
+        arg_at = [
+            i
+            for i, line in enumerate(lines)
+            if line.strip().startswith("ARG GCS_GIT_TIMEOUT")
+        ]
+        assert arg_at, "Dockerfile declares no ARG GCS_GIT_TIMEOUT"
+
+        run_at = [
+            i
+            for i, line in enumerate(lines)
+            if "sync_gcs_library.py" in line and line.lstrip().startswith("RUN")
+        ]
+        assert run_at, "no RUN invokes sync_gcs_library.py"
+
+        for run_line in run_at:
+            earlier = [i for i in arg_at if i < run_line]
+            assert earlier, f"ARG declared after the RUN on line {run_line + 1}"
+            # ...and in the same stage: a FROM between them resets the ARG.
+            assert not any(
+                lines[i].startswith("FROM ") for i in range(max(earlier) + 1, run_line)
+            ), "a FROM sits between the ARG and the RUN, which resets it"
+
+        default = lines[arg_at[0]].split("=", 1)[1].strip()
+        assert default == str(sync._GIT_TIMEOUT_DEFAULT), (
+            f"Dockerfile default {default} != _GIT_TIMEOUT_DEFAULT "
+            f"{sync._GIT_TIMEOUT_DEFAULT}"
+        )
