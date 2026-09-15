@@ -209,6 +209,12 @@ class TestTypeCheckGate:
         "gurps_bot/mechanics",
     )
 
+    #: The loose modules at gurps_bot/ root are not a package, so they are
+    #: reached by a glob rather than by a directory path. Without it they fall
+    #: outside COVERED and NOT COVERED both, and the pair reads exhaustive
+    #: while silently omitting bot.py, __main__.py, command_sync.py, config.py.
+    COVERED_LOOSE = "gurps_bot/*.py"
+
     def _typecheck_run(self, tests_wf):
         job = tests_wf["jobs"]["typecheck"]
         runs = [s["run"] for s in job["steps"] if "run" in s]
@@ -222,8 +228,33 @@ class TestTypeCheckGate:
 
     def test_every_covered_layer_is_in_the_command(self, tests_wf):
         command = self._typecheck_run(tests_wf)
-        for layer in self.COVERED:
+        for layer in (*self.COVERED, self.COVERED_LOOSE):
             assert layer in command, f"{layer} dropped from the gate: {command}"
+
+    def test_the_two_lists_partition_gurps_bot(self, tests_wf):
+        """Every top-level entry is in one list or the other, or NOT COVERED
+        is a sample rather than an enumeration.
+
+        A package landing in neither reads as covered to anyone skimming the
+        pair, which is what the four loose root modules did: outside the gate
+        command and named nowhere, while 'That is 4 of the 7 packages' was
+        true and made the omission easy to miss — they are modules, not
+        packages.
+        """
+        root = Path(__file__).resolve().parent.parent
+        text = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
+        command = self._typecheck_run(tests_wf)
+        for entry in sorted((root / "gurps_bot").iterdir()):
+            if entry.name == "__pycache__":
+                continue
+            rel = f"gurps_bot/{entry.name}"
+            if entry.is_file() and entry.suffix == ".py":
+                assert self.COVERED_LOOSE in command, (
+                    f"{rel} is reached only by the {self.COVERED_LOOSE} glob, "
+                    f"which is not in the gate command: {command}"
+                )
+            else:
+                assert rel in text, f"{rel} appears in neither list"
 
     def test_every_covered_layer_exists_on_disk(self):
         """A renamed package must not silently shrink the gate's reach."""

@@ -58,8 +58,12 @@ jobs:
   # not carrying the bot's .db attribute and guild_id: int | None flowing into
   # int params).
   #
-  # COVERED: gurps_bot/gcs, gurps_bot/utils, gurps_bot/db, gurps_bot/mechanics
-  # NOT COVERED: gurps_bot/cogs, gurps_bot/ui, gurps_bot/services, tools, tests
+  # COVERED: gurps_bot/gcs, gurps_bot/utils, gurps_bot/db, gurps_bot/mechanics,
+  #   and gurps_bot/*.py — the loose root modules (bot.py, __main__.py,
+  #   command_sync.py, config.py) are not a package, so they sat outside both
+  #   lists until the glob was added; they are clean and now gated
+  # NOT COVERED: gurps_bot/cogs, gurps_bot/ui, gurps_bot/services, tools,
+  #   tests, and gurps_bot/data (vendored GCS JSON, gitignored, no Python)
   #
   # That is 4 of the 7 packages under gurps_bot/, named rather than implied so
   # the coverage claim cannot read as total. Not all four were clean when this
@@ -87,4 +91,4 @@ jobs:
         run: uv sync --frozen
 
       - name: Type check the covered layers
-        run: uv run pyright gurps_bot/gcs gurps_bot/utils gurps_bot/db gurps_bot/mechanics
+        run: uv run pyright gurps_bot/gcs gurps_bot/utils gurps_bot/db gurps_bot/mechanics gurps_bot/*.py
