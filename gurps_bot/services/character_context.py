@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import discord
 
@@ -80,7 +80,18 @@ class CharacterContext:
             self.char = char
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
+        """Never suppresses — and the annotation has to say so.
+
+        `-> bool` reads as "may suppress", so a checker must assume control can
+        leave an `async with CharacterContext(...)` block without the body
+        having run, and every name a /char command assigns inside the block and
+        reads after it becomes possibly-unbound. That was 18 of this package's
+        pyright errors, all in `cogs/characters.py`, from this one word.
+
+        `CombatContext.__aexit__` is genuinely `-> bool`: it swallows two
+        permission/target errors after reporting them. This one does not.
+        """
         if self._session_ctx is not None:
             await self._session_ctx.__aexit__(exc_type, exc_val, exc_tb)
         return False
