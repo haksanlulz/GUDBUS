@@ -91,11 +91,14 @@ _SESSION_SECTION = re.compile(r"^## A session\n(.*?)(?=^## )", re.M | re.S)
 _INLINE_COMMAND = re.compile(r"`(/[a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)?)`")
 
 
-def _session_commands() -> set[str]:
-    text = README.read_text(encoding="utf-8")
-    m = _SESSION_SECTION.search(text)
+def _session_text() -> str:
+    m = _SESSION_SECTION.search(README.read_text(encoding="utf-8"))
     assert m, "the README no longer carries a worked-session section"
-    return set(_INLINE_COMMAND.findall(m.group(1)))
+    return m.group(1)
+
+
+def _session_commands() -> set[str]:
+    return set(_INLINE_COMMAND.findall(_session_text()))
 
 
 async def test_the_worked_session_only_names_commands_that_exist(tree):
@@ -107,3 +110,43 @@ async def test_the_worked_session_only_names_commands_that_exist(tree):
     groups = {c.rsplit(" ", 1)[0] for c in live if " " in c}
     unknown = named - live - groups
     assert not unknown, f"the worked session names commands the tree does not serve: {sorted(unknown)}"
+
+
+# The section's names and die faces are an example, but its message FORMATS
+# claim to be the ones the bot emits. Command names alone were the only thing
+# pinned, so a format-string edit anywhere below could leave the walkthrough
+# quoting output the code no longer produces. These two renderings are the
+# drift-prone ones: the tracker line and the shock line are both assembled
+# from several moving pieces.
+
+
+def test_the_worked_session_quotes_the_real_tracker_lines():
+    from gurps_bot.ui.formatters import format_combatant_line
+
+    text = _session_text()
+    for name, speed, hp, hp_max, fp, fp_max, current in (
+        ("Aldric", 5.75, 13, 13, 11, 11, True),
+        ("Ogre", 4.5, 16, 25, 12, 12, False),
+    ):
+        line = format_combatant_line(
+            name=name,
+            basic_speed=speed,
+            hp_current=hp,
+            hp_max=hp_max,
+            fp_current=fp,
+            fp_max=fp_max,
+            status_effects=[],
+            maneuver=None,
+            is_current=current,
+            is_out=False,
+        )
+        assert line.strip() in text, line
+
+
+def test_the_worked_session_quotes_the_real_shock_line():
+    from gurps_bot.mechanics.injury import injury_effects
+
+    # 9 injury on a 25-HP target: the -4 cap and the 2-HP-per-point scaling
+    # that the prose beneath the quote explains.
+    (shock,) = injury_effects(9, 25)
+    assert shock in _session_text(), shock

@@ -37,11 +37,13 @@
 
 ## A session
 
-One combat, start to finish. Every bot response quoted below was captured from a
-real invocation — the real cog callbacks over a faked interaction and an
-in-memory database, the harness `tests/test_attack_hidden.py` and
-`tests/test_combat_defend.py` use, with `random` seeded so the dice reproduce.
-Nothing here is illustrative.
+One combat, start to finish. The message formats below are the ones the code
+emits — `gurps_bot/ui/formatters.py`, `gurps_bot/ui/embeds.py` and
+`gurps_bot/cogs/combat.py` — and the two most drift-prone renderings are pinned
+by `tests/test_readme.py`, which builds them from those modules and fails if
+what is quoted here stops matching. The character names and the individual die
+faces are chosen for the example; nothing seeds `random`, so a real roll will
+differ. The arithmetic follows from the same rules the code applies.
 
 **GM — `/combat start`.** Posts the tracker, and keeps editing that one message
 for the rest of the fight.
