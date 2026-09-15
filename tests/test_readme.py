@@ -82,3 +82,28 @@ async def test_the_table_and_the_headline_count_agree(tree):
     assert int(m.group(1)) == len(_table_commands()), (
         "the README headline count and its own command table disagree"
     )
+
+
+# The worked session, which quotes bot output. Its prose names commands in
+# backticks; a walkthrough naming a command the bot does not serve is worse
+# than no walkthrough, and nothing else in the suite reads this section.
+_SESSION_SECTION = re.compile(r"^## A session\n(.*?)(?=^## )", re.M | re.S)
+_INLINE_COMMAND = re.compile(r"`(/[a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)?)`")
+
+
+def _session_commands() -> set[str]:
+    text = README.read_text(encoding="utf-8")
+    m = _SESSION_SECTION.search(text)
+    assert m, "the README no longer carries a worked-session section"
+    return set(_INLINE_COMMAND.findall(m.group(1)))
+
+
+async def test_the_worked_session_only_names_commands_that_exist(tree):
+    live = {f"/{name}" for name in _tree_descriptions(tree)}
+    named = _session_commands()
+    assert named, "the session section names no commands at all"
+    # Group parents (`/combat`) are real but are not themselves invocable, so
+    # allow a name that is a prefix of a live subcommand.
+    groups = {c.rsplit(" ", 1)[0] for c in live if " " in c}
+    unknown = named - live - groups
+    assert not unknown, f"the worked session names commands the tree does not serve: {sorted(unknown)}"
