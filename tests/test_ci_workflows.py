@@ -186,3 +186,65 @@ class TestArchitectures:
         qemu = next(i for i, u in enumerate(names) if "setup-qemu-action" in u)
         buildx = next(i for i, u in enumerate(names) if "setup-buildx-action" in u)
         assert qemu < buildx, "QEMU must be set up before buildx"
+
+
+class TestTypeCheckGate:
+    """pyright is installed on every sync; something has to run it.
+
+    It was a declared dev dependency in both the PEP-735 group and the .[dev]
+    extra since before 1.0, and no workflow, script or test ever invoked it —
+    a tool the project pays to install on every fresh clone and never reads.
+    The gate is scoped to the layers that are clean rather than repo-wide, so
+    these assert the scope is real and written down, not that it is total.
+    """
+
+    #: Named here as well as in the workflow comment so a silent narrowing of
+    #: the CI scope fails rather than passing quietly.
+    COVERED = (
+        "gurps_bot/gcs",
+        "gurps_bot/utils",
+        "gurps_bot/db",
+        "gurps_bot/mechanics",
+    )
+
+    def _typecheck_run(self, tests_wf):
+        job = tests_wf["jobs"]["typecheck"]
+        runs = [s["run"] for s in job["steps"] if "run" in s]
+        pyright = [r for r in runs if "pyright" in r]
+        assert pyright, f"typecheck job runs no pyright step: {runs}"
+        return pyright[0]
+
+    def test_the_workflow_runs_pyright(self, tests_wf):
+        assert "typecheck" in tests_wf["jobs"], list(tests_wf["jobs"])
+        self._typecheck_run(tests_wf)
+
+    def test_every_covered_layer_is_in_the_command(self, tests_wf):
+        command = self._typecheck_run(tests_wf)
+        for layer in self.COVERED:
+            assert layer in command, f"{layer} dropped from the gate: {command}"
+
+    def test_every_covered_layer_exists_on_disk(self):
+        """A renamed package must not silently shrink the gate's reach."""
+        root = Path(__file__).resolve().parent.parent
+        for layer in self.COVERED:
+            assert (root / layer).is_dir(), f"gate names a missing path: {layer}"
+
+    def test_the_coverage_claim_is_stated_not_implied(self):
+        """N-of-M, in the file, or the scope reads as the whole package."""
+        text = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
+        assert "COVERED:" in text
+        assert "NOT COVERED:" in text
+        for layer in ("gurps_bot/cogs", "gurps_bot/ui", "gurps_bot/services"):
+            assert layer in text, f"{layer} is unchecked and unmentioned"
+
+    def test_pyright_is_pinned_exactly(self):
+        """A minor bump adds checks and reddens a previously-green gate."""
+        import re
+
+        pyproject = (
+            Path(__file__).resolve().parent.parent / "pyproject.toml"
+        ).read_text(encoding="utf-8")
+        specs = re.findall(r'"pyright([^"]*)"', pyproject)
+        assert specs, "pyright is no longer declared at all"
+        for spec in specs:
+            assert spec.startswith("=="), f"pyright is not pinned: pyright{spec}"
