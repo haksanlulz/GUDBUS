@@ -70,12 +70,31 @@ async def enforce_row_cap(
 
     Counts rather than tracking a running total: a count is always right, and a
     denormalised counter is one more thing to keep true through deletes.
+
+    The count and the insert are not one statement, so this is a TOCTOU: two
+    concurrent creates can both read `cap - 1` and both land, and the cap can be
+    overshot by the number of writers racing it. Left that way on purpose —
+    these are anti-abuse bounds, not GURPS numbers, and a handful of extra rows
+    under contention costs nothing, where the compare-and-set treatment the two
+    real read-modify-write races in `services/combat.py` got would mean a
+    counter column to keep true through every delete. Named so it is a decision
+    rather than an oversight. (Do not fix here.)
     """
     stmt = select(func.count()).select_from(model)
     for column, value in filters.items():
         stmt = stmt.where(getattr(model, column) == value)
     current = await session.scalar(stmt)
-    if current is not None and current >= cap:
+    if current is None:
+        # `SELECT count(*)` always returns a row, so this is not reachable on
+        # SQLite, which is the only dialect shipped. It is written on the
+        # refusing side because of what this module is for: an unreadable count
+        # is a cap that is not being enforced, and the whole point is bounding
+        # what strangers can write to the operator's disk. Fail closed.
+        raise StorageLimitExceeded(
+            f"Could not count your {what} just now, so nothing was added. "
+            "Try again in a moment."
+        )
+    if current >= cap:
         raise StorageLimitExceeded(
             f"You have {current} {what} (maximum {cap}). Delete some first."
         )
