@@ -193,6 +193,67 @@ class TestNoMigrationScriptsAtAll:
         assert "head:     None" not in message, message
         assert "behind the code" not in message, message
 
+    def test_the_gate_refuses_a_fresh_db_instead_of_booting_unstamped(
+        self, tmp_path, monkeypatch
+    ):
+        """The fresh-DB branch was the fail-open: it returned before any check.
+
+        Measured before the fix: the gate took `not has_tables ->
+        create_and_stamp -> return`, alembic resolved "head" to nothing, and
+        the bot booted on a database left (has_tables=True, revision=None) out
+        of an image carrying no migrations at all.
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "fresh.db")
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        assert "script_location" in str(exc.value), exc.value
+        assert not (tmp_path / "fresh.db").exists(), "the gate created a database"
+
+    def test_the_deploy_path_blames_packaging_not_a_brand_new_database(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """main() is the entry point deploy/deploy.sh and the Dockerfile run.
+
+        Before the fix a fresh database here drew the LEGACY refusal, which
+        blames a correctly-created database and prescribes `alembic stamp
+        head` — a no-op in a tree with no revisions.
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "fresh_deploy.db")
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        assert bootstrap.main(url) == 2
+        err = capsys.readouterr().err
+        assert "script_location" in err, err
+        assert "predates Alembic" not in err, err
+
+    def test_the_deploy_path_refuses_a_stamped_db_without_a_raw_traceback(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Before the fix this reached upgrade_head, and alembic raised
+        CommandError("Can't locate revision identified by ...") out of main().
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "stamped.db")
+        assert bootstrap.main(url) == 0  # built with the real alembic.ini
+
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        assert bootstrap.main(url) == 2
+        assert "script_location" in capsys.readouterr().err
+
 
 class TestDeployScriptRunsMigrations:
     def test_deploy_sh_invokes_bootstrap(self):

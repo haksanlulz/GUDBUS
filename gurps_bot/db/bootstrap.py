@@ -5,6 +5,9 @@ Two entry points, one implementation:
 ``uv run python -m gurps_bot.db.bootstrap`` — the DEPLOY path (deploy.sh runs it
 on every update):
 
+* no revision files at all -> refuses FIRST, naming the packaging fault: a
+  tree that cannot find a head can judge no database, and every branch below
+  misreports the fault as a database one;
 * brand-new DB -> ``create_tables()`` builds the full current schema and
   stamps it at Alembic head. create_all can never ADD columns to an existing
   table, so the stamp is what makes every future ``upgrade head`` meaningful;
@@ -100,9 +103,14 @@ def script_head() -> str:
     Alembic returns None for the head when it finds no revision files at all —
     a packaging fault rather than a schema one: `script_location` points
     somewhere wrong, or `versions/` did not make it into the image. Refuse here
-    and name it, because the only caller compares this against a database's
-    stamp, where a None head reads as "your schema is behind the code, head is
-    None": a true refusal pointing at the wrong fix.
+    and name it, because every path that reaches a database compares this
+    against a stamp, where a None head reads as "your schema is behind the
+    code, head is None": a true refusal pointing at the wrong fix.
+
+    Both entry points call this BEFORE looking at the database, so the refusal
+    is reached whatever state the database is in — see the comments in
+    :func:`ensure_schema_current` and :func:`main` for the three ways a
+    versions-less tree misreports the fault when it does not.
     """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
@@ -195,8 +203,8 @@ def _no_scripts_refusal() -> str:
     Says nothing about the database, because the database is not the problem.
     """
     return (
-        f"!!  REFUSING TO START: Alembic found no migration scripts, so there\n"
-        f"    is no head revision to compare this database against.\n"
+        f"!!  REFUSING: Alembic found no migration scripts, so there is no\n"
+        f"    head revision to compare this database against.\n"
         f"        alembic.ini: {REPO_ROOT / 'alembic.ini'}\n"
         f"    This is a packaging fault, not a schema one — the database may be\n"
         f"    perfectly current. Check that alembic.ini's script_location points\n"
@@ -241,6 +249,8 @@ def ensure_schema_current(url: str | None = None) -> None:
     in-memory URL is a no-op here for the same reason.
 
     * transient / in-memory URL -> no-op;
+    * no migration scripts       -> REFUSE (a packaging fault — checked FIRST,
+      because a tree with no revisions can judge no database at all);
     * absent or empty database   -> :func:`create_and_stamp` (first run works);
     * tables but no stamp        -> REFUSE (never guess a legacy revision);
     * stamped below head         -> REFUSE, loudly, naming the fix;
@@ -257,13 +267,20 @@ def ensure_schema_current(url: str | None = None) -> None:
     if is_transient_sqlite_url(url):
         return
 
+    # Packaging before schema, and before the branch on the database: a tree
+    # with no revision files can judge no database at all, and the fresh-DB
+    # branch below would otherwise create_all a schema, stamp nothing (alembic
+    # resolves "head" to an empty set), and let the bot boot UNSTAMPED out of
+    # an image carrying no migrations — measured, the gate returned and the
+    # database came back (has_tables=True, revision=None).
+    head = script_head()
+
     has_tables, revision = asyncio.run(_inspect_db(url))
     if not has_tables:
         create_and_stamp(url)
         return
     if not revision:
         raise SchemaGateError(_legacy_refusal(url))
-    head = script_head()
     if revision != head:
         raise SchemaGateError(_stale_refusal(url, revision, head))
 
@@ -274,6 +291,18 @@ def main(url: str | None = None) -> int:
     if is_transient_sqlite_url(url):
         print("In-memory database URL — nothing to bootstrap.")
         return 0
+
+    # Packaging before schema, same reason as the startup gate. Measured on a
+    # versions-less tree without this check: a fresh database drew the LEGACY
+    # refusal, which blames a brand-new correctly-created database and
+    # prescribes `alembic stamp head` — a no-op in a tree with no revisions —
+    # and a stamped database drew a raw alembic CommandError traceback out of
+    # upgrade_head ("Can't locate revision identified by ...").
+    try:
+        script_head()
+    except SchemaGateError as exc:
+        print(exc, file=sys.stderr)
+        return 2
 
     # create_and_stamp runs create_all, so it is ONLY correct on a database
     # with no tables. On an existing one create_all cannot ALTER a table, but it
