@@ -255,6 +255,77 @@ class TestNoMigrationScriptsAtAll:
         assert "script_location" in capsys.readouterr().err
 
 
+class TestPackagingFaultsAlembicRaisesOn:
+    """The other two shapes of the same fault, which Alembic RAISES on.
+
+    An empty ``versions/`` is the only one that returns None. Measured against
+    built trees: a tree with no alembic.ini at all raises ``CommandError("No
+    'script_location' key found in configuration.")``, and a script_location
+    naming a directory that is not there raises ``CommandError("Path doesn't
+    exist: ...")``. Both escaped as a raw traceback out of BOTH entry points —
+    past ``run_bot``'s ``except SchemaGateError``, so the refusal never reached
+    the rotating log file either, and out of ``main()`` instead of an exit 2.
+
+    Each root below is a real Alembic config, not a mock, so these stay honest
+    if Alembic changes which faults it raises on.
+    """
+
+    def _no_ini_root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "no_ini"
+        root.mkdir()
+        return root
+
+    def _bad_location_root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "bad_location"
+        root.mkdir()
+        (root / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/not_shipped\n", encoding="utf-8"
+        )
+        return root
+
+    @pytest.fixture(params=["_no_ini_root", "_bad_location_root"])
+    def broken_root(self, request, tmp_path):
+        return getattr(self, request.param)(tmp_path)
+
+    def test_script_head_refuses_instead_of_raising_commanderror(
+        self, broken_root, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "script_location" in message, message
+        # Alembic's own words are quoted, because they are the only thing that
+        # tells these two faults apart for the operator reading the log.
+        assert "alembic says:" in message, message
+
+    def test_the_startup_gate_refuses_and_touches_no_database(
+        self, tmp_path, broken_root, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "untouched.db")
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        assert "script_location" in str(exc.value), exc.value
+        assert not (tmp_path / "untouched.db").exists(), "the gate created a database"
+
+    def test_the_deploy_path_exits_2_instead_of_a_traceback(
+        self, tmp_path, broken_root, monkeypatch, capsys
+    ):
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "deploy.db")
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        assert bootstrap.main(url) == 2
+        err = capsys.readouterr().err
+        assert "script_location" in err, err
+        assert "predates Alembic" not in err, err
+
+
 class TestDeployScriptRunsMigrations:
     def test_deploy_sh_invokes_bootstrap(self):
         # The documented update path used to run no alembic at all; pin the

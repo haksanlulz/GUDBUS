@@ -100,12 +100,20 @@ def upgrade_head(url: str) -> None:
 def script_head() -> str:
     """The Alembic head revision THIS code expects (single owner of the lookup).
 
-    Alembic returns None for the head when it finds no revision files at all —
-    a packaging fault rather than a schema one: `script_location` points
-    somewhere wrong, or `versions/` did not make it into the image. Refuse here
-    and name it, because every path that reaches a database compares this
-    against a stamp, where a None head reads as "your schema is behind the
-    code, head is None": a true refusal pointing at the wrong fix.
+    A packaging fault rather than a schema one — `script_location` points
+    somewhere wrong, `alembic.ini` never shipped, or `versions/` did not make it
+    into the image — reaches this function in two different shapes, and both are
+    caught here. Refuse and name it, because every path that reaches a database
+    compares this against a stamp, where a missing head reads as "your schema is
+    behind the code": a true refusal pointing at the wrong fix.
+
+    * the config resolves but holds no revision files -> Alembic returns None;
+    * the config cannot resolve at all -> Alembic RAISES ``CommandError``.
+      Measured against built trees: no alembic.ini -> "No 'script_location' key
+      found in configuration."; script_location naming a directory that does not
+      exist -> "Path doesn't exist: ...". Both used to escape as a raw traceback
+      out of BOTH entry points, and past ``run_bot``'s ``except SchemaGateError``,
+      so the refusal never reached the log file either.
 
     Both entry points call this BEFORE looking at the database, so the refusal
     is reached whatever state the database is in — see the comments in
@@ -114,9 +122,13 @@ def script_head() -> str:
     """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
+    from alembic.util.exc import CommandError
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    head = ScriptDirectory.from_config(cfg).get_current_head()
+    try:
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+    except CommandError as exc:
+        raise SchemaGateError(_no_scripts_refusal(str(exc))) from exc
     if head is None:
         raise SchemaGateError(_no_scripts_refusal())
     return head
@@ -197,20 +209,28 @@ def _display_url(url: str) -> str:
         return url
 
 
-def _no_scripts_refusal() -> str:
-    """Message for a tree/image that carries no Alembic revision files at all.
+def _no_scripts_refusal(detail: str | None = None) -> str:
+    """Message for a tree/image that cannot produce an Alembic head at all.
 
     Says nothing about the database, because the database is not the problem.
+    ``detail`` carries Alembic's own words for the faults it raises on rather
+    than returning None from — a missing alembic.ini, or a script_location
+    pointing at a directory that is not there.
     """
-    return (
-        f"!!  REFUSING: Alembic found no migration scripts, so there is no\n"
-        f"    head revision to compare this database against.\n"
-        f"        alembic.ini: {REPO_ROOT / 'alembic.ini'}\n"
-        f"    This is a packaging fault, not a schema one — the database may be\n"
-        f"    perfectly current. Check that alembic.ini's script_location points\n"
-        f"    at gurps_bot/db/migrations and that its versions/ directory\n"
-        f"    shipped with this build, then relaunch."
+    lines = [
+        "!!  REFUSING: Alembic could not resolve a head revision, so there is",
+        "    nothing to compare this database against.",
+        f"        alembic.ini: {REPO_ROOT / 'alembic.ini'}",
+    ]
+    if detail:
+        lines.append(f"        alembic says: {detail}")
+    lines.append(
+        "    This is a packaging fault, not a schema one — the database may be\n"
+        "    perfectly current. Check that alembic.ini shipped with this build,\n"
+        "    that its script_location points at gurps_bot/db/migrations, and\n"
+        "    that its versions/ directory came with it, then relaunch."
     )
+    return "\n".join(lines)
 
 
 def _legacy_refusal(url: str) -> str:
