@@ -4,11 +4,11 @@
 
 ## Features
 
-- **Character Management** — Import `.gcs` files, view attributes/skills/spells/traits/equipment, switch between characters, export back to `.gcs`
-- **Dice Rolling** — Standard dice notation (`3d6`, `2d+1`, `4d6+3`), GURPS success rolls with critical thresholds, Quick Contests
-- **Combat** — Damage rolls with wounding multipliers, hit locations, Fright Checks, attack/defend rolls
-- **Combat Tracker** — Persistent initiative tracker with HP/FP tracking, status effects, maneuvers, round management, interactive buttons
-- **Autocomplete** — Fuzzy-matched skill, attribute, weapon, and character name suggestions
+- **Character Management**: import `.gcs` files, view attributes/skills/spells/traits/equipment, switch between characters, export back to `.gcs`
+- **Dice Rolling**: standard dice notation (`3d6`, `2d+1`, `4d6+3`), GURPS success rolls with critical thresholds, Quick Contests
+- **Combat**: damage rolls with wounding multipliers, hit locations, Fright Checks, attack/defend rolls
+- **Combat Tracker**: persistent initiative tracker with HP/FP tracking, status effects, maneuvers, round management, interactive buttons
+- **Autocomplete**: fuzzy-matched skill, attribute, weapon, and character name suggestions
 
 ## Setup
 
@@ -38,24 +38,24 @@
 ## A session
 
 One combat, start to finish. The message formats below are the ones the code
-emits — `gurps_bot/ui/formatters.py`, `gurps_bot/ui/embeds.py` and
-`gurps_bot/cogs/combat.py` — and the two most drift-prone renderings are pinned
+emits (`gurps_bot/ui/formatters.py`, `gurps_bot/ui/embeds.py` and
+`gurps_bot/cogs/combat.py`), and the two most drift-prone renderings are pinned
 by `tests/test_readme.py`, which builds them from those modules and fails if
 what is quoted here stops matching. The character names and the individual die
 faces are chosen for the example; nothing seeds `random`, so a real roll will
 differ. The arithmetic follows from the same rules the code applies.
 
-**GM — `/combat start`.** Posts the tracker, and keeps editing that one message
+**GM, `/combat start`.** Posts the tracker, and keeps editing that one message
 for the rest of the fight.
 
 > **Combat — Round 1**
 > *No combatants yet. Use `/combat join` or `/combat add-npc`.*
 
-**Player — `/combat join`.** Speed, HP and FP come off their active character.
+**Player, `/combat join`.** Speed, HP and FP come off their active character.
 
 > **Aldric** joined combat (Speed 5.75).
 
-**GM — `/combat add-npc` `name: Ogre` `speed: 4.5` `hp: 25` `fp: 12`.**
+**GM, `/combat add-npc` `name: Ogre` `speed: 4.5` `hp: 25` `fp: 12`.**
 
 > Added **Ogre** (Speed 4.5, HP 25).
 
@@ -68,7 +68,7 @@ The tracker message now reads:
 Order is Basic Speed descending, then DX, then a per-combatant tiebreaker.
 ▶ marks whose turn it is.
 
-**Player — `/attack` `weapon: Broadsword`.** 3d against the weapon's skill level
+**Player, `/attack` `weapon: Broadsword`.** 3d against the weapon's skill level
 as imported from the sheet. The embed lays these out as fields side by side:
 
 > **Aldric — Attack: Broadsword (swung)**
@@ -83,7 +83,7 @@ A **Roll Damage** button comes attached to that message:
 
 Cutting wounds at ×1.5 on whatever gets past DR (B379), so 6 becomes 9.
 
-**GM — `/combat hp` `target: Ogre` `amount: -9`.**
+**GM, `/combat hp` `target: Ogre` `amount: -9`.**
 
 > **Ogre** HP -9 → 16/25
 > Shock -4 to DX, IQ, and DX/IQ-based skills next turn (does not affect active defenses, B419).
@@ -95,7 +95,7 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 > ▶ **Aldric** | Spd 5.75 | [########] 13/13 HP | [########] 11/11 FP
 >  **Ogre** | Spd 4.5 | [#####---] 16/25 HP | [########] 12/12 FP
 
-**GM — `/combat end`.**
+**GM, `/combat end`.**
 
 > Combat ended.
 
@@ -192,7 +192,7 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/craft enchant` | Enchanting an item: Power, time, and the ceremonial thresholds (Magic pp. 16-18) |
 | `/craft projects` | Your crafting projects in this server |
 | `/craft project` | One project: stage, time, and what it has cost |
-| `/craft abandon` | End a project — the spending stays on record |
+| `/craft abandon` | End a project; the spending stays on record |
 | `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 | `/campaign show` | Show this server's house rules |
@@ -203,7 +203,7 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/technique` | Look up a GURPS technique (facts + page cite) |
 | `/item` | Look up GURPS equipment (facts + page cite) |
 | `/legal` | Legal notice, credits, trademark, and privacy information |
-| `/about` | About this bot — credits, trademark, and privacy |
+| `/about` | About this bot: credits, trademark, and privacy |
 | `/support` | Ways to support the bot (donation links + how to help) |
 | `/donate` | Donation links to support the bot's hosting |
 | `/help` | What this bot does, by topic |
@@ -287,7 +287,7 @@ uv run python -m alembic revision --autogenerate -m "describe change"
 uv run python -m alembic upgrade head
 ```
 
-Deploys run `uv run python -m gurps_bot.db.bootstrap` instead — it creates and
+Deploys run `uv run python -m gurps_bot.db.bootstrap` instead. It creates and
 stamps a fresh database at head, upgrades a stamped one, and refuses with
 instructions on an unstamped legacy one. Startup `create_all` builds a new
 database at the current schema and stamps it automatically; `upgrade head`
@@ -301,8 +301,8 @@ schema).
 Layers and the test style each gets:
 
 - `mechanics/`: pure functions, so every rule is a plain unit test with literal inputs and expected outputs.
-- `services/` and integration tests: a real SQLite database through the async engine, never a mocked session.
-- `cogs/`: driven discord.py components (real cog callbacks, views, and modals over a faked interaction), not mocks of the cog.
+- `services/` and integration tests: a real SQLite database through the async engine. No mocked sessions.
+- `cogs/`: driven discord.py components (real cog callbacks, views, and modals over a faked interaction). The cog itself is never mocked.
 - `db/`: bootstrap and migration paths run real Alembic against a file database.
 - `ui/`: embed and formatter output asserted as payloads.
 
@@ -320,33 +320,33 @@ Counts, to the nearest thousand lines, pinned to the tree by `tests/test_readme.
 - application code: 21K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
 - tests: 29K lines (`find tests -name '*.py' | xargs cat | wc -l`)
 
-Rounded and pinned rather than exact and dated: the previous figures carried a
+Rounded and pinned instead of exact and dated. The previous figures carried a
 date, printed a tenth of a thousand, and were both wrong within days of being
-written — beside the commands that disprove them.
+written, sitting beside the commands that disprove them.
 
-The collected-test total is deliberately not printed here. It moved on the very
-next commit after it was written, and a stale number sitting beside the command
-that disproves it is worse than no number:
+The collected-test total is deliberately left out. It moved on the very next
+commit after it was written, and a stale number beside the command that
+disproves it is worse than no number:
 
 ```bash
 uv run python -m pytest --collect-only -q | tail -1
 ```
 
-**Why so many tests.** The mechanics layer is pure: no I/O, no Discord, no database, so every GURPS rule the bot implements is checkable with a two-line test, and there are a lot of rules. The pins are real, not decorative: mutating the natural-17 branch in `gurps_bot/mechanics/checks.py` turns exactly two tests red (`tests/test_checks.py::TestDetermineOutcome::test_crit_failure_on_17_when_target_15_or_less` and `::test_17_always_fails_even_at_high_skill`) and nothing else; removing the minimum-injury floor in `gurps_bot/mechanics/damage.py` turns exactly three red (`tests/test_damage.py::TestMinimumInjuryFloor::test_one_point_small_piercing_floors_to_1`, `::test_penetrating_after_dr_floors_to_1`, and `tests/test_injury_tolerance.py::TestInteractionWithLocationAndFloor::test_minimum_one_injury_floor_survives`).
+**Why so many tests.** The mechanics layer is pure: no I/O, no Discord, no database, so every GURPS rule the bot implements is checkable with a two-line test, and there are a lot of rules. The pins hold: mutating the natural-17 branch in `gurps_bot/mechanics/checks.py` turns exactly two tests red (`tests/test_checks.py::TestDetermineOutcome::test_crit_failure_on_17_when_target_15_or_less` and `::test_17_always_fails_even_at_high_skill`) and nothing else; removing the minimum-injury floor in `gurps_bot/mechanics/damage.py` turns exactly three red (`tests/test_damage.py::TestMinimumInjuryFloor::test_one_point_small_piercing_floors_to_1`, `::test_penetrating_after_dr_floors_to_1`, and `tests/test_injury_tolerance.py::TestInteractionWithLocationAndFloor::test_minimum_one_injury_floor_survives`).
 
-Call-only wiring assertions (`assert_awaited()` with nothing said about the payload) were audited and pruned on 2026-09-11. Policy going forward: tests pin rules and regressions; assert behavior and payloads, not that a function was called.
+Call-only wiring assertions (`assert_awaited()` with nothing said about the payload) were audited and pruned on 2026-09-11. Policy going forward: tests pin rules and regressions. Assert behavior and payloads, never bare invocation.
 
 ## AI assistance
 
 This project was built with AI assistance (Claude). Correctness was established
-by the test suite — including golden-file harnesses for the GCS parser and the
-magic mechanics, and a test that pins the SJG legal notice character-exact —
-and enforced twice on the way out: CI publishes no Docker image from a commit
-whose test matrix failed, and the systemd deploy script runs the full suite
-before every service restart. The author reviews and is accountable for all
-shipped code.
+by the test suite, including golden-file harnesses for the GCS parser and the
+magic mechanics and a test that pins the SJG legal notice character-exact, and
+enforced twice on the way out: CI publishes no Docker image from a commit whose
+test matrix failed, and the systemd deploy script runs the full suite before
+every service restart. The author reviews and is accountable for all shipped
+code.
 
 ## License
 
-MIT (see `LICENSE`). The vendored reference data is MPL-2.0 — see
+MIT (see `LICENSE`). The vendored reference data is MPL-2.0; see
 [Reference data](#reference-data).
