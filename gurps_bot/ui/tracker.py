@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import discord
 
@@ -24,18 +24,24 @@ def get_tracker_view() -> discord.ui.View:
     return _TRACKER_VIEW
 
 
+@runtime_checkable
+class _MessageSource(Protocol):
+    def get_partial_message(self, message_id: int, /) -> discord.PartialMessage: ...
+
+
 class TrackerManager:
     """edits the tracker via get_partial_message — 1 API call vs fetch+edit's 2"""
 
-    def __init__(
-        self, channel: discord.abc.Messageable, message_id: int | None,
-    ) -> None:
-        self.channel = channel
+    def __init__(self, channel: object, message_id: int | None) -> None:
+        # takes interaction.channel as-is: None, a category or a forum cannot
+        # hold the tracker, so they become "no channel" rather than an
+        # AttributeError after the command has already committed and replied
+        self.channel = channel if isinstance(channel, _MessageSource) else None
         self.message_id = message_id
 
     async def refresh(self, combat: Combat) -> bool:
         """re-render; False = message deleted or unpermitted — callers warn instead of going stale"""
-        if not self.message_id:
+        if not self.message_id or self.channel is None:
             return False
         embed = combat_tracker_embed(combat)
         try:
@@ -56,7 +62,7 @@ class TrackerManager:
         return False
 
     async def end(self) -> None:
-        if not self.message_id:
+        if not self.message_id or self.channel is None:
             return
         try:
             partial = self.channel.get_partial_message(self.message_id)
