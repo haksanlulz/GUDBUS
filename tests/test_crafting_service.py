@@ -1,4 +1,4 @@
-"""Crafting projects across sessions — GAUNTLET §5's two persistence specs.
+"""Crafting projects across sessions — the two persistence specs.
 
 * SPEC a-crafting-project-survives-the-session
 * SPEC a-failed-attempt-never-charges-without-recording-why

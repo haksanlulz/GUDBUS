@@ -1,9 +1,8 @@
 """Contract scan: no GURPS book text lives in this repo.
 
-GAUNTLET §3 invariant, operator-ruled at inquest R5 and deliberately wider than
-the draft it replaced: **not even privately, not the Basic Set markdown.** The
-accepted consequence is recorded in ATTACK.md — book-checks can never run in CI,
-so CI green does not mean book-checked. That rung stays manual, local and dated.
+A standing invariant, deliberately wider than the draft it replaced: **not even
+privately, not the Basic Set markdown.** The accepted consequence is that
+book-checks can never run in CI, so CI green does not mean book-checked. That rung stays manual, local and dated.
 
 The temptation this closes is specific and arrives with the crafting arc: five
 domains, six books, and every one of them easier to implement with the chapter
@@ -30,7 +29,7 @@ being exactly what the operator ruled out.
 
 Every layer FAILS CLOSED and carries a planted positive, because an empty
 result from a broken probe and an empty result from a clean tree render
-identically (Rule 22).
+identically.
 """
 
 from __future__ import annotations
@@ -128,7 +127,7 @@ def _tracked_files() -> list[str]:
 
     Fails rather than skips when git is unavailable: this invariant is about
     what the repository carries, so a run that cannot see the index has not
-    checked it. A skip here would be the fail-open shape (Rule 14).
+    checked it. A skip here would be the fail-open shape.
     """
     proc = subprocess.run(
         ["git", "ls-files"],
@@ -236,7 +235,7 @@ class TestNoBookContainers:
             "GURPS book containers found in the working tree:\n  "
             + "\n  ".join(hits)
             + "\n\nThe books stay on the operator's own disk. Book-checks are a "
-            "manual, local, dated rung — see GAUNTLET §3 and ATTACK.md."
+            "manual, local, dated rung, never a file in the repo."
         )
 
 

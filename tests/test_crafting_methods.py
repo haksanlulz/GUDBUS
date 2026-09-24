@@ -1,9 +1,9 @@
-"""B475-477 Gadgeteering, and the per-METHOD half of the §3 invariant.
+"""B475-477 Gadgeteering, and the per-METHOD half of the per-domain invariant.
 
-GAUNTLET §3 requires that crafting rules stay per-domain **and per-method**,
+The crafting invariant is that rules stay per-domain **and per-method**,
 "never one shared abstraction", and until now that scan had nothing to bite on:
 one method implemented cannot disagree with itself, so a differential written
-against it would have been unfalsified rather than passing (Rule 25). Three
+against it would have been unfalsified rather than passing. Three
 methods inside one domain is the first population that can express a
 disagreement, so this file asserts the disagreements directly.
 
@@ -13,7 +13,7 @@ applies is a fact about the character.
 
 ⚠️ B476's **Gadget Bugs Table is deliberately not implemented**. It is eighteen
 rows of effect prose, and "no effect prose, ever" is the arc's hardest non-goal
-— the one ATTACK.md flags as most likely to erode by accident. The engine says
+— and the one most likely to erode by accident. The engine says
 *whether* the table applies and cites the page; what is on it stays in the book.
 """
 
@@ -201,7 +201,7 @@ class TestQuickGadgeteering:
 
 
 class TestTheMethodsDisagree:
-    """GAUNTLET §3, per-METHOD half. The scan the arc has been owed.
+    """The invariant's per-METHOD half. The scan the arc has been owed.
 
     Each test names one rule and asserts the methods give different answers to
     it. A shared abstraction would make one of these pass by accident; all of

@@ -114,10 +114,10 @@ def materials_cost(
 ) -> float:
     """LTC3: weight x the Raw Materials Table, not a fraction of list price.
 
-    ⚑ This is the number sealed probe 5 got wrong twice before anyone opened
-    the book, and it passed unchallenged both times because a percentage of
-    list price produces a plausible figure. It is derived from the item's
-    WEIGHT and its material, and list price never enters it.
+    ⚑ A percentage of list price is the tempting wrong answer here, and it
+    survives review because it produces a plausible figure. The cost is
+    derived from the item's WEIGHT and its material; list price never enters
+    it.
     """
     if weight_lbs < 0:
         raise ValueError(f"weight cannot be negative, got {weight_lbs}")

@@ -276,10 +276,8 @@ class TestCostsStaysThreeFigures:
 class TestRepairAcrossATechLevelGap:
     """`/craft repair`'s tech-line layer, wired 2026-08-15.
 
-    ⚠️ Sealed probe 3 was not read while this was written. Its scenario shape
-    is known from ATTACK.md — a TL10 beam weapon worked on with TL9 skill —
-    but its numbers are not, and the point of the exercise is that this code
-    is finished before they are seen.
+    Written from the book alone. The scenario shape — a TL10 beam weapon
+    worked on with TL9 skill — is the case the tech-level gap exists for.
     """
 
     async def _run(self, **kwargs):
@@ -342,9 +340,9 @@ class TestRepairAcrossATechLevelGap:
         assert "-10" in modifiers.value
 
 
-class TestBrewHonoursProbeTwoAtTheSurface:
-    """`/craft brew` — added 2026-08-15, when re-verifying sealed probe 2
-    found the alchemy domain had no consumer at all.
+class TestBrewHonoursTheReferenceScenarioAtTheSurface:
+    """`/craft brew` — added 2026-08-15, when re-verifying the alchemy
+    reference scenario found the domain had no consumer at all.
 
     Six of its seven conditions passed at module level and the module was
     imported by nothing but its own tests, so conditions 4 (mastery is
@@ -370,7 +368,7 @@ class TestBrewHonoursProbeTwoAtTheSurface:
             "embed"
         ]
 
-    async def test_the_sealed_scenario_reaches_eleven(self):
+    async def test_the_reference_scenario_reaches_eleven(self):
         embed = await self._embed(doses=2, technique=12, formulary=True)
         roll = next(f for f in embed.fields if f.name == "Roll against")
         assert "11" in roll.value

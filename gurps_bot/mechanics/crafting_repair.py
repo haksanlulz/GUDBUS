@@ -31,13 +31,13 @@ architectural statement.
 
 ⚠️ **The rule that a critical failure ESCALATES the damage tier is still not
 implemented, and is now known to be printed in none of the four books read.**
-It was recorded in ATTACK.md from probe-3 elicitation. B485's "critical
+It came from a reference scenario, not a book. B485's "critical
 failure requires major repairs" belongs to Breakdowns — a *maintenance* roll,
 not a repair roll — and Ultra-Tech's repair nanopaste has the only printed
 make-it-worse clause in the family (a negative result damages the item), which
 is a different mechanism at a different scale. Writing it from memory is
-exactly the fabrication sealed probe 3 exists to catch, so it is named here
-and left unbuilt.
+exactly the fabrication this project's book-first rule exists to prevent, so
+it is named here and left unbuilt.
 """
 
 from __future__ import annotations

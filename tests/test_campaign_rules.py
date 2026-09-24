@@ -1,6 +1,6 @@
 """Per-guild house rules, and the Rule-of-14 switch on /fright-check.
 
-GAUNTLET §5 SPEC fright-follows-the-book, operator-ratified 2026-07-27:
+SPEC fright-follows-the-book, ratified 2026-07-27:
 Rule of 14 is ON by default (RAW) and a campaign may turn it off, in which case
 modified Will is used uncapped and the bot says which mode it used.
 """
