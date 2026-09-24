@@ -9,6 +9,8 @@ import pytest
 from gurps_bot.gcs.parser import (
     _MAX_ITEMS_PER_CATEGORY,
     _MAX_NEST_DEPTH,
+    _MAX_WEAPONS_PER_CHARACTER,
+    _MAX_WEAPONS_PER_ITEM,
     GCSParseError,
     _as_float,
     _as_int,
@@ -226,14 +228,74 @@ class TestItemCapBoundary:
         with pytest.raises(GCSParseError, match="too many skills"):
             parse_gcs(data)
 
-    def test_equipment_cap_is_per_recursion_level_not_global(self):
-        # _flatten_equipment builds a fresh `result` per call: children are
-        # capped per level, so the grand total can exceed the per-level cap —
-        # unlike the shared-accumulator categories above
+    def test_equipment_flattens_parent_before_children(self):
         top = [{"description": f"E{i}", "calc": {}} for i in range(3)]
         top[0]["children"] = [{"description": f"C{j}", "calc": {}} for j in range(4)]
         char = parse_gcs(_char(equipment=top))
-        assert len(char.equipment) == 3 + 4  # parent appears before its children
+        assert [e["description"] for e in char.equipment] == [
+            "E0", "C0", "C1", "C2", "C3", "E1", "E2",
+        ]
+
+    def test_equipment_cap_counts_across_containers(self):
+        """It used to be per recursion level, so every container held its own
+        4000 and nesting multiplied the cap."""
+        half = _MAX_ITEMS_PER_CATEGORY // 2
+        data = _char(equipment=[
+            {"description": "bag", "calc": {},
+             "children": [{"description": f"a{i}", "calc": {}} for i in range(half)]},
+            {"description": "box", "calc": {},
+             "children": [{"description": f"b{i}", "calc": {}} for i in range(half)]},
+        ])
+        with pytest.raises(GCSParseError, match="too many equipment"):
+            parse_gcs(data)
+
+    def test_equipment_cap_counts_carried_and_other_together(self):
+        half = _MAX_ITEMS_PER_CATEGORY // 2 + 1
+        data = _char(
+            equipment=[{"description": f"a{i}", "calc": {}} for i in range(half)],
+            other_equipment=[{"description": f"b{i}", "calc": {}} for i in range(half)],
+        )
+        with pytest.raises(GCSParseError, match="too many equipment"):
+            parse_gcs(data)
+
+
+class TestWeaponCaps:
+    """Weapon modes are not items, so the item cap never saw them. One sheet
+    under the 5MB import limit parsed for 8s, held 1.3GB and would have stored
+    a 316MB JSON blob."""
+
+    def test_an_item_at_the_per_item_cap_is_accepted(self):
+        item = {"description": "gun", "calc": {}, "weapons": [{}] * _MAX_WEAPONS_PER_ITEM}
+        char = parse_gcs(_char(equipment=[item]))
+        assert len(char.equipment[0]["weapons"]) == _MAX_WEAPONS_PER_ITEM
+
+    @pytest.mark.parametrize("category", ["equipment", "traits"])
+    def test_one_over_the_per_item_cap_is_refused(self, category):
+        item = {"name": "x", "description": "x", "calc": {},
+                "weapons": [{}] * (_MAX_WEAPONS_PER_ITEM + 1)}
+        with pytest.raises(GCSParseError, match="too many weapons"):
+            parse_gcs(_char(**{category: [item]}))
+
+    def test_the_character_budget_spans_traits_and_equipment(self):
+        per = _MAX_WEAPONS_PER_ITEM
+        n_items = _MAX_WEAPONS_PER_CHARACTER // per // 2 + 1
+        equipment = [{"description": f"e{i}", "calc": {}, "weapons": [{}] * per}
+                     for i in range(n_items)]
+        traits = [{"name": f"t{i}", "calc": {}, "weapons": [{}] * per}
+                  for i in range(n_items)]
+        with pytest.raises(GCSParseError, match="character has too many weapons"):
+            parse_gcs(_char(equipment=equipment, traits=traits))
+
+    def test_the_reported_payload_is_refused_quickly(self):
+        """The audit's shape: one item, a vast weapon list. The check runs on
+        the raw length, before anything is built from it."""
+        import time
+
+        item = {"description": "x", "calc": {}, "weapons": [{}] * 1_700_000}
+        start = time.perf_counter()
+        with pytest.raises(GCSParseError):
+            parse_gcs(_char(equipment=[item]))
+        assert time.perf_counter() - start < 0.5
 
 
 class TestMixedJunkAtDepth:
