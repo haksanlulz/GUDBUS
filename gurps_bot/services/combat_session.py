@@ -9,6 +9,7 @@ import discord
 
 from gurps_bot.config import DEFER_INTERACTIONS
 from gurps_bot.services.combat import current_combatant, get_combat
+from gurps_bot.ui.respond import defer as defer_interaction
 from gurps_bot.ui.respond import respond
 from gurps_bot.utils.fuzzy import fuzzy_match
 from gurps_bot.utils.scope import channel_scope
@@ -96,7 +97,11 @@ class CombatContext:
     """Session + combat acquisition for subcommands; check ctx.ok, combat errors go out ephemeral."""
 
     def __init__(
-        self, interaction: discord.Interaction[GURPSBot], *, defer: bool | None = None,
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        *,
+        defer: bool | None = None,
+        ephemeral: bool = False,
     ) -> None:
         self.interaction = interaction
         self._combat: Combat | None = None
@@ -107,6 +112,8 @@ class CombatContext:
         # is what the tests do so they assert behaviour rather than the current
         # default, and so they survived the default flipping.
         self._defer = DEFER_INTERACTIONS if defer is None else defer
+        # the defer fixes the reply's visibility; a hidden roll must defer hidden
+        self._ephemeral = ephemeral
 
     # bound by __aenter__; nothing reads it before the block is entered
     session: AsyncSession
@@ -138,8 +145,8 @@ class CombatContext:
         # ceiling to 15 minutes. Mirrors CharacterContext, which already did
         # this. ON by default — see config.DEFER_INTERACTIONS for the
         # measurements and for when a deployment should turn it off.
-        if self._defer and not self.interaction.response.is_done():
-            await self.interaction.response.defer()
+        if self._defer:
+            await defer_interaction(self.interaction, ephemeral=self._ephemeral)
 
         self._session_ctx = self.interaction.client.db()
         self.session = await self._session_ctx.__aenter__()
@@ -191,10 +198,7 @@ class CombatContext:
         return suppress
 
     async def _send_error(self, msg: str) -> None:
-        if self.interaction.response.is_done():
-            await self.interaction.followup.send(msg, ephemeral=True)
-        else:
-            await self.interaction.response.send_message(msg, ephemeral=True)
+        await respond(self.interaction, msg, ephemeral=True)
 
     async def refresh_tracker(self) -> bool:
         """Re-fetch combat + redraw the tracker; call after commit()."""

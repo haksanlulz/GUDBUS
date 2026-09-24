@@ -634,7 +634,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         fencing_or_master: bool = False,
         weapon: str | None = None,
     ) -> None:
-        async with CombatContext(interaction) as ctx:
+        async with CombatContext(interaction, ephemeral=hidden) as ctx:
             if not ctx.ok:
                 return
 
