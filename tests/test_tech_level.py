@@ -1,9 +1,6 @@
 """B168 — the two tech-level rules, and the fact that they are two.
 
-⚠️ Sealed probe 3 was NOT consulted while writing this or the repair layer it
-serves. It is one of the two clean held-out probes and probe 1 is already
-spent, so its value is entirely in staying unread until the code it checks is
-frozen. Everything here came off the Basic Set: Characters 10th printing, the
+Everything here came off the Basic Set: Characters 10th printing, the
 "IQ-Based Technological Skills" and "Other Technological Skills" paragraphs and
 the table printed between them.
 """

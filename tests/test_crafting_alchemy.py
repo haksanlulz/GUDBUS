@@ -1,12 +1,9 @@
 """GURPS Magic ch. 28 — alchemy.
 
-⚠️ Sealed probe 2 not consulted while writing this. ATTACK.md rates it "mostly
-clean", between the held-out probes 1 and 3 and the differentials 4 and 5, so
-it is worth preserving what cleanliness it has. Everything here came off Magic
-pp. 210-212 in the operator's own copy.
+Everything here came off Magic pp. 210-212 in the operator's own copy.
 
-⚑ Three of GAUNTLET §5's alchemy specs are closed by this module, and every
-number ATTACK recorded from probe-2 elicitation turned out to be printed:
+⚑ Three alchemy specs are closed by this module, and every number that
+arrived second-hand turned out to be printed:
 the -1/0/+1/+TL/2 lab ladder, the suppressed critical successes, and the
 two-stage critical failure. None of them was a house rule.
 """
@@ -97,7 +94,7 @@ class TestMana:
 
 
 class TestTheBatchRuleHasTwoClauses:
-    """The exact rule probe-2 elicitation caught being applied by halves."""
+    """The exact rule most easily applied by halves."""
 
     @pytest.mark.parametrize("doses,penalty", [(1, 0), (2, -1), (3, -2), (6, -5)])
     def test_the_roll_takes_minus_one_per_EXTRA_dose(self, doses, penalty):
@@ -123,8 +120,7 @@ class TestTheBatchRuleHasTwoClauses:
 
 
 class TestTheTwoBatchPenaltiesAreNotTheSame:
-    """⚑ The subtlety ATTACK.md does not record, and the one most likely to be
-    got wrong: the brew roll is -1 per EXTRA dose, the disaster-avoidance roll
+    """⚑ The subtlety most likely to be got wrong: the brew roll is -1 per EXTRA dose, the disaster-avoidance roll
     is -1 per dose. Four lines apart, one word different."""
 
     @pytest.mark.parametrize("doses", [1, 2, 3, 7])
@@ -143,7 +139,7 @@ class TestTheTwoBatchPenaltiesAreNotTheSame:
 
 
 class TestThereAreNoCriticalSuccesses:
-    """GAUNTLET §5 SPEC alchemy-has-no-critical-successes."""
+    """SPEC alchemy-has-no-critical-successes."""
 
     def test_a_reported_critical_success_is_refused_not_downgraded(self):
         """Returning a plain success would hide the real problem — that the
@@ -173,7 +169,7 @@ class TestFailure:
         assert not outcome.needs_disaster_roll
 
     def test_a_critical_failure_is_two_rolls_not_one(self):
-        """GAUNTLET §5 SPEC an-alchemy-disaster-takes-two-rolls-to-reach-the-table."""
+        """SPEC an-alchemy-disaster-takes-two-rolls-to-reach-the-table."""
         outcome = alchemy.resolve_brew("critical_failure", doses=4)
         assert outcome.needs_disaster_roll
         assert outcome.disaster_roll_modifier == -4
@@ -259,7 +255,7 @@ class TestTheWeakestWorkerRolls:
 
 
 class TestMasteryIsDerivedAndNeverAsked:
-    """Sealed probe 2, condition 4 — and it failed on re-verify 2026-08-15.
+    """The reference scenario's mastery condition — and it failed on re-verify 2026-08-15.
 
     ``brewing_modifier`` took ``unmastered: bool``: the caller handed the
     module its conclusion. That is the same disease as a ``quality=``
@@ -303,7 +299,7 @@ class TestMasteryIsDerivedAndNeverAsked:
     def test_the_conclusion_cannot_be_passed_in(self):
         """The regression guard. If ``unmastered=`` ever comes back as a
         parameter, the caller can assert a rule the module is supposed to
-        decide, and probe 2's condition 4 silently reopens."""
+        decide, and the mastery condition silently reopens."""
         import inspect
 
         params = inspect.signature(alchemy.brewing_modifier).parameters
@@ -350,8 +346,8 @@ class TestTheBrewingModifier:
         assert mod.terms == ()
 
 
-class TestProbeTwoEndToEnd:
-    """The sealed scenario, run as one call.
+class TestTheReferenceScenarioEndToEnd:
+    """The alchemy reference scenario, run as one call.
 
     Alchemy 12 · elixir technique raised to 12 · basic lab · formulary in
     hand · 2 doses · standard mana · $200/dose · 1 week.

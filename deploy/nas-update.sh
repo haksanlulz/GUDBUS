@@ -45,8 +45,8 @@ PROJECT_DIR=${GUDBUS_PROJECT_DIR:-/boot/config/plugins/compose.manager/projects/
 # Manager named it, and it went stale when production moved to the template on
 # 07-28 — so --preflight would have failed with "container not found" on its
 # first real use. Docker names are case-sensitive; the mismatch is invisible
-# until something looks. GAUNTLET §2 lists five different spellings across this
-# one deployment, and this is the fourth time one of them was guessed wrong.
+# until something looks. This one deployment has used five different spellings
+# of the name, and this is the fourth time one of them was guessed wrong.
 CONTAINER=${GUDBUS_CONTAINER:-GUDBUS}
 REPO=${GUDBUS_REPO:-haksanlulz/GUDBUS}
 COMPOSE="$PROJECT_DIR/docker-compose.yml"

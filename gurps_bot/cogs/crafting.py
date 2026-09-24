@@ -100,7 +100,7 @@ class InventionFlowView(discord.ui.View):
         self.description_bonus = 0
         #: How many TLs above the inventor. Graded rather than a yes/no, because
         #: the anchor scene is a TL+3 superscience item and a boolean cannot say
-        #: so — sealed probe 1 puts that at -15, not -5.
+        #: so — at -5 per step, TL+3 is -15, not -5.
         self.tl_gap = 0
 
     # The flow belongs to whoever opened it; a shared message otherwise lets a

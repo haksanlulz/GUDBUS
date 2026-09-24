@@ -1,8 +1,6 @@
 """GURPS Magic pp. 16-18 — enchantment.
 
-Sealed probe 4 was NOT consulted; everything came off the book. As with probe
-5 that is worth less than it was for probe 3 — probe 4 is a DIFFERENTIAL, its
-rules located alongside the operator — so the book is the authority here.
+Everything came off the book, and the book is the authority here.
 
 ⚑ The book's two worked examples are the regression class, and between them
 they exercise the assistant penalty, the bystander penalty, the min() over two
