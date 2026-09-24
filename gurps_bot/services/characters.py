@@ -28,6 +28,7 @@ from gurps_bot.db.models import (
 )
 from gurps_bot.gcs.parser import ParsedCharacter
 from gurps_bot.services.limits import MAX_CHARACTERS_PER_USER, enforce_row_cap
+from gurps_bot.services.wealth import fold_character_wallet
 from gurps_bot.utils._cache_instances import skill_cache
 
 
@@ -319,6 +320,7 @@ async def delete_character(session: AsyncSession, char_id: int) -> bool:
     if char:
         log.info("Deleting character '%s' (id=%d)", char.name, char_id)
         skill_cache.invalidate_user(char.discord_user_id)
+        await fold_character_wallet(session, char.discord_user_id, char_id)
         await session.delete(char)
         return True
     return False
