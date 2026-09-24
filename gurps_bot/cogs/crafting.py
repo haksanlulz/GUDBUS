@@ -205,7 +205,7 @@ class InventionFlowView(discord.ui.View):
         embed.set_footer(text="B473")
         return embed
 
-    async def _refresh(self, interaction: discord.Interaction) -> None:
+    async def _redraw(self, interaction: discord.Interaction) -> None:
         if self.complexity is None:
             await interaction.response.defer()
             return
@@ -226,7 +226,7 @@ class InventionFlowView(discord.ui.View):
         self, interaction: discord.Interaction, select: discord.ui.Select
     ) -> None:
         self.complexity = _COMPLEXITY_BY_VALUE[select.values[0]]
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.select(
         placeholder="Which rules? (Gadgeteer advantage required for the last two)",
@@ -253,7 +253,7 @@ class InventionFlowView(discord.ui.View):
         self, interaction: discord.Interaction, select: discord.ui.Select
     ) -> None:
         self.method = Method[select.values[0]]
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.select(
         placeholder="Anything else true of it? (optional)",
@@ -268,7 +268,7 @@ class InventionFlowView(discord.ui.View):
         self, interaction: discord.Interaction, select: discord.ui.Select
     ) -> None:
         self.situations = set(select.values)
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.button(label="GM adjustments…", style=discord.ButtonStyle.secondary)
     async def adjust_btn(
@@ -394,7 +394,7 @@ class GmAdjustmentsModal(discord.ui.Modal, title="GM adjustments"):
         flow.tl_gap = gap
         flow.variant_bonus = variant
         flow.description_bonus = description
-        await flow._refresh(interaction)
+        await flow._redraw(interaction)
 
 
 class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):

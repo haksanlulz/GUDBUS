@@ -1027,3 +1027,18 @@ class TestEnchantMethodsDisagreeOnAssistants:
         assert self._field(crowded, "⚠️ Too many hands") is not None
         slow = await self._run(method="SLOW_AND_SURE", assistants=5)
         assert self._field(slow, "⚠️ Too many hands") is None
+
+
+class TestTheFlowLeavesDiscordsHooksAlone:
+    """``View._refresh(components)`` is discord.py's, not ours.
+
+    The gateway calls it on every MESSAGE_UPDATE for a message whose view it
+    tracks. The flow once defined its own ``async def _refresh(interaction)``,
+    so each edit of the flow's message handed the component list to our
+    redraw, got back a coroutine nobody awaited, and skipped discord.py's own
+    component sync.
+    """
+
+    def test_discords_refresh_hook_is_not_overridden(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        assert view._refresh([]) is None
