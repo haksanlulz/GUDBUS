@@ -92,6 +92,46 @@ class TestPublishGate:
                 )
 
 
+
+class TestTypecheckGate:
+    """pyright was a dev dependency nothing ran, and 208 errors accumulated.
+
+    Two of them were live defects (a view method shadowing discord.py's own
+    ``View._refresh``, and a tracker redraw that AttributeError'd on a channel
+    without messages). The job lives in tests.yml, so the publish gate above
+    covers it without a second ``needs:``.
+    """
+
+    @staticmethod
+    def _pyright_steps(tests_wf):
+        return [
+            (job_name, step)
+            for job_name, job in tests_wf["jobs"].items()
+            for step in job.get("steps", [])
+            if "pyright" in str(step.get("run", ""))
+        ]
+
+    def test_the_tests_workflow_runs_pyright(self, tests_wf):
+        assert self._pyright_steps(tests_wf), (
+            "no job in tests.yml runs pyright — the typecheck is unenforced again"
+        )
+
+    def test_pyright_takes_its_scope_from_pyproject(self, tests_wf):
+        # Paths on the command line would override [tool.pyright] and let the
+        # CI scope and the local `uv run pyright` scope drift apart.
+        for job_name, step in self._pyright_steps(tests_wf):
+            assert step["run"].split() == ["uv", "run", "pyright"], (
+                f"{job_name}: {step['run']!r} — pass scope in pyproject, not here"
+            )
+
+    def test_the_shipped_package_is_in_scope(self):
+        try:
+            import tomllib
+        except ImportError:  # 3.10: pytest itself depends on tomli there
+            import tomli as tomllib
+        pyproject = WORKFLOWS.parent.parent / "pyproject.toml"
+        config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        assert "gurps_bot" in config["tool"]["pyright"]["include"]
 class TestChannels:
     """`:latest` is the release pointer. Trunk must not be able to move it."""
 

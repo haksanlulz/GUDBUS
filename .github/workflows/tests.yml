@@ -50,3 +50,24 @@ jobs:
 
       - name: Run tests
         run: uv run python -m pytest -q
+
+  # A separate job rather than a matrix step: the typecheck answers one question
+  # regardless of interpreter (the floor is pinned in pyproject), and a type
+  # error should read as its own red check, not as a failed test leg. Being in
+  # this workflow is what puts it behind the publish gate too.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv + Python
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run pyright
+        run: uv run pyright
