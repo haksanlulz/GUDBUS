@@ -27,7 +27,7 @@ log = logging.getLogger(__name__)
 
 
 async def _macro_name_autocomplete(
-    interaction: discord.Interaction, current: str,
+    interaction: discord.Interaction[GURPSBot], current: str,
 ) -> list[app_commands.Choice[str]]:
     """Suggest the caller's own saved macro names.
 
@@ -71,7 +71,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def save(
-        self, interaction: discord.Interaction, name: str, expression: str,
+        self, interaction: discord.Interaction[GURPSBot], name: str, expression: str,
     ) -> None:
         async with interaction.client.db() as session:
             try:
@@ -103,7 +103,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
     @app_commands.describe(name="Macro name")
     @app_commands.autocomplete(name=_macro_name_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)
-    async def roll_macro(self, interaction: discord.Interaction, name: str) -> None:
+    async def roll_macro(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         # Normalize up front: get_macro raises InvalidMacroName for a name that
         # sanitizes to nothing, and an unhandled raise here reaches the user as
         # the generic "something went wrong" instead of a fixable message.
@@ -144,7 +144,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
 
     @app_commands.command(name="list", description="List your saved macros")
     @app_commands.checks.cooldown(2, 5.0)
-    async def list_cmd(self, interaction: discord.Interaction) -> None:
+    async def list_cmd(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with interaction.client.db() as session:
             macros = await list_macros(session, interaction.user.id)
         if not macros:
@@ -159,7 +159,7 @@ class MacroCog(commands.GroupCog, group_name="macro"):
     @app_commands.describe(name="Macro name")
     @app_commands.autocomplete(name=_macro_name_autocomplete)
     @app_commands.checks.cooldown(2, 5.0)
-    async def delete_cmd(self, interaction: discord.Interaction, name: str) -> None:
+    async def delete_cmd(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         # Same guard as /macro roll — delete_macro reaches get_macro, which
         # raises InvalidMacroName on a name that sanitizes to nothing.
         try:

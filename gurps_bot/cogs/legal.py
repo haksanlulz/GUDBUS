@@ -128,7 +128,7 @@ class LegalCog(commands.Cog):
         description="Legal notice, credits, trademark, and privacy information",
     )
     @app_commands.checks.cooldown(2, 5.0)
-    async def legal(self, interaction: discord.Interaction) -> None:
+    async def legal(self, interaction: discord.Interaction[GURPSBot]) -> None:
         await interaction.response.send_message(
             embed=_legal_embed_from_env(), ephemeral=True
         )
@@ -138,11 +138,11 @@ class LegalCog(commands.Cog):
         description="About this bot — credits, trademark, and privacy",
     )
     @app_commands.checks.cooldown(2, 5.0)
-    async def about(self, interaction: discord.Interaction) -> None:
+    async def about(self, interaction: discord.Interaction[GURPSBot]) -> None:
         await interaction.response.send_message(
             embed=_legal_embed_from_env(), ephemeral=True
         )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(LegalCog(bot))

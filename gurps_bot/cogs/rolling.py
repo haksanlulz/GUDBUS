@@ -67,7 +67,7 @@ INJURY_TOLERANCE_CHOICES = [
 ]
 
 async def _skill_attr_autocomplete(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction[GURPSBot],
     current: str,
 ) -> list[app_commands.Choice[str]]:
     if not interaction.guild_id:
@@ -107,7 +107,7 @@ async def _skill_attr_autocomplete(
 
 
 async def _resolve_target(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction[GURPSBot],
     target_str: str,
     *,
     use_followup: bool = False,
@@ -170,7 +170,7 @@ class RollingCog(commands.Cog):
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def roll_dice(
-        self, interaction: discord.Interaction, dice: str, hidden: bool = False,
+        self, interaction: discord.Interaction[GURPSBot], dice: str, hidden: bool = False,
     ) -> None:
         try:
             spec = parse_dice(dice)
@@ -192,7 +192,7 @@ class RollingCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def check_roll(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str,
         modifier: int = 0,
         hidden: bool = False,
@@ -219,7 +219,7 @@ class RollingCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def contest_roll(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target_a: str,
         target_b: str,
         label_a: str = "Side A",
@@ -254,7 +254,7 @@ class RollingCog(commands.Cog):
     )
     async def fright_check(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         modifier: int = 0,
         hidden: bool = False,
     ) -> None:
@@ -344,7 +344,7 @@ class RollingCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def damage_roll(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         dice: str,
         damage_type: str = "cr",
         dr: app_commands.Range[int, 0, 100000] = 0,
@@ -366,5 +366,5 @@ class RollingCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=hidden)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(RollingCog(bot))

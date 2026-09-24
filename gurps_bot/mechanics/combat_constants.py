@@ -26,7 +26,7 @@ class StatusEffect(str, Enum):
     DISARMED = "Disarmed"
 
 
-STATUS_ICONS: dict[StatusEffect, str] = {
+STATUS_ICONS: dict[str, str] = {
     StatusEffect.STUNNED: "\u26a1",
     StatusEffect.PRONE: "\u2b07\ufe0f",
     StatusEffect.KNEELING: "\U0001f9ce",

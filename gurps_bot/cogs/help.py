@@ -15,11 +15,16 @@ so a new command cannot quietly go undocumented.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from gurps_bot.ui.respond import respond
+
+if TYPE_CHECKING:
+    from gurps_bot.bot import GURPSBot
 
 #: Ordered because the embed renders in this order and a newcomer reads it top
 #: down. Each entry: topic key -> (title, one-line framing, command names).
@@ -125,7 +130,8 @@ def _tree_descriptions(tree: app_commands.CommandTree) -> dict[str, str]:
         if isinstance(cmd, app_commands.Group):
             for sub in cmd.commands:
                 found[f"{cmd.name} {sub.name}"] = sub.description
-        else:
+        elif isinstance(cmd, app_commands.Command):
+            # a context menu has no description, so it has nothing to list here
             found[cmd.name] = cmd.description
     return found
 
@@ -144,7 +150,7 @@ class HelpCog(commands.Cog):
     ])
     async def help_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         topic: app_commands.Choice[str] | None = None,
     ) -> None:
         descriptions = _tree_descriptions(self.bot.tree)
@@ -210,5 +216,5 @@ class HelpCog(commands.Cog):
         await respond(interaction, embed=embed, ephemeral=True)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(HelpCog(bot))

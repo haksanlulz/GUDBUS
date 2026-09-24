@@ -117,7 +117,8 @@ class InventionFlowView(discord.ui.View):
 
     async def on_timeout(self) -> None:
         for item in self.children:
-            item.disabled = True
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
+                item.disabled = True
 
     def modifier(self) -> crafting.ModifierBreakdown:
         complexity = self.complexity or Complexity.AVERAGE
@@ -160,7 +161,7 @@ class InventionFlowView(discord.ui.View):
         target = self.target()
 
         embed = discord.Embed(
-            title=f"{Stage.CONCEPT.name} roll — {self.complexity.label} invention",
+            title=f"{Stage.CONCEPT.name} roll — {(self.complexity or Complexity.AVERAGE).label} invention",
             description=f"Using **{self.method.value}** rules",
             colour=_INVENTION,
         )
@@ -205,7 +206,7 @@ class InventionFlowView(discord.ui.View):
         embed.set_footer(text="B473")
         return embed
 
-    async def _refresh(self, interaction: discord.Interaction) -> None:
+    async def _redraw(self, interaction: discord.Interaction) -> None:
         if self.complexity is None:
             await interaction.response.defer()
             return
@@ -223,10 +224,10 @@ class InventionFlowView(discord.ui.View):
         ],
     )
     async def complexity_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
     ) -> None:
         self.complexity = _COMPLEXITY_BY_VALUE[select.values[0]]
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.select(
         placeholder="Which rules? (Gadgeteer advantage required for the last two)",
@@ -250,10 +251,10 @@ class InventionFlowView(discord.ui.View):
         ],
     )
     async def method_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
     ) -> None:
         self.method = Method[select.values[0]]
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.select(
         placeholder="Anything else true of it? (optional)",
@@ -265,20 +266,20 @@ class InventionFlowView(discord.ui.View):
         ],
     )
     async def situation_select(
-        self, interaction: discord.Interaction, select: discord.ui.Select
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
     ) -> None:
         self.situations = set(select.values)
-        await self._refresh(interaction)
+        await self._redraw(interaction)
 
     @discord.ui.button(label="GM adjustments…", style=discord.ButtonStyle.secondary)
     async def adjust_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
     ) -> None:
         await interaction.response.send_modal(GmAdjustmentsModal(self))
 
     @discord.ui.button(label="Roll it (secret)", style=discord.ButtonStyle.primary)
     async def roll_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
     ) -> None:
         if self.complexity is None:
             await interaction.response.send_message(
@@ -321,7 +322,7 @@ class InventionFlowView(discord.ui.View):
 
     @discord.ui.button(label="Save as project", style=discord.ButtonStyle.secondary)
     async def save_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
     ) -> None:
         if self.complexity is None:
             await interaction.response.send_message(
@@ -394,7 +395,7 @@ class GmAdjustmentsModal(discord.ui.Modal, title="GM adjustments"):
         flow.tl_gap = gap
         flow.variant_bonus = variant
         flow.description_bonus = description
-        await flow._refresh(interaction)
+        await flow._redraw(interaction)
 
 
 class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
@@ -420,7 +421,7 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
         super().__init__()
         self.view = view
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def on_submit(self, interaction: discord.Interaction[GURPSBot]) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # discord.py types this over any client; this bot has one
         from gurps_bot.services.crafting import start_project
         from gurps_bot.services.limits import StorageLimitExceeded
         from gurps_bot.utils.sanitize import sanitize_name
@@ -446,6 +447,12 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
             return
 
         view = self.view
+        complexity = view.complexity
+        if complexity is None:
+            # save_btn gates the modal on it, but the flow is the modal's to read,
+            # not to trust — the same answer the button gives
+            await respond(interaction, "Pick how hard it is first.", ephemeral=True)
+            return
         try:
             async with interaction.client.db() as session:
                 project = await start_project(
@@ -453,7 +460,7 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
                     discord_user_id=interaction.user.id,
                     guild_id=interaction.guild_id,
                     name=name,
-                    complexity=view.complexity.name.lower(),
+                    complexity=complexity.name.lower(),
                     skill=view.skill,
                     retail_price=price,
                     modifiers=view.stored_modifiers(),
@@ -487,7 +494,7 @@ class CraftingCog(commands.Cog):
     @app_commands.describe(
         skill="Your invention skill — the Engineer, Alchemy, Bioengineering etc. the GM named",
     )
-    async def invent(self, interaction: discord.Interaction, skill: int) -> None:
+    async def invent(self, interaction: discord.Interaction[GURPSBot], skill: int) -> None:
         if not 1 <= skill <= 40:
             await respond(
                 interaction,
@@ -524,7 +531,7 @@ class CraftingCog(commands.Cog):
     )
     async def costs(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         # Annotated `str`, not `Choice[str]`: Discord sends the choice VALUE, and
         # taking it directly is what `test_cold_guild` exercises. help.py's
         # `Choice[str]` form works too, but only because its parameter is
@@ -622,7 +629,7 @@ class CraftingCog(commands.Cog):
     )
     async def repair(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         price: int,
         current_hp: int,
         max_hp: int,
@@ -781,7 +788,7 @@ class CraftingCog(commands.Cog):
     )
     async def enchant(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         enchant_skill: int,
         spell_skill: int,
         energy: int,
@@ -922,7 +929,7 @@ class CraftingCog(commands.Cog):
     )
     async def make(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         list_price: float,
         weight: float,
         cost_per_lb: float,
@@ -1056,7 +1063,7 @@ class CraftingCog(commands.Cog):
     )
     async def brew(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         alchemy_skill: int,
         cost_per_dose: int,
         doses: int = 1,
@@ -1178,7 +1185,7 @@ class CraftingCog(commands.Cog):
     @craft.command(name="projects", description="Your crafting projects in this server")
     @app_commands.describe(include_finished="Also show abandoned and completed ones")
     async def projects(
-        self, interaction: discord.Interaction, include_finished: bool = False
+        self, interaction: discord.Interaction[GURPSBot], include_finished: bool = False
     ) -> None:
         async with interaction.client.db() as session:
             found = await list_projects(
@@ -1211,7 +1218,7 @@ class CraftingCog(commands.Cog):
 
     @craft.command(name="project", description="One project: stage, time, and what it has cost")
     @app_commands.describe(id="The project id from /craft projects")
-    async def project(self, interaction: discord.Interaction, id: int) -> None:
+    async def project(self, interaction: discord.Interaction[GURPSBot], id: int) -> None:
         async with interaction.client.db() as session:
             found = await get_project(session, id, interaction.user.id)
             if found is None:
@@ -1264,7 +1271,7 @@ class CraftingCog(commands.Cog):
 
     @craft.command(name="abandon", description="End a project — the spending stays on record")
     @app_commands.describe(id="The project id from /craft projects")
-    async def abandon(self, interaction: discord.Interaction, id: int) -> None:
+    async def abandon(self, interaction: discord.Interaction[GURPSBot], id: int) -> None:
         async with interaction.client.db() as session:
             found = await get_project(session, id, interaction.user.id)
             if found is None:
@@ -1291,5 +1298,5 @@ class CraftingCog(commands.Cog):
         )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CraftingCog(bot))

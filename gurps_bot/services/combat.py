@@ -6,10 +6,11 @@ import logging
 import math
 import random
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import CursorResult, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -257,15 +258,10 @@ async def remove_combatant(
 ) -> bool:
     """Remove a combatant; removing the current actor passes the turn to the next in order."""
     ordered = ordered_combatants(combat)
-    target_idx = None
-    target = None
-    for i, c in enumerate(ordered):
-        if c.id == combatant_id:
-            target_idx = i
-            target = c
-            break
-    if target is None:
+    found = next(((i, c) for i, c in enumerate(ordered) if c.id == combatant_id), None)
+    if found is None:
         return False
+    target_idx, target = found
 
     removing_current = combat.current_combatant_id == combatant_id
 
@@ -608,17 +604,18 @@ async def cleanup_stale_combats(
         .where(Combatant.combat_id.in_(stale_ids))
         .execution_options(synchronize_session=False)
     )
-    result = await session.execute(
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(
         delete(Combat)
         .where(Combat.updated_at < cutoff)
         .execution_options(synchronize_session=False)
-    )
+    ))
     return result.rowcount
 
 
 async def count_combats(session: AsyncSession) -> int:
     """Total active combats across all guilds (/status diagnostics)."""
-    return await session.scalar(select(func.count(Combat.id)))
+    return await session.scalar(select(func.count(Combat.id))) or 0
 
 
 async def purge_guild_combats(session: AsyncSession, guild_id: int) -> None:

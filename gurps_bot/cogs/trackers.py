@@ -127,7 +127,7 @@ def _fmt_hours(hours: float) -> str:
 
 
 async def _active_character_id(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction[GURPSBot],
 ) -> tuple[int | None, str | None]:
     """Active character as (id, name); (None, None) in DMs or with none set. Opens its own session."""
     if not interaction.guild_id:
@@ -166,7 +166,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_log(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         method: str,
         hours: float,
@@ -238,7 +238,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_progress_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         character_scoped: bool = True,
     ) -> None:
@@ -286,7 +286,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str | None = None,
         character_scoped: bool = True,
     ) -> None:
@@ -334,7 +334,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_reset(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         character_scoped: bool = True,
     ) -> None:
@@ -386,7 +386,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_add(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         title: str,
         body: str = "",
         tags: str | None = None,
@@ -449,7 +449,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         tag: str | None = None,
         this_channel: bool = False,
         character_scoped: bool = False,
@@ -479,7 +479,7 @@ class NotesCog(commands.Cog):
     @app_commands.describe(query="Substring to search for")
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_search(
-        self, interaction: discord.Interaction, query: str
+        self, interaction: discord.Interaction[GURPSBot], query: str
     ) -> None:
         try:
             async with interaction.client.db() as session:
@@ -509,7 +509,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_edit(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         note_id: int,
         title: str | None = None,
         body: str | None = None,
@@ -557,7 +557,7 @@ class NotesCog(commands.Cog):
     @app_commands.describe(note_id="ID of the note to delete")
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_delete(
-        self, interaction: discord.Interaction, note_id: int
+        self, interaction: discord.Interaction[GURPSBot], note_id: int
     ) -> None:
         async with interaction.client.db() as session:
             deleted = await delete_note(
@@ -616,7 +616,7 @@ class TimersCog(commands.Cog):
     )
 
     def _require_channel(
-        self, interaction: discord.Interaction
+        self, interaction: discord.Interaction[GURPSBot]
     ) -> tuple[int, int] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
             return None
@@ -634,7 +634,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_add(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         label: str,
         duration: int,
         unit: str = "turns",
@@ -699,7 +699,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_tick(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         unit: str = "turns",
         amount: int = 1,
         target: str | None = None,
@@ -773,7 +773,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str | None = None,
         include_expired: bool = True,
     ) -> None:
@@ -826,7 +826,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_remove(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         timer_id: int | None = None,
         clear_all: bool = False,
         expired_only: bool = False,
@@ -893,7 +893,7 @@ class WealthCog(commands.Cog):
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_show(
-        self, interaction: discord.Interaction, character_scoped: bool = True
+        self, interaction: discord.Interaction[GURPSBot], character_scoped: bool = True
     ) -> None:
         char_id, char_name = (
             await _active_character_id(interaction)
@@ -936,7 +936,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_adjust(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         amount: float,
         reason: str | None = None,
         character_scoped: bool = True,
@@ -980,7 +980,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_set(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         balance: float,
         character_scoped: bool = True,
     ) -> None:
@@ -1014,7 +1014,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_status(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         status: int,
         character_scoped: bool = True,
     ) -> None:
@@ -1058,7 +1058,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_upkeep(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         living_status: int | None = None,
         character_scoped: bool = True,
     ) -> None:
@@ -1122,7 +1122,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_starting(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         tl: int,
         wealth_level: str,
     ) -> None:
@@ -1143,7 +1143,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(StudyCog(bot))
     await bot.add_cog(NotesCog(bot))
     await bot.add_cog(TimersCog(bot))

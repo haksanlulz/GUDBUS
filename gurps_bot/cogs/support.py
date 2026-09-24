@@ -110,7 +110,7 @@ class SupportCog(commands.Cog):
         description="Ways to support the bot (donation links + how to help)",
     )
     @app_commands.checks.cooldown(2, 10.0)
-    async def support(self, interaction: discord.Interaction) -> None:
+    async def support(self, interaction: discord.Interaction[GURPSBot]) -> None:
         await interaction.response.send_message(embed=_support_embed_from_env())
 
     @app_commands.command(
@@ -118,10 +118,10 @@ class SupportCog(commands.Cog):
         description="Donation links to support the bot's hosting",
     )
     @app_commands.checks.cooldown(2, 10.0)
-    async def donate(self, interaction: discord.Interaction) -> None:
+    async def donate(self, interaction: discord.Interaction[GURPSBot]) -> None:
         # same embed as /support, intentional
         await interaction.response.send_message(embed=_support_embed_from_env())
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(SupportCog(bot))

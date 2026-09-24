@@ -352,7 +352,7 @@ class ReferenceCog(commands.Cog):
 
     async def _lookup(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         command: str,
         name: str,
     ) -> None:
@@ -375,35 +375,35 @@ class ReferenceCog(commands.Cog):
     @app_commands.describe(name="Skill name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def skill(self, interaction: discord.Interaction, name: str) -> None:
+    async def skill(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "skill", name)
 
     @app_commands.command(name="trait", description="Look up a GURPS advantage or disadvantage")
     @app_commands.describe(name="Trait name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def trait(self, interaction: discord.Interaction, name: str) -> None:
+    async def trait(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "trait", name)
 
     @app_commands.command(name="spell", description="Look up a GURPS spell (facts + page cite)")
     @app_commands.describe(name="Spell name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def spell(self, interaction: discord.Interaction, name: str) -> None:
+    async def spell(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "spell", name)
 
     @app_commands.command(name="technique", description="Look up a GURPS technique (facts + page cite)")
     @app_commands.describe(name="Technique name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def technique(self, interaction: discord.Interaction, name: str) -> None:
+    async def technique(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "technique", name)
 
     @app_commands.command(name="item", description="Look up GURPS equipment (facts + page cite)")
     @app_commands.describe(name="Equipment name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def item(self, interaction: discord.Interaction, name: str) -> None:
+    async def item(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "item", name)
 
     # discord.py wants the (self, interaction, current) shape per command —
@@ -411,7 +411,7 @@ class ReferenceCog(commands.Cog):
 
     async def _suggest(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         command: str,
         current: str,
     ) -> list[app_commands.Choice[str]]:
@@ -440,25 +440,25 @@ class ReferenceCog(commands.Cog):
         ]
 
     @skill.autocomplete("name")
-    async def _skill_ac(self, interaction: discord.Interaction, current: str):
+    async def _skill_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "skill", current)
 
     @trait.autocomplete("name")
-    async def _trait_ac(self, interaction: discord.Interaction, current: str):
+    async def _trait_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "trait", current)
 
     @spell.autocomplete("name")
-    async def _spell_ac(self, interaction: discord.Interaction, current: str):
+    async def _spell_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "spell", current)
 
     @technique.autocomplete("name")
-    async def _technique_ac(self, interaction: discord.Interaction, current: str):
+    async def _technique_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "technique", current)
 
     @item.autocomplete("name")
-    async def _item_ac(self, interaction: discord.Interaction, current: str):
+    async def _item_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "item", current)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(ReferenceCog(bot))

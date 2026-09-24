@@ -11,10 +11,12 @@ from gurps_bot.config import DEFER_INTERACTIONS
 from gurps_bot.services.combat import current_combatant, get_combat
 from gurps_bot.ui.respond import respond
 from gurps_bot.utils.fuzzy import fuzzy_match
+from gurps_bot.utils.scope import channel_scope
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from gurps_bot.bot import GURPSBot
     from gurps_bot.db.models import Combat, Combatant
 
 log = logging.getLogger(__name__)
@@ -94,12 +96,11 @@ class CombatContext:
     """Session + combat acquisition for subcommands; check ctx.ok, combat errors go out ephemeral."""
 
     def __init__(
-        self, interaction: discord.Interaction, *, defer: bool | None = None,
+        self, interaction: discord.Interaction[GURPSBot], *, defer: bool | None = None,
     ) -> None:
         self.interaction = interaction
-        self.session: AsyncSession | None = None
-        self.combat: Combat | None = None
-        self.cs: CombatSession | None = None
+        self._combat: Combat | None = None
+        self._cs: CombatSession | None = None
         self._session_ctx = None
         # None means "whatever the deployment is configured for" — on by
         # default since 2026-07-29. Passing an explicit bool overrides it, which
@@ -107,10 +108,27 @@ class CombatContext:
         # default, and so they survived the default flipping.
         self._defer = DEFER_INTERACTIONS if defer is None else defer
 
+    # bound by __aenter__; nothing reads it before the block is entered
+    session: AsyncSession
+
     @property
     def ok(self) -> bool:
         """True if an active combat was found."""
-        return self.combat is not None
+        return self._combat is not None
+
+    @property
+    def combat(self) -> Combat:
+        """The channel's combat. Only valid once `ok` has been checked."""
+        if self._combat is None:
+            raise RuntimeError("CombatContext.combat read without checking ctx.ok")
+        return self._combat
+
+    @property
+    def cs(self) -> CombatSession:
+        """Permission helpers over `combat`. Only valid once `ok` has been checked."""
+        if self._cs is None:
+            raise RuntimeError("CombatContext.cs read without checking ctx.ok")
+        return self._cs
 
     async def __aenter__(self) -> CombatContext:
         # Acknowledge before touching the database, when enabled. Discord
@@ -125,15 +143,13 @@ class CombatContext:
 
         self._session_ctx = self.interaction.client.db()
         self.session = await self._session_ctx.__aenter__()
-        self.combat = await get_combat(
-            self.session,
-            self.interaction.guild_id,
-            self.interaction.channel_id,
+        self._combat = await get_combat(
+            self.session, *channel_scope(self.interaction),
         )
-        if not self.combat:
+        if not self._combat:
             await self._send_error("No active combat.")
         else:
-            self.cs = CombatSession(self.combat, self.interaction.user.id)
+            self._cs = CombatSession(self._combat, self.interaction.user.id)
         return self
 
     async def commit(self) -> None:
@@ -184,14 +200,12 @@ class CombatContext:
         """Re-fetch combat + redraw the tracker; call after commit()."""
         from gurps_bot.ui.tracker import TrackerManager
 
-        self.combat = await get_combat(
-            self.session,
-            self.interaction.guild_id,
-            self.interaction.channel_id,
+        self._combat = await get_combat(
+            self.session, *channel_scope(self.interaction),
         )
         # a concurrent /combat end can land between commit and here — combat comes
         # back None, and dereferencing it would blow up after the reply went out
-        if self.combat is None:
+        if self._combat is None:
             return False
-        tracker = TrackerManager(self.interaction.channel, self.combat.message_id)
-        return await tracker.refresh(self.combat)
+        tracker = TrackerManager(self.interaction.channel, self._combat.message_id)
+        return await tracker.refresh(self._combat)

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Coroutine
+from typing import TYPE_CHECKING, Any
 
 import discord
 from discord import app_commands
@@ -10,15 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.utils.fuzzy import fuzzy_match
 
+if TYPE_CHECKING:
+    from gurps_bot.bot import GURPSBot
+
 
 def make_autocomplete(
-    fetch: Callable[[AsyncSession, discord.Interaction], Awaitable[list[str]]],
+    fetch: Callable[[AsyncSession, discord.Interaction[GURPSBot]], Awaitable[list[str]]],
     score_cutoff: int = 40,
-) -> Callable[[discord.Interaction, str], Awaitable[list[app_commands.Choice[str]]]]:
+) -> Callable[
+    [discord.Interaction[GURPSBot], str], Coroutine[Any, Any, list[app_commands.Choice[str]]]
+]:
     """Build an autocomplete callback from a (session, interaction) -> candidates fetch."""
 
     async def autocomplete(
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         current: str,
     ) -> list[app_commands.Choice[str]]:
         if not interaction.guild_id:

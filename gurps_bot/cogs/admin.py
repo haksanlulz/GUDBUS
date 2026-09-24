@@ -33,7 +33,7 @@ class AdminCog(commands.Cog):
     @app_commands.command(
         name="sync", description="Force a global slash-command re-register (bot owner only)"
     )
-    async def sync_commands(self, interaction: discord.Interaction) -> None:
+    async def sync_commands(self, interaction: discord.Interaction[GURPSBot]) -> None:
         if not await interaction.client.is_owner(interaction.user):
             await interaction.response.send_message(
                 "Only the bot owner can sync commands.", ephemeral=True
@@ -67,7 +67,7 @@ class AdminCog(commands.Cog):
         await ctx.reply(f"Synced {len(synced)} commands globally.")
 
     @app_commands.command(name="status", description="Bot status and diagnostics")
-    async def status(self, interaction: discord.Interaction) -> None:
+    async def status(self, interaction: discord.Interaction[GURPSBot]) -> None:
         import sys
         from datetime import datetime, timezone
 
@@ -129,5 +129,5 @@ class AdminCog(commands.Cog):
         log.info("Cleaned up guild-scoped data for guild %s (%s)", guild.name, guild.id)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(AdminCog(bot))

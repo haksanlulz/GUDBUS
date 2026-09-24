@@ -100,7 +100,10 @@ def script_head() -> str:
     from alembic.script import ScriptDirectory
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    return ScriptDirectory.from_config(cfg).get_current_head()
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    if head is None:
+        raise RuntimeError("alembic has no revisions — the migrations directory is empty")
+    return head
 
 
 async def _inspect_db(url: str) -> tuple[bool, str | None]:

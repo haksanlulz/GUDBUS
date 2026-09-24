@@ -66,7 +66,7 @@ class CalcCharacterCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def encumbrance(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         st: int,
         basic_move: int,
         basic_speed: float,
@@ -110,7 +110,7 @@ class CalcCharacterCog(commands.Cog):
     )
     @app_commands.describe(st="Strength (ST)")
     @app_commands.checks.cooldown(2, 5.0)
-    async def lifting(self, interaction: discord.Interaction, st: int) -> None:
+    async def lifting(self, interaction: discord.Interaction[GURPSBot], st: int) -> None:
         try:
             caps = lift.lifting_capacities(st)
         except (ValueError, TypeError) as e:
@@ -144,7 +144,7 @@ class CalcCharacterCog(commands.Cog):
     @reaction.command(name="roll", description="Roll 3d + modifier and read the reaction band")
     @app_commands.describe(modifier="Net reaction modifier (bonus + / penalty -)")
     @app_commands.checks.cooldown(2, 5.0)
-    async def reaction_roll(self, interaction: discord.Interaction, modifier: int = 0) -> None:
+    async def reaction_roll(self, interaction: discord.Interaction[GURPSBot], modifier: int = 0) -> None:
         result = react.roll_reaction(modifier)
         dice_str = " + ".join(str(d) for d in result.roll.dice)
         embed = discord.Embed(
@@ -169,7 +169,7 @@ class CalcCharacterCog(commands.Cog):
     @reaction.command(name="band", description="Look up the reaction band for an adjusted total")
     @app_commands.describe(total="Adjusted reaction total (3d + modifiers, already summed)")
     @app_commands.checks.cooldown(2, 5.0)
-    async def reaction_band(self, interaction: discord.Interaction, total: int) -> None:
+    async def reaction_band(self, interaction: discord.Interaction[GURPSBot], total: int) -> None:
         band = react.reaction_band(total)
         embed = discord.Embed(title=f"Reaction Band — Total {total}", color=GOLD)
         embed.add_field(name="Reaction", value=f"**{band.name}**", inline=True)
@@ -200,7 +200,7 @@ class CalcCharacterCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def ranged(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         distance: float,
         target_size: float,
         target_speed: float = 0.0,
@@ -227,7 +227,7 @@ class CalcCharacterCog(commands.Cog):
     )
     @app_commands.describe(yards="Distance in yards")
     @app_commands.checks.cooldown(2, 5.0)
-    async def range_mod(self, interaction: discord.Interaction, yards: float) -> None:
+    async def range_mod(self, interaction: discord.Interaction[GURPSBot], yards: float) -> None:
         try:
             mod = srng.range_modifier(yards)
         except ValueError as e:
@@ -245,7 +245,7 @@ class CalcCharacterCog(commands.Cog):
     )
     @app_commands.describe(longest_dimension="Longest dimension in yards")
     @app_commands.checks.cooldown(2, 5.0)
-    async def size_mod(self, interaction: discord.Interaction, longest_dimension: float) -> None:
+    async def size_mod(self, interaction: discord.Interaction[GURPSBot], longest_dimension: float) -> None:
         try:
             sm = srng.size_modifier(longest_dimension)
         except ValueError as e:
@@ -261,5 +261,5 @@ class CalcCharacterCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CalcCharacterCog(bot))

@@ -44,6 +44,14 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["gurps_bot*"]
 
+# Scope and floor live here, not in the CI step, so `uv run pyright` locally and
+# in CI answer the same question. The shipped package only: tools/ are
+# operator scripts and tests/ lean on mocks by design. The floor is the oldest
+# Python CI runs, so an annotation 3.10 cannot evaluate is caught here too.
+[tool.pyright]
+include = ["gurps_bot"]
+pythonVersion = "3.10"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
