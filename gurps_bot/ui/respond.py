@@ -27,7 +27,7 @@ async def respond(
     view: discord.ui.View | None = None,
     ephemeral: bool = False,
     **kwargs,
-) -> discord.Message | None:
+) -> None:
     """Send the interaction's reply, routing on whether it is already answered.
 
     Deliberately does NOT fetch the sent message. The two callers that need one
@@ -48,6 +48,6 @@ async def respond(
         payload["view"] = view
 
     if interaction.response.is_done():
-        return await interaction.followup.send(ephemeral=ephemeral, **payload)
-
-    return await interaction.response.send_message(ephemeral=ephemeral, **payload)
+        await interaction.followup.send(ephemeral=ephemeral, **payload)
+    else:
+        await interaction.response.send_message(ephemeral=ephemeral, **payload)

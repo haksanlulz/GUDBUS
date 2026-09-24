@@ -107,7 +107,7 @@ class BodyRefCog(commands.Cog):
     @app_commands.describe(name="Which posture")
     @app_commands.choices(name=_POSTURE_CHOICES)
     @app_commands.checks.cooldown(2, 5.0)
-    async def posture(self, interaction: discord.Interaction, name: str) -> None:
+    async def posture(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await interaction.response.send_message(
             embed=build_posture_embed(name), ephemeral=True
         )
@@ -119,11 +119,11 @@ class BodyRefCog(commands.Cog):
     @app_commands.describe(location="Which deliberate hit location")
     @app_commands.choices(location=_TARGET_CHOICES)
     @app_commands.checks.cooldown(2, 5.0)
-    async def target(self, interaction: discord.Interaction, location: str) -> None:
+    async def target(self, interaction: discord.Interaction[GURPSBot], location: str) -> None:
         await interaction.response.send_message(
             embed=build_target_embed(location), ephemeral=True
         )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(BodyRefCog(bot))

@@ -7,12 +7,16 @@ this group behaves exactly as it did before the group existed.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from gurps_bot.services.campaign import get_campaign_rules, set_rule_of_14
+
+if TYPE_CHECKING:
+    from gurps_bot.bot import GURPSBot
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ class CampaignGroup(app_commands.Group):
         self.bot = bot
 
     @app_commands.command(name="show", description="Show this server's house rules")
-    async def show(self, interaction: discord.Interaction) -> None:
+    async def show(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with interaction.client.db() as session:
             rules = await get_campaign_rules(session, interaction.guild_id)
         await interaction.response.send_message(
@@ -62,7 +66,7 @@ class CampaignGroup(app_commands.Group):
     @app_commands.default_permissions(manage_guild=True)
     @app_commands.guild_only()
     async def rule_of_14(
-        self, interaction: discord.Interaction, enabled: bool
+        self, interaction: discord.Interaction[GURPSBot], enabled: bool
     ) -> None:
         if interaction.guild_id is None:
             await interaction.response.send_message(
@@ -84,5 +88,5 @@ class CampaignCog(commands.Cog):
         bot.tree.add_command(self.group)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CampaignCog(bot))

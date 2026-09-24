@@ -114,7 +114,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def jump(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         basic_move: float,
         jumping_skill: int | None = None,
         st: int | None = None,
@@ -141,17 +141,19 @@ class CalcMovementCog(commands.Cog):
             return
 
         use_st = st is not None
-        kwargs = dict(
-            running_start=running_start,
-            yards_run=yards_run,
-            super_jump=super_jump,
-            jumping_skill=jumping_skill,
-            st=st,
-            use_st_jump=use_st,
-            encumbrance=enc_factor,
+        high, long = (
+            jump(
+                basic_move,
+                running_start=running_start,
+                yards_run=yards_run,
+                super_jump=super_jump,
+                jumping_skill=jumping_skill,
+                st=st,
+                use_st_jump=use_st,
+                encumbrance=enc_factor,
+            )
+            for jump in (jump_mod.high_jump, jump_mod.long_jump)
         )
-        high = jump_mod.high_jump(basic_move, **kwargs)
-        long = jump_mod.long_jump(basic_move, **kwargs)
 
         embed = discord.Embed(title="Jump", color=BLUE)
         cap_note = " (capped at 2x standing)" if high.capped else ""
@@ -192,7 +194,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def throw(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         st: app_commands.Range[int, 1, 40],
         weight: float,
         damage_type: str = "cr",
@@ -259,7 +261,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def hike(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         basic_move: int,
         encumbrance: str = "NONE",
         terrain: str = "AVERAGE",
@@ -344,7 +346,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def swim(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         basic_move: int,
         ht: int,
         seconds: float = 10.0,
@@ -437,7 +439,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_cruising(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         top_speed: float,
         terrain: str,
         locomotion: str = "WHEELS",
@@ -480,7 +482,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_endurance(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         range_miles: float,
         cruising_mph: float,
     ) -> None:
@@ -507,7 +509,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_dodge(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         control_skill: int,
         handling: int,
     ) -> None:
@@ -536,7 +538,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_control(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         control_skill: int,
         handling: int,
         sr: int,
@@ -584,7 +586,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_decel(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         kind: str,
         handling: int = 0,
     ) -> None:
@@ -608,7 +610,7 @@ class CalcMovementCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def vehicle_crash(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         velocity: int,
         hp: int,
         dr: int = 0,
@@ -638,5 +640,5 @@ class CalcMovementCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CalcMovementCog(bot))

@@ -299,7 +299,7 @@ async def delete_character(session: AsyncSession, char_id: int) -> bool:
 
 async def count_characters(session: AsyncSession) -> int:
     """Total imported characters across all users (/status diagnostics)."""
-    return await session.scalar(select(func.count(Character.id)))
+    return await session.scalar(select(func.count(Character.id))) or 0
 
 
 async def purge_guild_active_characters(

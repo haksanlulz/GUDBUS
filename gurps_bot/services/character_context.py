@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import discord
 
@@ -13,9 +13,12 @@ from gurps_bot.services.characters import (
     get_character_spells,
     get_character_traits,
 )
+from gurps_bot.utils.scope import guild_id_of
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from gurps_bot.bot import GURPSBot
 
 
 class CharacterContext:
@@ -23,7 +26,7 @@ class CharacterContext:
 
     def __init__(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         *,
         defer: bool = True,
     ) -> None:
@@ -68,7 +71,7 @@ class CharacterContext:
         char = await get_active_character(
             self.session,
             self.interaction.user.id,
-            self.interaction.guild_id,
+            guild_id_of(self.interaction),
         )
         if not char:
             # __aexit__ can't suppress an __aenter__ exception, so error goes out here
@@ -80,7 +83,9 @@ class CharacterContext:
             self.char = char
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> Literal[False]:
+        # Literal, not bool: a bool return tells a type checker the block may
+        # swallow exceptions, which marks every name bound inside it as unbound
         if self._session_ctx is not None:
             await self._session_ctx.__aexit__(exc_type, exc_val, exc_tb)
         return False

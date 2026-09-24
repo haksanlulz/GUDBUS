@@ -205,6 +205,7 @@ gurps_bot/
     fuzzy.py          # rapidfuzz wrapper
     cache.py          # TTL cache for autocomplete
     sanitize.py       # Input sanitization
+    scope.py          # guild/channel ids for guild-only paths
 ```
 
 ## Development
