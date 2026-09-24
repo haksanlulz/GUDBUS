@@ -63,8 +63,9 @@ class CampaignGroup(app_commands.Group):
     @app_commands.describe(
         enabled="ON caps modified Will at 13 for Fright Checks (RAW). OFF uses it uncapped."
     )
-    @app_commands.default_permissions(manage_guild=True)
-    @app_commands.guild_only()
+    # A check, not default_permissions: Discord ignores permissions and
+    # guild_only on a subcommand, so those decorators restricted nothing.
+    @app_commands.checks.has_permissions(manage_guild=True)
     async def rule_of_14(
         self, interaction: discord.Interaction[GURPSBot], enabled: bool
     ) -> None:
