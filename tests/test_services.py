@@ -169,6 +169,69 @@ class TestStableIdentityReimport:
         assert names == ["Renamed Knight"]
 
 
+class TestTheImportCapLivesInTheService:
+    """The cap used to be a name check in the cog, run before the service
+    resolved the sheet by its stable id — so a renamed re-import at the cap
+    was refused as a new character though it only updates a row. It also
+    enforced a cog-local copy of the number; limits.MAX_CHARACTERS_PER_USER
+    was declared, pinned by a test, and read by nothing."""
+
+    @staticmethod
+    def _sheet(sample, n):
+        import copy
+
+        d = copy.deepcopy(sample)
+        d["id"] = f"id-{n}"
+        d["profile"]["name"] = f"Hero {n}"
+        return d
+
+    async def _fill(self, db_session, sample, count):
+        for n in range(count):
+            d = self._sheet(sample, n)
+            await import_character(db_session, USER_ID, parse_gcs(d), "x.gcs", raw_data=d)
+        await db_session.commit()
+
+    async def test_a_new_character_over_the_cap_is_refused(
+        self, db_session, sample_gcs_data, monkeypatch
+    ):
+        from gurps_bot.services import characters as svc
+        from gurps_bot.services.limits import StorageLimitExceeded
+
+        monkeypatch.setattr(svc, "MAX_CHARACTERS_PER_USER", 2)
+        await self._fill(db_session, sample_gcs_data, 2)
+        d = self._sheet(sample_gcs_data, 99)
+        with pytest.raises(StorageLimitExceeded, match="characters"):
+            await import_character(db_session, USER_ID, parse_gcs(d), "x.gcs", raw_data=d)
+
+    async def test_a_renamed_reimport_at_the_cap_replaces(
+        self, db_session, sample_gcs_data, monkeypatch
+    ):
+        from gurps_bot.services import characters as svc
+
+        monkeypatch.setattr(svc, "MAX_CHARACTERS_PER_USER", 2)
+        await self._fill(db_session, sample_gcs_data, 2)
+        d = self._sheet(sample_gcs_data, 0)
+        d["profile"]["name"] = "Hero Zero, Renamed"
+        char, replaced = await import_character(
+            db_session, USER_ID, parse_gcs(d), "x.gcs", raw_data=d
+        )
+        assert replaced is True
+        assert char.name == "Hero Zero, Renamed"
+
+    async def test_renaming_onto_another_characters_name_is_refused_cleanly(
+        self, db_session, sample_gcs_data
+    ):
+        """It used to be an IntegrityError from the unique (user, name) index,
+        which reached the user as a generic failure."""
+        from gurps_bot.services.characters import CharacterNameTaken
+
+        await self._fill(db_session, sample_gcs_data, 2)
+        d = self._sheet(sample_gcs_data, 0)
+        d["profile"]["name"] = "Hero 1"
+        with pytest.raises(CharacterNameTaken, match="Hero 1"):
+            await import_character(db_session, USER_ID, parse_gcs(d), "x.gcs", raw_data=d)
+
+
 class TestActiveCharacter:
     async def test_no_active_returns_none(self, db_session):
         char = await get_active_character(db_session, USER_ID, GUILD_ID)
