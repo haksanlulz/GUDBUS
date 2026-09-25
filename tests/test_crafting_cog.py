@@ -1318,3 +1318,174 @@ class TestMakeHonoursTheBooksLadderAtTheSurface:
     async def test_the_footer_names_the_book(self):
         interaction = await self._run()
         assert self._embed(interaction).footer.text == "Low-Tech Companion 3 ch. 5"
+
+
+class TestMakeFlowAssemblesTheSameReport:
+    """`/craft make` with any figure missing opens a guided flow (2026-09-25).
+
+    Three menus and one modal instead of eight parameters, per the anchor-scene
+    spec. What the flow must never do is answer differently from the typed
+    command: both render through `_make_report`, and the tests here drive the
+    flow to a state and compare its embed field-for-field with the typed
+    command given the same inputs.
+    """
+
+    LADDER = dict(list_price="90", weight="22.5", cost_per_lb="2.70", monthly_pay="790")
+
+    async def _open(self, **kwargs):
+        from gurps_bot.cogs.crafting import MakeFlowView
+
+        interaction = _interaction()
+        cog = CraftingCog(MagicMock())
+        await cog.make.callback(cog, interaction, **kwargs)
+        call = interaction.response.send_message.await_args
+        view = call.kwargs.get("view")
+        assert isinstance(view, MakeFlowView), call.kwargs
+        return interaction, view
+
+    async def _typed(self, **kwargs):
+        interaction = _interaction()
+        cog = CraftingCog(MagicMock())
+        await cog.make.callback(cog, interaction, **kwargs)
+        return interaction.response.send_message.await_args.kwargs["embed"]
+
+    async def _submit(self, view, **fields):
+        from gurps_bot.cogs.crafting import MakeNumbersModal
+
+        modal = MakeNumbersModal(view)
+        for name, value in fields.items():
+            getattr(modal, name)._value = value
+        interaction = _interaction()
+        await modal.on_submit(interaction)
+        return interaction
+
+    @staticmethod
+    def _shape(embed):
+        return (
+            embed.title,
+            [(f.name, f.value, f.inline) for f in embed.fields],
+            embed.footer.text,
+        )
+
+    async def test_no_numbers_opens_the_flow_with_a_checklist(self):
+        interaction, view = await self._open()
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        needed = next(f for f in embed.fields if f.name == "Still needed")
+        for _field, label in view.numbers.LABELS:
+            assert label in needed.value
+        assert not any(f.name == "Materials" for f in embed.fields)
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is False
+
+    async def test_the_flow_renders_exactly_what_the_typed_command_renders(self):
+        _, view = await self._open()
+        await self._submit(view, **self.LADDER, workers="6")
+        typed = await self._typed(
+            list_price=90, weight=22.5, cost_per_lb=2.70, monthly_pay=790, workers=6
+        )
+        assert self._shape(view.summary_embed()) == self._shape(typed)
+
+    async def test_the_menus_change_the_reading_the_same_way_the_parameters_do(self):
+        interaction, view = await self._open()
+        await _choose(view.class_select, interaction, "ARMS_OR_ARMOR")
+        await _choose(view.labor_select, interaction, "ARTISTIC")
+        await _choose(view.materials_select, interaction, "SWORD_OR_PLATE")
+        await self._submit(view, **self.LADDER)
+        typed = await self._typed(
+            list_price=90, weight=22.5, cost_per_lb=2.70, monthly_pay=790,
+            item_class="ARMS_OR_ARMOR", labor="ARTISTIC", materials="SWORD_OR_PLATE",
+        )
+        assert self._shape(view.summary_embed()) == self._shape(typed)
+        assert "x2" in next(f.value for f in view.summary_embed().fields if f.name == "Materials")
+
+    async def test_each_menu_change_redraws_the_message(self):
+        interaction, view = await self._open()
+        await _choose(view.class_select, interaction, "TOOL")
+        kwargs = interaction.response.edit_message.await_args.kwargs
+        assert kwargs["view"] is view
+        assert "Tool" in next(f.value for f in kwargs["embed"].fields if f.name == "Reading")
+
+    async def test_what_was_typed_is_kept_and_prefilled(self):
+        from gurps_bot.cogs.crafting import MakeNumbersModal
+
+        interaction, view = await self._open(weight=22.5, workers=3)
+        assert view.numbers.weight == 22.5 and view.numbers.workers == 3
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        given = next(f for f in embed.fields if f.name == "Already given")
+        assert "Weight (lbs): **22.5**" in given.value
+        needed = next(f for f in embed.fields if f.name == "Still needed")
+        assert "Weight" not in needed.value and "List price" in needed.value
+        modal = MakeNumbersModal(view)
+        assert modal.weight.default == "22.5"
+        assert modal.workers.default == "3"
+        assert modal.list_price.default is None
+
+    async def test_the_menus_open_showing_what_was_typed(self):
+        _, view = await self._open(item_class="TOOL", materials="COMPOSITE_BOW")
+        assert [o.value for o in view.class_select.options if o.default] == ["TOOL"]
+        assert [o.value for o in view.materials_select.options if o.default] == ["COMPOSITE_BOW"]
+        assert [o.value for o in view.labor_select.options if o.default] == ["ROUTINE"]
+
+    async def test_words_where_numbers_belong_are_refused_and_nothing_changes(self):
+        _, view = await self._open()
+        before = view.numbers
+        interaction = await self._submit(view, **{**self.LADDER, "weight": "heavy"})
+        call = interaction.response.send_message.await_args
+        assert call.kwargs["ephemeral"] is True and "numbers" in call.args[0]
+        assert view.numbers is before
+        interaction.response.edit_message.assert_not_awaited()
+
+    async def test_an_engine_refusal_reaches_the_player_in_the_engines_words(self):
+        _, view = await self._open()
+        before = view.numbers
+        interaction = await self._submit(view, **{**self.LADDER, "weight": "-1"})
+        call = interaction.response.send_message.await_args
+        assert call.kwargs["ephemeral"] is True
+        assert "weight cannot be negative" in call.args[0]
+        assert view.numbers is before
+
+    async def test_a_bystander_cannot_drive_it_and_the_owner_can(self):
+        _, view = await self._open()
+        stranger = _interaction(user_id=2)
+        assert await view.interaction_check(stranger) is False
+        assert stranger.response.send_message.await_args.kwargs["ephemeral"] is True
+        assert await view.interaction_check(_interaction(user_id=1)) is True
+
+    async def test_a_timed_out_flow_disables_itself_on_the_message(self):
+        _, view = await self._open()
+        view.message = MagicMock()
+        view.message.edit = AsyncMock()
+        await view.on_timeout()
+        assert all(item.disabled for item in view.children)
+        view.message.edit.assert_awaited_once_with(view=view)
+
+    async def test_make_remembers_the_message_it_sent(self):
+        interaction, view = await self._open()
+        assert view.message is interaction.original_response.return_value
+
+    def test_discords_refresh_hook_is_not_overridden(self):
+        from gurps_bot.cogs.crafting import MakeFlowView, MakeNumbers
+
+        view = MakeFlowView(invoker_id=1, numbers=MakeNumbers())
+        assert view._refresh([]) is None
+
+    def test_every_menu_value_is_a_real_engine_name(self):
+        from gurps_bot.cogs.crafting import MakeFlowView, MakeNumbers
+
+        view = MakeFlowView(invoker_id=1, numbers=MakeNumbers())
+        assert {o.value for o in view.class_select.options} == {
+            c.name for c in crafting_mundane.ItemClass
+        }
+        assert {o.value for o in view.labor_select.options} == {
+            k.name for k in crafting_mundane.LaborKind
+        }
+        assert {o.value for o in view.materials_select.options} == {
+            m.name for m in crafting_mundane.MaterialMultiplier
+        }
+
+    async def test_all_four_typed_never_opens_a_flow(self):
+        interaction = _interaction()
+        cog = CraftingCog(MagicMock())
+        await cog.make.callback(
+            cog, interaction, list_price=90, weight=22.5, cost_per_lb=2.70, monthly_pay=790
+        )
+        assert interaction.response.send_message.await_args.kwargs.get("view") is None

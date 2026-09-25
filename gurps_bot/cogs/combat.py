@@ -38,6 +38,7 @@ from gurps_bot.services.combat import (
     add_pc_combatant,
     add_status,
     cleanup_stale_combats,
+    discard_combat,
     end_combat,
     get_combat,
     get_combatant_trait_names,
@@ -343,7 +344,18 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             await session.commit()
 
         view = get_tracker_view()
-        await respond(interaction, embed=embed, view=view)
+        try:
+            await respond(interaction, embed=embed, view=view)
+        except discord.HTTPException:
+            # The combat is already committed, so a failed reply cannot roll
+            # it back — and left standing it would tell the table's retry
+            # "already a combat in this channel". Discard it (by id, so a
+            # combat someone else started in the gap is untouched) and let
+            # the error handler report the failure.
+            async with interaction.client.db() as session:
+                await discard_combat(session, combat.id)
+                await session.commit()
+            raise
 
         # the message id only feeds tracker auto-refresh; losing it is cheap,
         # so a failed fetch is logged and the combat stands
