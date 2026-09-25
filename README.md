@@ -1,6 +1,6 @@
 # GUDBUS
 
-**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 107 slash commands.
+**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 109 slash commands.
 
 ## Features
 
@@ -194,6 +194,8 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/craft project` | One project: stage, time, and what it has cost |
 | `/craft abandon` | End a project; the spending stays on record |
 | `/craft delete` | Delete a finished project and its history |
+| `/craft work` | Log time on a project: hours (making), weeks (brewing) or days (Slow and Sure enchanting) |
+| `/craft roll` | Make a project's roll: the piece's quality, the brew, the enchantment, or one repair attempt |
 | `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 | `/campaign show` | Show this server's house rules |
@@ -319,8 +321,8 @@ uv run python -m pytest -m "not slow and not integration and not load"
 Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options]` with strict markers on, so a misspelled mark on a test fails collection instead of warning.
 
 Counts, to the nearest thousand lines, pinned to the tree by `tests/test_readme.py`:
-- application code: 22K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
-- tests: 31K lines (`find tests -name '*.py' | xargs cat | wc -l`)
+- application code: 24K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
+- tests: 33K lines (`find tests -name '*.py' | xargs cat | wc -l`)
 
 Rounded and pinned instead of exact and dated. The previous figures carried a
 date, printed a tenth of a thousand, and were both wrong within days of being

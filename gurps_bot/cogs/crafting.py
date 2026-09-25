@@ -13,13 +13,18 @@ with them is the point), and the roll itself is **ephemeral** — visible only t
 whoever pressed the button, never posted to the channel. Whether that should
 become a real GM registry is an operator ruling, not a thing to infer.
 
-Stateless by design. Persistent crafting projects are the next lane; nothing
-here writes to the database, which is why this cog opens no session.
+The calculators are stateless; the projects are not. `/craft invent` saves an
+invention from its flow, and since 2026-09-25 every other calculator offers
+**Save as project** under its answer — the same figures, kept, with
+`/craft work` logging the calendar and `/craft roll` making the domain's roll.
+Every database write goes through `services/crafting*`; the dice are rolled
+here and handed over as numbers.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -27,6 +32,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from gurps_bot.db.crafting import CraftingProject
 from gurps_bot.mechanics import (
     crafting,
     crafting_alchemy,
@@ -40,6 +46,11 @@ from gurps_bot.mechanics import (
 from gurps_bot.mechanics import tech_level as tech_level_rules
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
+from gurps_bot.mechanics.dice import roll, roll_3d6
+from gurps_bot.services import crafting_alchemy as alchemy_projects
+from gurps_bot.services import crafting_enchantment as enchantment_projects
+from gurps_bot.services import crafting_mundane as mundane_projects
+from gurps_bot.services import crafting_repair as repair_projects
 from gurps_bot.services.crafting import (
     charge_history,
     delete_project,
@@ -48,8 +59,13 @@ from gurps_bot.services.crafting import (
     list_projects,
     spent_by_kind,
 )
+from gurps_bot.services.limits import StorageLimitExceeded
+from gurps_bot.ui import crafting_projects as project_ui
+from gurps_bot.ui.crafting_projects import breakdown_lines as _breakdown_lines
+from gurps_bot.ui.crafting_projects import fmt_mod as _fmt_mod
 from gurps_bot.ui.respond import respond
 from gurps_bot.ui.views import PaginatorView
+from gurps_bot.utils.sanitize import sanitize_name
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
@@ -86,14 +102,6 @@ _OUTCOME_KEYS = {
     Outcome.FAILURE: "failure",
     Outcome.CRITICAL_FAILURE: "critical_failure",
 }
-
-
-def _fmt_mod(value: int) -> str:
-    return f"+{value}" if value >= 0 else str(value)
-
-
-def _breakdown_lines(modifier: crafting.ModifierBreakdown) -> str:
-    return "\n".join(f"`{_fmt_mod(v):>3}`  {label}" for label, v in modifier.terms)
 
 
 class InventionFlowView(discord.ui.View):
@@ -797,6 +805,31 @@ class MakeFlowView(discord.ui.View):
     ) -> None:
         await interaction.response.send_modal(MakeNumbersModal(self))
 
+    def figures(self) -> dict:
+        """What the flow holds, in the shape `services.crafting_mundane.start` takes."""
+        n = self.numbers
+        return dict(
+            list_price=float(n.list_price or 0.0),
+            weight=float(n.weight or 0.0),
+            cost_per_lb=float(n.cost_per_lb or 0.0),
+            monthly_pay=float(n.monthly_pay or 0.0),
+            workers=n.workers,
+            item_class=self.item_class.name,
+            labor=self.labor.name,
+            materials=self.materials.name,
+        )
+
+    @discord.ui.button(label="Save as project", style=discord.ButtonStyle.secondary)
+    async def save_btn(
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
+    ) -> None:
+        if not self.numbers.complete:
+            await interaction.response.send_message(
+                "Fill in the numbers first — press **Numbers…**.", ephemeral=True
+            )
+            return
+        await interaction.response.send_modal(SaveCraftingModal(self.figures()))
+
 
 class MakeNumbersModal(discord.ui.Modal, title="The figures only you know"):
     """The four figures LTC3 needs, plus how many are working.
@@ -856,6 +889,212 @@ class MakeNumbersModal(discord.ui.Modal, title="The figures only you know"):
 
         flow.numbers = numbers
         await flow._redraw(interaction)
+
+
+class SaveProjectView(discord.ui.View):
+    """One button under a calculator's answer: keep it as a project.
+
+    The calculator has already validated every figure, so the modal only asks
+    for what a one-off answer never needed — a name, and the one or two
+    figures a project rolls with that the calculator did not take.
+    """
+
+    def __init__(self, *, invoker_id: int, modal: Callable[[], discord.ui.Modal]) -> None:
+        super().__init__(timeout=_VIEW_TIMEOUT)
+        self.invoker_id = invoker_id
+        self._modal = modal
+        #: set by the command after sending, so the timeout can edit it
+        self.message: discord.Message | None = None
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message(
+                "That answer is someone else's — run the command yourself to save "
+                "your own project.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            if isinstance(item, discord.ui.Button):
+                item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass  # deleted, or no longer editable; nothing left to disable
+
+    @discord.ui.button(label="Save as project", style=discord.ButtonStyle.secondary)
+    async def save_btn(
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(self._modal())
+
+
+class _SaveProjectModal(discord.ui.Modal):
+    """A name, the figures the calculator never asked for, then the domain's
+    own `start`. Subclasses add their inputs and say which service to call."""
+
+    project_name = discord.ui.TextInput(
+        label="What is it?", placeholder="a longsword", max_length=200
+    )
+
+    def __init__(self, figures: dict) -> None:
+        super().__init__()
+        self.figures = figures
+
+    def extra(self) -> dict:
+        """The subclass's own inputs, parsed. Raises ValueError with the message
+        the player should see."""
+        return {}
+
+    async def start(
+        self, session, interaction: discord.Interaction, name: str, extra: dict
+    ) -> CraftingProject:
+        raise NotImplementedError
+
+    async def on_submit(self, interaction: discord.Interaction[GURPSBot]) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # discord.py types this over any client; this bot has one
+        name = sanitize_name(self.project_name.value)
+        if not name:
+            await respond(
+                interaction,
+                "That name is empty once special characters are removed.",
+                ephemeral=True,
+            )
+            return
+        try:
+            extra = self.extra()
+        except ValueError as exc:
+            await respond(interaction, str(exc), ephemeral=True)
+            return
+        try:
+            async with interaction.client.db() as session:
+                project = await self.start(session, interaction, name, extra)
+                # read before the commit: the session may expire attributes on it
+                project_id = project.id
+                line = project_ui.list_line(project)
+                await session.commit()
+        except (StorageLimitExceeded, ValueError) as exc:
+            await respond(interaction, str(exc), ephemeral=True)
+            return
+
+        await respond(
+            interaction,
+            f"Started **{name}** as project `{project_id}` — {line}\n"
+            f"`/craft project id:{project_id}` shows it; `/craft work` logs time, "
+            f"`/craft roll` makes the roll.",
+            ephemeral=True,
+        )
+
+
+class SaveCraftingModal(_SaveProjectModal, title="Keep the commission"):
+    """LTC3: the calculator never asked who rolls, and a project needs to know."""
+
+    skill = discord.ui.TextInput(
+        label="Rolling skill (the highest craftsman present)", placeholder="14", max_length=2
+    )
+    fine_materials = discord.ui.TextInput(
+        label="Superior materials: +0 to +5 to the margin",
+        placeholder="0", required=False, default="0", max_length=1,
+    )
+    crucible_steel = discord.ui.TextInput(
+        label="Crucible steel? (yes/no)", placeholder="no", required=False, default="no",
+        max_length=3,
+    )
+
+    def extra(self) -> dict:
+        try:
+            skill = int(self.skill.value)
+            fine = int(self.fine_materials.value or "0")
+        except ValueError:
+            raise ValueError(
+                "The skill and the materials bonus need to be whole numbers."
+            ) from None
+        steel = (self.crucible_steel.value or "no").strip().lower() in ("y", "yes")
+        return dict(skill=skill, fine_materials=fine, crucible_steel=steel)
+
+    async def start(self, session, interaction, name, extra):
+        return await mundane_projects.start(
+            session,
+            discord_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            name=name,
+            **self.figures,
+            **extra,
+        )
+
+
+class SaveAlchemyModal(_SaveProjectModal, title="Keep the batch"):
+    async def start(self, session, interaction, name, extra):
+        return await alchemy_projects.start(
+            session,
+            discord_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            name=name,
+            **self.figures,
+        )
+
+
+class SaveEnchantmentModal(_SaveProjectModal, title="Keep the enchantment"):
+    materials_value = discord.ui.TextInput(
+        label="Value of the item and materials ($, optional)",
+        placeholder="0", required=False, default="0", max_length=12,
+    )
+
+    def extra(self) -> dict:
+        try:
+            value = int(self.materials_value.value or "0")
+        except ValueError:
+            raise ValueError("The materials value needs to be a whole number.") from None
+        return dict(materials_value=value)
+
+    async def start(self, session, interaction, name, extra):
+        return await enchantment_projects.start(
+            session,
+            discord_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            name=name,
+            **self.figures,
+            **extra,
+        )
+
+
+class SaveRepairModal(_SaveProjectModal, title="Keep the repair job"):
+    skill = discord.ui.TextInput(
+        label="Your repair skill (Mechanic, Armoury…)", placeholder="12", max_length=2
+    )
+
+    def extra(self) -> dict:
+        try:
+            return dict(skill=int(self.skill.value))
+        except ValueError:
+            raise ValueError("The repair skill needs to be a whole number.") from None
+
+    async def start(self, session, interaction, name, extra):
+        return await repair_projects.start(
+            session,
+            discord_user_id=interaction.user.id,
+            guild_id=interaction.guild_id,
+            name=name,
+            **self.figures,
+            **extra,
+        )
+
+
+async def _attach_save(
+    interaction: discord.Interaction[GURPSBot],
+    embed: discord.Embed,
+    modal: Callable[[], discord.ui.Modal],
+) -> None:
+    """Send a calculator's answer with the save button under it."""
+    view = SaveProjectView(invoker_id=interaction.user.id, modal=modal)
+    await respond(interaction, embed=embed, view=view)
+    try:
+        view.message = await interaction.original_response()
+    except discord.HTTPException:
+        pass  # the button works without it; only the timeout cleanup is lost
 
 
 class CraftingCog(commands.Cog):
@@ -1144,7 +1383,18 @@ class CraftingCog(commands.Cog):
                 inline=False,
             )
         embed.set_footer(text="B484")
-        await respond(interaction, embed=embed)
+        figures = dict(
+            price=price,
+            current_hp=current_hp,
+            max_hp=max_hp,
+            workspace=workspace,
+            time_spent=time_spent,
+            tech_level=tech_level,
+            item_tech_level=item_tech_level,
+            unfamiliar=unfamiliar,
+            emp=emp,
+        )
+        await _attach_save(interaction, embed, lambda: SaveRepairModal(figures))
 
     @craft.command(
         name="enchant", description="Enchanting an item: Power, time, and the ceremonial thresholds"
@@ -1281,7 +1531,17 @@ class CraftingCog(commands.Cog):
             )
         embed.add_field(name=chosen.value, value=timing, inline=False)
         embed.set_footer(text="GURPS Magic pp. 16-18")
-        await respond(interaction, embed=embed)
+        figures = dict(
+            enchant_skill=enchant_skill,
+            spell_skill=spell_skill,
+            energy=energy,
+            method=method,
+            assistants=assistants,
+            hp_spent=hp_spent,
+            bystanders=bystanders,
+            mana=mana,
+        )
+        await _attach_save(interaction, embed, lambda: SaveEnchantmentModal(figures))
 
     @craft.command(
         name="make", description="Making a mundane item: cost, time, and what the roll means"
@@ -1344,7 +1604,17 @@ class CraftingCog(commands.Cog):
             except ValueError as exc:
                 await respond(interaction, str(exc), ephemeral=True)
                 return
-            await respond(interaction, embed=embed)
+            figures = dict(
+                list_price=float(list_price or 0.0),
+                weight=float(weight or 0.0),
+                cost_per_lb=float(cost_per_lb or 0.0),
+                monthly_pay=float(monthly_pay or 0.0),
+                workers=workers,
+                item_class=item_class,
+                labor=labor,
+                materials=materials,
+            )
+            await _attach_save(interaction, embed, lambda: SaveCraftingModal(figures))
             return
 
         # Anything missing: the guided flow. Whatever WAS typed is kept, so a
@@ -1504,7 +1774,20 @@ class CraftingCog(commands.Cog):
             inline=False,
         )
         embed.set_footer(text="GURPS Magic ch. 28")
-        await respond(interaction, embed=embed)
+        figures = dict(
+            alchemy_skill=alchemy_skill,
+            cost_per_dose=cost_per_dose,
+            doses=doses,
+            technique=technique,
+            lab=lab,
+            mana=mana,
+            weeks=weeks,
+            formulary=formulary,
+            teacher=teacher,
+            helper_skill=helper_skill,
+            tech_level=tech_level,
+        )
+        await _attach_save(interaction, embed, lambda: SaveAlchemyModal(figures))
 
     @craft.command(name="projects", description="Your crafting projects in this server")
     @app_commands.describe(include_finished="Also show abandoned and completed ones")
@@ -1522,7 +1805,8 @@ class CraftingCog(commands.Cog):
         if not found:
             await respond(
                 interaction,
-                "No crafting projects here yet. `/craft invent` starts one.",
+                "No crafting projects here yet. `/craft invent` starts one, and "
+                "the other calculators offer **Save as project** under their answer.",
                 ephemeral=True,
             )
             return
@@ -1540,16 +1824,11 @@ class CraftingCog(commands.Cog):
             for project in chunk:
                 embed.add_field(
                     name=f"`{project.id}` {project.name}"[:256],
-                    value=(
-                        f"{project.complexity.capitalize()} · **{project.stage}** · "
-                        f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
-                    ),
+                    value=project_ui.list_line(project),
                     inline=False,
                 )
-            footer = "B473-474"
             if len(chunks) > 1:
-                footer = f"Page {n}/{len(chunks)} · {footer}"
-            embed.set_footer(text=footer)
+                embed.set_footer(text=f"Page {n}/{len(chunks)}")
             pages.append(embed)
         if len(pages) == 1:
             await respond(interaction, embed=pages[0], ephemeral=True)
@@ -1573,46 +1852,168 @@ class CraftingCog(commands.Cog):
                 return
             spent = await spent_by_kind(session, found.id)
             history = await charge_history(session, found.id)
+            # Rendered inside the session: a domain project's figures are read
+            # off the row. `flawed_theory` is deliberately never rendered.
+            embed = project_ui.detail_embed(found, spent, history)
 
-        embed = discord.Embed(
-            title=found.name,
-            description=(
-                f"{found.complexity.capitalize()} {found.domain} · "
-                f"stage **{found.stage}** · skill {found.skill}"
-            ),
-            colour=_INVENTION,
-        )
-        embed.add_field(
-            name="Progress",
-            value=f"{found.attempts} attempt(s) over {found.elapsed_days} day(s)",
-            inline=False,
-        )
-        # Three figures, still apart. Summing them here would undo the whole
-        # point of storing them as typed rows.
-        embed.add_field(
-            name="Spent so far",
-            value="\n".join(
-                f"{kind}: ${amount:,}" for kind, amount in sorted(spent.items())
-            )
-            or "nothing yet",
-            inline=False,
-        )
-        if history:
-            recent = history[-5:]
-            embed.add_field(
-                name=f"Last {len(recent)} of {len(history)} charge(s)",
-                value="\n".join(
-                    f"`{c.kind}` ${c.amount:,}"
-                    + (f" — {c.outcome}" if c.outcome else "")
-                    for c in recent
-                ),
-                inline=False,
-            )
-        # `flawed_theory` is deliberately absent from this embed. B473 makes the
-        # Concept roll secret so the player cannot learn it, and a project view
-        # they can run themselves is the last place it should leak.
-        embed.set_footer(text="B473-474")
         await respond(interaction, embed=embed, ephemeral=True)
+
+    @craft.command(
+        name="work",
+        description="Log time on a project: hours (making), weeks (brewing) or days (Slow and Sure enchanting)",
+    )
+    @app_commands.describe(
+        id="The project id from /craft projects",
+        amount="Hours, weeks or days — whichever the project's domain counts",
+        missed="Enchanting only: days skipped or interrupted; each costs two to make up",
+    )
+    async def work(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        id: int,
+        amount: float = 0.0,
+        missed: int = 0,
+    ) -> None:
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(interaction, f"No project `{id}` of yours.", ephemeral=True)
+                return
+            try:
+                await self._log_work(session, found, amount, missed)
+                text = f"**{found.name}** — {project_ui.list_line(found)}"
+                await session.commit()
+            except ValueError as exc:
+                await respond(interaction, str(exc), ephemeral=True)
+                return
+
+        await respond(interaction, text, ephemeral=True)
+
+    @staticmethod
+    async def _log_work(session, project: CraftingProject, amount: float, missed: int) -> None:
+        """Each domain counts its own unit; the ones without a calendar say so."""
+        if project.domain == "crafting":
+            if missed:
+                raise ValueError("Missed days are an enchanting thing — a smith just logs fewer hours.")
+            await mundane_projects.log_hours(session, project, amount)
+        elif project.domain == "alchemy":
+            if missed:
+                raise ValueError("Missed days are an enchanting thing — a batch just brews longer.")
+            await alchemy_projects.log_weeks(session, project, amount)
+        elif project.domain == "enchantment":
+            await enchantment_projects.log_days(session, project, amount, missed=missed)
+        elif project.domain == "repair":
+            raise ValueError(
+                "A repair has no calendar — each `/craft roll` is one half-hour attempt."
+            )
+        else:
+            raise ValueError(
+                "An invention advances by its stage rolls, not by logged days; the "
+                "prototype attempt command is the next lane."
+            )
+
+    @craft.command(
+        name="roll",
+        description="Make a project's roll: the piece's quality, the brew, the enchantment, or one repair attempt",
+    )
+    @app_commands.describe(id="The project id from /craft projects")
+    async def roll_cmd(self, interaction: discord.Interaction[GURPSBot], id: int) -> None:
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(interaction, f"No project `{id}` of yours.", ephemeral=True)
+                return
+            # The books give the enchanting roll to the GM; with no GM identity
+            # in the bot, ephemeral is the strongest routing there is.
+            ephemeral = found.domain == "enchantment"
+            try:
+                headline = await self._roll_project(session, found)
+            except ValueError as exc:
+                await respond(interaction, str(exc), ephemeral=True)
+                return
+            await session.commit()
+            spent = await spent_by_kind(session, found.id)
+            history = await charge_history(session, found.id)
+            embed = project_ui.detail_embed(found, spent, history)
+
+        await respond(interaction, headline, embed=embed, ephemeral=ephemeral)
+
+    @staticmethod
+    async def _roll_project(session, project: CraftingProject) -> str:
+        """Dice here, state in the domain's service. Returns the headline."""
+        domain = project.domain
+        if domain == "crafting":
+            reason = mundane_projects.ready_to_roll(project)
+            if reason:
+                raise ValueError(reason)
+            result = check(mundane_projects.roll_target(project))
+            made = await mundane_projects.resolve_roll(session, project, rolled=result.rolled)
+            return f"🎲 {result.roll_result} vs **{result.target}** — **{made.quality.value}**"
+
+        if domain == "alchemy":
+            if project.stage == "disaster":
+                target = alchemy_projects.disaster_target(project)
+                technique = check(target)
+                table = None if technique.outcome.succeeded else roll_3d6()
+                disaster = await alchemy_projects.resolve_disaster(
+                    session, project,
+                    rolled=technique.rolled,
+                    rolled_3d=None if table is None else table.total,
+                )
+                if disaster is None:
+                    return f"🎲 {technique.roll_result} vs **{target}** — the disaster is averted"
+                return (
+                    f"🎲 {technique.roll_result} vs **{target}**, then {table} on the "
+                    f"disaster table — **disaster**"
+                )
+            reason = alchemy_projects.ready_to_roll(project)
+            if reason:
+                raise ValueError(reason)
+            result = check(alchemy_projects.roll_target(project))
+            brew = await alchemy_projects.resolve_roll(session, project, rolled=result.rolled)
+            if brew.needs_disaster_roll:
+                return (
+                    f"🎲 {result.roll_result} vs **{result.target}** — **critical failure**; "
+                    f"`/craft roll` again makes the disaster roll"
+                )
+            return (
+                f"🎲 {result.roll_result} vs **{result.target}** — "
+                f"**{'success' if brew.succeeded else 'failure'}**"
+            )
+
+        if domain == "enchantment":
+            reason = enchantment_projects.ready_to_roll(project)
+            if reason:
+                raise ValueError(reason)
+            target = enchantment_projects.roll_target(project)
+            dice = roll_3d6()
+            outcome = crafting_enchantment.ceremonial_outcome(dice.total, target)
+            bonus = None
+            if outcome is crafting_enchantment.CeremonialOutcome.CRITICAL_SUCCESS:
+                bonus = roll(crafting_enchantment.CRITICAL_SUCCESS_POWER_BONUS).total
+            made = await enchantment_projects.resolve_roll(
+                session, project, rolled_3d=dice.total, power_bonus_rolled=bonus
+            )
+            return f"🎲 {dice} vs **{target}** — **{made.outcome.value}** (only you can see this)"
+
+        if domain == "repair":
+            if repair_projects.needs_parts(project):
+                die = roll("1d")
+                cost = await repair_projects.buy_parts(session, project, rolled_1d=die.total)
+                return f"🎲 {die} — spare parts **${cost:,}**; the repair can begin"
+            target = repair_projects.roll_target(project)
+            result = check(target)
+            outcome, restored = await repair_projects.resolve_attempt(
+                session, project, rolled=result.rolled
+            )
+            if restored:
+                return f"🎲 {result.roll_result} vs **{target}** — {outcome.value}, **+{restored} HP**"
+            return f"🎲 {result.roll_result} vs **{target}** — {outcome.value}, nothing restored"
+
+        raise ValueError(
+            "An invention advances by its stage rolls — `/craft invent` makes the "
+            "Concept roll; the prototype attempt command is the next lane."
+        )
 
     @craft.command(name="abandon", description="End a project — the spending stays on record")
     @app_commands.describe(id="The project id from /craft projects")
