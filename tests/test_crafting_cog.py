@@ -1070,3 +1070,59 @@ class TestTheFlowLeavesDiscordsHooksAlone:
     def test_discords_refresh_hook_is_not_overridden(self):
         view = InventionFlowView(skill=14, invoker_id=1)
         assert view._refresh([]) is None
+
+
+class TestDelete:
+    """The project cap counts finished projects on purpose and tells the user
+    to "Delete some first" — but nothing could delete one, so reaching it was
+    a permanent lockout. /craft delete removes a FINISHED project."""
+
+    async def test_a_finished_project_goes_with_its_history(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_attempt(s, project, amount=10, outcome="failure")
+            await service.finish_project(s, project, "abandoned")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is None
+            assert await service.charge_history(s, project_id) == []
+
+    async def test_an_active_project_must_be_abandoned_first(self, db):
+        project_id = await _seed_project(db)
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.delete.callback(cog, interaction, project_id)
+        assert "abandon" in interaction.response.send_message.await_args.kwargs["content"].lower()
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is not None
+
+    async def test_another_users_project_is_untouched(self, db):
+        project_id = await _seed_project(db, discord_user_id=2)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 2), "abandoned")
+            await s.commit()
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db, user_id=1), project_id)
+        async with db() as s:
+            assert await service.get_project(s, project_id, 2) is not None
+
+    async def test_deleting_frees_a_slot_under_the_cap(self, db, monkeypatch):
+        from gurps_bot.services import crafting as svc_mod
+        from gurps_bot.services.limits import StorageLimitExceeded
+
+        monkeypatch.setattr(svc_mod, "MAX_CRAFTING_PROJECTS_PER_USER", 1)
+        project_id = await _seed_project(db)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 1), "complete")
+            await s.commit()
+        with pytest.raises(StorageLimitExceeded):
+            await _seed_project(db, name="second")
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+        await _seed_project(db, name="second")  # no longer refused

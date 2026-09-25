@@ -41,6 +41,7 @@ from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
     charge_history,
+    delete_project,
     finish_project,
     get_project,
     list_projects,
@@ -1308,6 +1309,37 @@ class CraftingCog(commands.Cog):
             interaction,
             f"Abandoned **{name}**. Its charge history stays — the money was "
             f"still spent.",
+            ephemeral=True,
+        )
+
+    @craft.command(name="delete", description="Delete a finished project and its history")
+    @app_commands.describe(id="The project id from /craft projects include_finished:True")
+    async def delete(self, interaction: discord.Interaction[GURPSBot], id: int) -> None:
+        # Finished projects count toward the per-user cap on purpose (limits.py),
+        # so this is the way to free a slot. Only finished ones: an active
+        # project has to be abandoned first, which is the deliberate step.
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(
+                    interaction, f"No project `{id}` of yours.", ephemeral=True
+                )
+                return
+            if not found.is_finished:
+                await respond(
+                    interaction,
+                    f"`{id}` is still {found.stage}. Abandon it first with "
+                    f"`/craft abandon`, then delete it.",
+                    ephemeral=True,
+                )
+                return
+            name = found.name
+            await delete_project(session, found)
+            await session.commit()
+
+        await respond(
+            interaction,
+            f"Deleted **{name}** and its charge history.",
             ephemeral=True,
         )
 

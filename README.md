@@ -1,6 +1,6 @@
 # GUDBUS
 
-**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 106 slash commands.
+**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 107 slash commands.
 
 ## Features
 
@@ -193,6 +193,7 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/craft projects` | Your crafting projects in this server |
 | `/craft project` | One project: stage, time, and what it has cost |
 | `/craft abandon` | End a project; the spending stays on record |
+| `/craft delete` | Delete a finished project and its history |
 | `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 | `/campaign show` | Show this server's house rules |
