@@ -26,6 +26,7 @@ from gurps_bot.services.notes import (
     search_notes,
 )
 from gurps_bot.services.study import (
+    count_study,
     get_skill_progress,
     list_study,
     log_study,
@@ -308,6 +309,12 @@ class StudyCog(commands.Cog):
                 interaction.user.id,
                 character_id=char_id,
                 skill_name=skill,
+                limit=_LIST_PAGE,
+            )
+            # counted, not len(rows): the fetch is capped, and a capped length
+            # told a user with 120 logs "…and 40 more"
+            total = await count_study(
+                session, interaction.user.id, character_id=char_id, skill_name=skill,
             )
 
         embed = discord.Embed(title="Study Log", color=BLUE)
@@ -322,8 +329,8 @@ class StudyCog(commands.Cog):
                     f"{_fmt_hours(r.real_hours)} real → "
                     f"{_fmt_hours(r.learning_hours)} learning hrs"
                 )
-            if len(rows) > _LIST_PAGE:
-                lines.append(f"*…and {len(rows) - _LIST_PAGE} more.*")
+            if total > len(rows):
+                lines.append(f"*…and {total - len(rows)} more.*")
             description = "\n".join(lines)
             if len(description) > EMBED_DESC_LIMIT:
                 description = description[: EMBED_DESC_LIMIT - 40] + "\n*…truncated*"
