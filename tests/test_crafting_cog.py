@@ -13,12 +13,13 @@ the embed.
 
 from __future__ import annotations
 
+import re
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from gurps_bot.cogs.crafting import CraftingCog, InventionFlowView
-from gurps_bot.mechanics import crafting
+from gurps_bot.mechanics import crafting, crafting_mundane
 from gurps_bot.mechanics.checks import CheckResult
 from gurps_bot.mechanics.crafting import Complexity
 from gurps_bot.mechanics.dice import DiceSpec, RollResult
@@ -1169,3 +1170,151 @@ class TestDelete:
         cog = CraftingCog(MagicMock())
         await cog.delete.callback(cog, _interaction_with_db(db), project_id)
         await _seed_project(db, name="second")  # no longer refused
+
+
+class TestMakeHonoursTheBooksLadderAtTheSurface:
+    """`/craft make` had no test above the engine until 2026-09-25.
+
+    LTC3's worked example — a 9' ladder, $90, 22.5 lbs of 1" planks at
+    $2.70/lb, a $790/month carpenter — is the one end-to-end figure the chapter
+    computes itself. `tests/test_crafting_mundane.py` pins it at the engine;
+    this pins it at the embed, plus the two things only the surface can get
+    wrong: the quality ladder it PRINTS (labels are hand-written, the engine
+    never sees them) and whether the command asks for a quality it must not.
+    """
+
+    LADDER = dict(list_price=90, weight=22.5, cost_per_lb=2.70, monthly_pay=790)
+
+    #: LTC3's bands, at both edges — the cog's label table is a second copy of
+    #: this, so a label drifting off its margin is exactly what this catches.
+    BANDS = {
+        "failure by 4+": (-4, -9),
+        "failure by 1-3": (-1, -3),
+        "success by 0-11": (0, 11),
+        "success by 12-17": (12, 17),
+        "success by 18+": (18, 30),
+    }
+
+    async def _run(self, **kwargs):
+        interaction = _interaction()
+        cog = CraftingCog(MagicMock())
+        await cog.make.callback(cog, interaction, **{**self.LADDER, **kwargs})
+        return interaction
+
+    def _embed(self, interaction):
+        return interaction.response.send_message.await_args.kwargs["embed"]
+
+    def _field(self, interaction, name):
+        return next((f for f in self._embed(interaction).fields if f.name == name), None)
+
+    def _refusal(self, interaction) -> str:
+        call = interaction.response.send_message.await_args
+        assert call.kwargs["ephemeral"] is True
+        return call.kwargs.get("content") or (call.args[0] if call.args else "")
+
+    async def test_the_books_ladder_reproduces_at_the_surface(self):
+        interaction = await self._run()
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is False
+        assert "$60.75" in self._field(interaction, "Materials").value
+        assert "$29.25" in self._field(interaction, "Labour").value
+        time = self._field(interaction, "Time").value
+        assert "13.5 man-hours" in time
+        assert "$2.17/hour" in time
+
+    async def test_six_working_together_take_just_over_two_hours(self):
+        interaction = await self._run(workers=6)
+        time = self._field(interaction, "Time").value
+        assert "2.2 hours" in time
+        assert "with 6 working together" in time
+
+    async def test_a_seventh_pair_of_hands_is_named_and_ignored(self):
+        six = self._field(await self._run(workers=6), "Time").value
+        seven = await self._run(workers=7)
+        assert self._field(seven, "Time").value == six
+        cap = self._field(seven, "Six is the cap")
+        assert cap is not None and "7 were named" in cap.value
+        assert self._field(await self._run(workers=6), "Six is the cap") is None
+
+    @pytest.mark.parametrize("klass", list(crafting_mundane.ItemClass))
+    async def test_the_printed_ladder_agrees_with_the_engine(self, klass):
+        interaction = await self._run(item_class=klass.name)
+        field = next(
+            f for f in self._embed(interaction).fields if f.name.startswith("Then one roll")
+        )
+        assert klass.value in field.name
+        printed = {}
+        for line in field.value.splitlines():
+            # rendered as `{label:>16}`  {quality}: label padded inside the ticks
+            m = re.fullmatch(r"`\s*(.+?)`\s+(.+)", line)
+            assert m, line
+            printed[m.group(1)] = m.group(2).strip()
+        assert set(printed) == set(self.BANDS), "a band is missing or mislabelled"
+        for label, margins in self.BANDS.items():
+            for margin in margins:
+                expected = crafting_mundane.craft_quality(margin, klass).quality.value
+                assert printed[label] == expected, (label, margin, klass)
+
+    async def test_the_command_never_asks_for_a_quality(self):
+        import inspect
+
+        cog = CraftingCog(MagicMock())
+        names = set(inspect.signature(cog.make.callback).parameters) | {
+            p.name for p in cog.make.parameters
+        }
+        assert not any("quality" in n for n in names), names
+
+    async def test_every_engine_class_and_material_is_offered(self):
+        cog = CraftingCog(MagicMock())
+        params = {p.name: p for p in cog.make.parameters}
+        assert {c.value for c in params["item_class"].choices} == {
+            c.name for c in crafting_mundane.ItemClass
+        }
+        assert {c.value for c in params["materials"].choices} == {
+            m.name for m in crafting_mundane.MaterialMultiplier
+        }
+        assert {c.value for c in params["labor"].choices} == {
+            k.name for k in crafting_mundane.LaborKind
+        }
+
+    async def test_a_sword_doubles_the_materials_and_says_so(self):
+        interaction = await self._run(materials="SWORD_OR_PLATE")
+        materials = self._field(interaction, "Materials").value
+        assert "$121.50" in materials and "x2" in materials
+        # the doubling comes out of labour, so the clock shrinks with it
+        assert "$-31.50" not in self._field(interaction, "Labour").value
+
+    async def test_materials_dearer_than_the_item_is_said_not_clamped_silently(self):
+        interaction = await self._run(list_price=10)
+        warning = self._field(interaction, "⚠️ The materials cost more than the item")
+        assert warning is not None and "$60.75" in warning.value and "$10.00" in warning.value
+        assert "$0.00" in self._field(interaction, "Labour").value
+        assert "0.0 man-hours" in self._field(interaction, "Time").value
+
+    async def test_artistic_work_is_dearer_per_hour_and_therefore_quicker(self):
+        routine = self._field(await self._run(), "Time").value
+        artistic = self._field(await self._run(labor="ARTISTIC"), "Time").value
+        assert "$2.96/hour" in artistic
+        assert "9.9 man-hours" in artistic
+        assert artistic != routine
+
+    @pytest.mark.parametrize(
+        "kwargs, says",
+        [
+            ({"weight": -1}, "weight cannot be negative"),
+            ({"cost_per_lb": -1}, "cost per lb cannot be negative"),
+            ({"list_price": -1}, "list price cannot be negative"),
+            ({"monthly_pay": 0}, "labor rate must be positive"),
+            ({"workers": 0}, "someone has to make it"),
+        ],
+    )
+    async def test_nonsense_input_is_refused_in_the_engines_words(self, kwargs, says):
+        interaction = await self._run(**kwargs)
+        assert says in self._refusal(interaction)
+
+    async def test_an_unknown_option_is_refused(self):
+        interaction = await self._run(item_class="BOGUS")
+        assert self._refusal(interaction) == "Unknown option."
+
+    async def test_the_footer_names_the_book(self):
+        interaction = await self._run()
+        assert self._embed(interaction).footer.text == "Low-Tech Companion 3 ch. 5"
