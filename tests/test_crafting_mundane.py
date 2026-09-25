@@ -1,11 +1,7 @@
 """Low-Tech Companion 3 ch. 5 — making a mundane item.
 
-Sealed probe 5 was NOT consulted while writing this; everything came off
-LTC3 pp. 22-25. That is worth less here than it was for probe 3, and the
-sealed file says so: probes 4 and 5 are DIFFERENTIALS. Their rules were
-located and extracted alongside the operator, so they pin behaviour well and
-prove little about code written afterwards by the same reader. The book is the
-authority in this file, not the probe.
+Everything here came off LTC3 pp. 22-25, and the book is the authority in
+this file.
 
 ⚑ The book's own worked example — the 9' ladder — is the regression class.
 It is the only end-to-end figure in the chapter that the text computes itself,
@@ -68,7 +64,7 @@ class TestTheBooksOwnLadder:
 class TestMaterialsComeFromWeightNotListPrice:
     """SPEC materials-come-from-weight-not-from-list-price.
 
-    The figure sealed probe 5 got wrong twice, and the reason it survived: a
+    The tempting wrong answer, and the reason it survives review: a
     percentage of list price also produces a plausible number.
     """
 
@@ -115,7 +111,7 @@ class TestTheRawMaterialMultipliers:
 
 
 class TestQualityIsAReturnValue:
-    """GAUNTLET SPEC quality-is-a-return-value-never-a-parameter."""
+    """SPEC quality-is-a-return-value-never-a-parameter."""
 
     def test_you_cannot_ask_for_a_quality(self):
         import inspect

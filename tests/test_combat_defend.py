@@ -113,6 +113,37 @@ class TestCombatDefend:
         await _cog().defend_tracked.callback(_cog(), interaction, defense_type="dodge", value=9, hidden=True)
         assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
 
+    async def test_hidden_defers_privately_when_deferring(self, session, session_factory):
+        """The defer fixes who can read the reply. A public defer made the
+        GM's blind roll visible to the channel however `ephemeral` was set on
+        the followup — the test above could not see it, because its mock's
+        `is_done()` never flips and the defer path never runs."""
+        from gurps_bot.cogs import combat as combat_mod
+
+        await _seed(session)
+        interaction = _interaction(session_factory)
+        with patch.object(combat_mod, "CombatContext") as ctx_cls:
+            ctx_cls.return_value.__aenter__ = AsyncMock(
+                side_effect=RuntimeError("stop after construction")
+            )
+            ctx_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            try:
+                await _cog().defend_tracked.callback(
+                    _cog(), interaction, defense_type="dodge", value=9, hidden=True
+                )
+            except RuntimeError:
+                pass
+        assert ctx_cls.call_args.kwargs.get("ephemeral") is True
+
+    async def test_the_context_defers_with_the_visibility_it_was_given(self, session_factory):
+        from gurps_bot.services.combat_session import CombatContext
+
+        interaction = _interaction(session_factory)
+        interaction.extras = {}
+        async with CombatContext(interaction, defer=True, ephemeral=True):
+            pass
+        interaction.response.defer.assert_awaited_once_with(ephemeral=True)
+
     async def test_not_in_combat_errors_ephemerally(self, session_factory):
         interaction = _interaction(session_factory)  # nothing seeded
         await _cog().defend_tracked.callback(_cog(), interaction, defense_type="dodge", value=9)

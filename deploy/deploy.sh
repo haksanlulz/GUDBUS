@@ -6,7 +6,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."   # deploy/ -> project root
 
 echo "==> Pulling latest"
-git pull --ff-only 2>/dev/null || echo "    (no git remote or nothing to pull — skipping)"
+# Only a missing remote is a skip (the rsync'd-tree setup in DEPLOY.md). Any
+# other pull failure — diverged branch, local edits, network — must stop here:
+# carrying on would migrate, test and restart the OLD code and then say Done.
+if git remote get-url origin >/dev/null 2>&1; then
+  git pull --ff-only
+else
+  echo "    (no git remote — skipping)"
+fi
 
 echo "==> Syncing dependencies (creates/updates .venv)"
 uv sync
@@ -44,4 +51,5 @@ else
   echo "      sudo systemctl daemon-reload && sudo systemctl enable --now gurps-bot"
 fi
 
-echo "==> Done. If slash commands changed, run /sync clear:true in Discord."
+echo "==> Done. Slash commands re-register at startup when they change;"
+echo "    if they ever go missing, mention the bot with: @<bot> sync"

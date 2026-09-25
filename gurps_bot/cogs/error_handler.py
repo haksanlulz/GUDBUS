@@ -72,7 +72,7 @@ def _flatten_options(
     return leaves
 
 
-def _interaction_context(interaction: discord.Interaction) -> dict[str, object]:
+def _interaction_context(interaction: discord.Interaction[GURPSBot]) -> dict[str, object]:
     """Best-effort log context from an interaction; never raises.
 
     Option NAMES are what make an error reproducible and are always kept; free-text
@@ -106,7 +106,7 @@ class ErrorHandler(commands.Cog):
 
     async def on_app_command_error(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         error: app_commands.AppCommandError,
     ) -> None:
         try:
@@ -157,5 +157,5 @@ class ErrorHandler(commands.Cog):
             )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(ErrorHandler(bot))

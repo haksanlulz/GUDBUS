@@ -32,6 +32,7 @@ def _interaction(user_id: int = 1) -> MagicMock:
     interaction.response.edit_message = AsyncMock()
     interaction.response.defer = AsyncMock()
     interaction.followup.send = AsyncMock()
+    interaction.original_response = AsyncMock()
     return interaction
 
 
@@ -220,6 +221,35 @@ class TestTheFlowBelongsToWhoeverOpenedIt:
         await view.on_timeout()
         assert all(item.disabled for item in view.children)
 
+    async def test_the_timeout_reaches_the_message(self):
+        """Setting .disabled on the view changes nothing anyone sees; the
+        message has to be edited. Without it the menus stayed live-looking and
+        every click after the timeout answered "This interaction failed"."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock()
+        await view.on_timeout()
+        view.message.edit.assert_awaited_once_with(view=view)
+
+    async def test_a_deleted_message_does_not_break_the_timeout(self):
+        import discord
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock(
+            side_effect=discord.NotFound(MagicMock(status=404), "gone")
+        )
+        await view.on_timeout()  # must not raise
+
+    async def test_invent_remembers_the_message_it_sent(self):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        sent = MagicMock()
+        interaction.original_response = AsyncMock(return_value=sent)
+        await cog.invent.callback(cog, interaction, 14)
+        view = interaction.response.send_message.await_args.kwargs["view"]
+        assert view.message is sent
+
 
 class TestCostsStaysThreeFigures:
     """SPEC money-is-never-summed-into-one-number, at the surface.
@@ -276,10 +306,8 @@ class TestCostsStaysThreeFigures:
 class TestRepairAcrossATechLevelGap:
     """`/craft repair`'s tech-line layer, wired 2026-08-15.
 
-    ⚠️ Sealed probe 3 was not read while this was written. Its scenario shape
-    is known from ATTACK.md — a TL10 beam weapon worked on with TL9 skill —
-    but its numbers are not, and the point of the exercise is that this code
-    is finished before they are seen.
+    Written from the book alone. The scenario shape — a TL10 beam weapon
+    worked on with TL9 skill — is the case the tech-level gap exists for.
     """
 
     async def _run(self, **kwargs):
@@ -342,9 +370,9 @@ class TestRepairAcrossATechLevelGap:
         assert "-10" in modifiers.value
 
 
-class TestBrewHonoursProbeTwoAtTheSurface:
-    """`/craft brew` — added 2026-08-15, when re-verifying sealed probe 2
-    found the alchemy domain had no consumer at all.
+class TestBrewHonoursTheReferenceScenarioAtTheSurface:
+    """`/craft brew` — added 2026-08-15, when re-verifying the alchemy
+    reference scenario found the domain had no consumer at all.
 
     Six of its seven conditions passed at module level and the module was
     imported by nothing but its own tests, so conditions 4 (mastery is
@@ -370,7 +398,7 @@ class TestBrewHonoursProbeTwoAtTheSurface:
             "embed"
         ]
 
-    async def test_the_sealed_scenario_reaches_eleven(self):
+    async def test_the_reference_scenario_reaches_eleven(self):
         embed = await self._embed(doses=2, technique=12, formulary=True)
         roll = next(f for f in embed.fields if f.name == "Roll against")
         assert "11" in roll.value
@@ -1027,3 +1055,18 @@ class TestEnchantMethodsDisagreeOnAssistants:
         assert self._field(crowded, "⚠️ Too many hands") is not None
         slow = await self._run(method="SLOW_AND_SURE", assistants=5)
         assert self._field(slow, "⚠️ Too many hands") is None
+
+
+class TestTheFlowLeavesDiscordsHooksAlone:
+    """``View._refresh(components)`` is discord.py's, not ours.
+
+    The gateway calls it on every MESSAGE_UPDATE for a message whose view it
+    tracks. The flow once defined its own ``async def _refresh(interaction)``,
+    so each edit of the flow's message handed the component list to our
+    redraw, got back a coroutine nobody awaited, and skipped discord.py's own
+    component sync.
+    """
+
+    def test_discords_refresh_hook_is_not_overridden(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        assert view._refresh([]) is None

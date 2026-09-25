@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import math
+from typing import TYPE_CHECKING
 
 import discord
 
 from gurps_bot.services.combat_session import CombatPermissionError, CombatSession
+from gurps_bot.utils.scope import channel_scope
+
+if TYPE_CHECKING:
+    from gurps_bot.bot import GURPSBot
 
 
 class PaginatorView(discord.ui.View):
@@ -35,7 +40,7 @@ class PaginatorView(discord.ui.View):
                 pass
 
     @discord.ui.button(label="Prev", style=discord.ButtonStyle.secondary)
-    async def prev_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def prev_btn(self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button) -> None:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("Not your character list.", ephemeral=True)
             return
@@ -44,7 +49,7 @@ class PaginatorView(discord.ui.View):
         await interaction.response.edit_message(embed=self.pages[self.current], view=self)
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary)
-    async def next_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def next_btn(self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button) -> None:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("Not your character list.", ephemeral=True)
             return
@@ -70,7 +75,7 @@ class ConfirmView(discord.ui.View):
                 pass
 
     @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
-    async def confirm_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def confirm_btn(self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button) -> None:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("Not your action.", ephemeral=True)
             return
@@ -79,7 +84,7 @@ class ConfirmView(discord.ui.View):
         await interaction.response.edit_message(content="Confirmed.", view=None)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_btn(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
+    async def cancel_btn(self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button) -> None:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message("Not your action.", ephemeral=True)
             return
@@ -106,7 +111,7 @@ class RollDamageView(discord.ui.View):
 
     @discord.ui.button(label="Roll Damage", style=discord.ButtonStyle.danger, emoji="\U0001f3b2")
     async def roll_damage_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button,
     ) -> None:
         from gurps_bot.mechanics.damage import parse_gcs_damage, roll_damage
         from gurps_bot.ui.embeds import damage_embed
@@ -136,13 +141,13 @@ class CombatTrackerView(discord.ui.View):
         custom_id="combat_next_turn", row=0,
     )
     async def next_turn_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button,
     ) -> None:
         from gurps_bot.services.combat import advance_turn, current_combatant, get_combat
         from gurps_bot.ui.embeds import combat_tracker_embed, turn_announcement
 
         async with interaction.client.db() as session:
-            combat = await get_combat(session, interaction.guild_id, interaction.channel_id)
+            combat = await get_combat(session, *channel_scope(interaction))
             if not combat:
                 await interaction.response.send_message("No active combat.", ephemeral=True)
                 return
@@ -177,13 +182,13 @@ class CombatTrackerView(discord.ui.View):
         custom_id="combat_prev_turn", row=0,
     )
     async def prev_turn_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button,
     ) -> None:
         from gurps_bot.services.combat import get_combat, previous_turn
         from gurps_bot.ui.embeds import combat_tracker_embed
 
         async with interaction.client.db() as session:
-            combat = await get_combat(session, interaction.guild_id, interaction.channel_id)
+            combat = await get_combat(session, *channel_scope(interaction))
             if not combat:
                 await interaction.response.send_message("No active combat.", ephemeral=True)
                 return
@@ -205,12 +210,12 @@ class CombatTrackerView(discord.ui.View):
         custom_id="combat_add_npc", row=0,
     )
     async def add_npc_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button,
     ) -> None:
         from gurps_bot.services.combat import get_combat
 
         async with interaction.client.db() as session:
-            combat = await get_combat(session, interaction.guild_id, interaction.channel_id)
+            combat = await get_combat(session, *channel_scope(interaction))
 
         if not combat:
             await interaction.response.send_message("No active combat.", ephemeral=True)
@@ -229,12 +234,12 @@ class CombatTrackerView(discord.ui.View):
         custom_id="combat_end", row=0,
     )
     async def end_combat_btn(
-        self, interaction: discord.Interaction, button: discord.ui.Button,
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button,
     ) -> None:
         from gurps_bot.services.combat import end_combat, get_combat
 
         async with interaction.client.db() as session:
-            combat = await get_combat(session, interaction.guild_id, interaction.channel_id)
+            combat = await get_combat(session, *channel_scope(interaction))
             if not combat:
                 await interaction.response.send_message("No active combat.", ephemeral=True)
                 return
@@ -245,7 +250,7 @@ class CombatTrackerView(discord.ui.View):
                 await interaction.response.send_message(str(e), ephemeral=True)
                 return
 
-            await end_combat(session, interaction.guild_id, interaction.channel_id)
+            await end_combat(session, *channel_scope(interaction))
             await session.commit()
 
         await interaction.response.edit_message(
@@ -270,7 +275,7 @@ class AddNPCModal(discord.ui.Modal, title="Add NPC"):
         label="DX (for Tie-Breaking)", placeholder="10", required=False, default="10",
     )
 
-    async def on_submit(self, interaction: discord.Interaction) -> None:
+    async def on_submit(self, interaction: discord.Interaction[GURPSBot]) -> None:  # pyright: ignore[reportIncompatibleMethodOverride]  # discord.py types this over any client; this bot has one
         from gurps_bot.services.combat import add_npc_combatant, get_combat
         from gurps_bot.ui.tracker import TrackerManager
         from gurps_bot.utils.sanitize import sanitize_name
@@ -299,7 +304,7 @@ class AddNPCModal(discord.ui.Modal, title="Add NPC"):
             return
 
         async with interaction.client.db() as session:
-            combat = await get_combat(session, interaction.guild_id, interaction.channel_id)
+            combat = await get_combat(session, *channel_scope(interaction))
             if not combat:
                 await interaction.response.send_message("No active combat.", ephemeral=True)
                 return

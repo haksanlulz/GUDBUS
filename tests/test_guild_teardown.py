@@ -195,3 +195,80 @@ class TestLeavingAGuildClearsIt:
                 )
             )
         assert chars > 0, "leaving a guild deleted the player's character"
+
+
+class TestADepartureWhileOfflineIsCaughtAtStartup:
+    """on_guild_remove only fires if the bot is connected when it is removed.
+    Discord does not replay GUILD_DELETE after a fresh IDENTIFY — a guild that
+    removed the bot during downtime is simply absent from READY — so its data
+    stayed forever, contrary to PRIVACY.md and /legal."""
+
+    async def test_a_guild_the_bot_is_no_longer_in_is_purged(self, session_factory):
+        from gurps_bot.services.admin import reconcile_departed_guilds
+
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        await seeder._seed(session_factory, OTHER_GUILD)
+
+        async with session_factory() as s:
+            purged = await reconcile_departed_guilds(s, present={OTHER_GUILD})
+            await s.commit()
+
+        assert purged == [GUILD]
+        assert not any((await seeder._rows_for(session_factory, GUILD)).values())
+        assert all((await seeder._rows_for(session_factory, OTHER_GUILD)).values())
+
+    async def test_a_guild_with_stored_data_is_found(self, session_factory):
+        """The scan reads the same metadata-derived table set pinned above."""
+        from gurps_bot.services.admin import stored_guild_ids
+
+        assert _guild_scoped_tables() == EXPECTED_GUILD_SCOPED
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        async with session_factory() as s:
+            assert GUILD in await stored_guild_ids(s)
+
+    async def test_an_empty_guild_list_purges_nothing(self, session_factory):
+        """Zero guilds at startup is far likelier a cache that has not filled
+        than a bot removed from everywhere; wiping every server's data on that
+        reading is not a trade worth making."""
+        from gurps_bot.services.admin import reconcile_departed_guilds
+
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        async with session_factory() as s:
+            assert await reconcile_departed_guilds(s, present=set()) == []
+        assert all((await seeder._rows_for(session_factory, GUILD)).values())
+
+
+class TestTheReconcileRunsOnceAtStartup:
+    async def test_first_ready_reconciles_against_the_bots_guilds(self, monkeypatch):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, MagicMock
+
+        from gurps_bot.cogs import admin as admin_cog
+
+        calls = []
+
+        async def fake_reconcile(session, present):
+            calls.append(present)
+            return []
+
+        monkeypatch.setattr(admin_cog, "reconcile_departed_guilds", fake_reconcile)
+        session = MagicMock()
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def db():
+            yield session
+
+        bot = MagicMock()
+        bot.db = db
+        bot.guilds = [MagicMock(id=1), MagicMock(id=2)]
+        cog = admin_cog.AdminCog(bot)
+
+        await cog.on_ready()
+        await cog.on_ready()  # a reconnect fires it again; the scan must not
+
+        assert calls == [{1, 2}]
+        session.commit.assert_awaited_once()

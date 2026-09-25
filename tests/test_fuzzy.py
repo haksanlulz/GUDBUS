@@ -76,3 +76,21 @@ class TestPrefixOptimized:
         results = fuzzy_match("Broadsword", ["Broadsword", "Shortsword", "Knife"])
         assert results[0][0] == "Broadsword"
         assert results[0][1] >= 90
+
+
+class TestMatchingIgnoresCase:
+    """WRatio compares raw strings, so without a processor 'BRAWLING' scored
+    below the cutoff against 'Brawling', and 'fast-draw knife' preferred
+    'Knife' over 'Fast-Draw (Knife)'. /check and combatant lookup both take
+    the top match, so they resolved to the wrong thing or to nothing."""
+
+    def test_uppercase_finds_the_skill(self):
+        assert best_match("BRAWLING", ["Brawling", "Knife"], score_cutoff=50) == "Brawling"
+
+    def test_punctuation_and_case_do_not_pick_the_wrong_skill(self):
+        assert best_match(
+            "fast-draw knife", ["Fast-Draw (Knife)", "Knife", "Brawling"], score_cutoff=50
+        ) == "Fast-Draw (Knife)"
+
+    def test_combatant_names_ignore_case(self):
+        assert best_match("BOB", ["Goblin 1", "Goblin 2", "Orc", "Bob"], score_cutoff=50) == "Bob"

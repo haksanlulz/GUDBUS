@@ -272,6 +272,7 @@ gurps_bot/
     fuzzy.py          # rapidfuzz wrapper
     cache.py          # TTL cache for autocomplete
     sanitize.py       # Input sanitization
+    scope.py          # guild/channel ids for guild-only paths
 ```
 
 ## Development
@@ -318,7 +319,7 @@ Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options]` with 
 
 Counts, to the nearest thousand lines, pinned to the tree by `tests/test_readme.py`:
 - application code: 21K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
-- tests: 29K lines (`find tests -name '*.py' | xargs cat | wc -l`)
+- tests: 30K lines (`find tests -name '*.py' | xargs cat | wc -l`)
 
 Rounded and pinned instead of exact and dated. The previous figures carried a
 date, printed a tenth of a thousand, and were both wrong within days of being

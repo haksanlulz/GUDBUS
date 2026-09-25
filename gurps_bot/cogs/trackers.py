@@ -82,6 +82,13 @@ def _cap_desc(text: str) -> str:
         return text
     return text[: EMBED_DESC_LIMIT - 40] + "\n*…truncated*"
 
+
+def _cap_field(text: str) -> str:
+    """Fit user text into an embed field value (1024). Display-only."""
+    if len(text) <= EMBED_FIELD_LIMIT:
+        return text
+    return text[: EMBED_FIELD_LIMIT - 1] + "…"
+
 # no 'adventuring' choice — it's GM-set per session and needs a multiplier arg.
 # B292's own names where .title() mangles them ("On The Job", bare "Intensive")
 _METHOD_DISPLAY = {
@@ -127,7 +134,7 @@ def _fmt_hours(hours: float) -> str:
 
 
 async def _active_character_id(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction[GURPSBot],
 ) -> tuple[int | None, str | None]:
     """Active character as (id, name); (None, None) in DMs or with none set. Opens its own session."""
     if not interaction.guild_id:
@@ -166,7 +173,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_log(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         method: str,
         hours: float,
@@ -238,7 +245,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_progress_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         character_scoped: bool = True,
     ) -> None:
@@ -286,7 +293,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str | None = None,
         character_scoped: bool = True,
     ) -> None:
@@ -334,7 +341,7 @@ class StudyCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def study_reset(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         skill: str,
         character_scoped: bool = True,
     ) -> None:
@@ -386,7 +393,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_add(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         title: str,
         body: str = "",
         tags: str | None = None,
@@ -433,7 +440,9 @@ class NotesCog(commands.Cog):
         )
         if note_tags:
             embed.add_field(
-                name="Tags", value=", ".join(f"`{t}`" for t in note_tags), inline=False
+                name="Tags",
+                value=_cap_field(", ".join(f"`{t}`" for t in note_tags)),
+                inline=False,
             )
         if secret:
             embed.add_field(name="Visibility", value="GM secret (only you)", inline=True)
@@ -449,7 +458,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         tag: str | None = None,
         this_channel: bool = False,
         character_scoped: bool = False,
@@ -479,7 +488,7 @@ class NotesCog(commands.Cog):
     @app_commands.describe(query="Substring to search for")
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_search(
-        self, interaction: discord.Interaction, query: str
+        self, interaction: discord.Interaction[GURPSBot], query: str
     ) -> None:
         try:
             async with interaction.client.db() as session:
@@ -509,7 +518,7 @@ class NotesCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_edit(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         note_id: int,
         title: str | None = None,
         body: str | None = None,
@@ -548,7 +557,9 @@ class NotesCog(commands.Cog):
         )
         if note_tags:
             embed.add_field(
-                name="Tags", value=", ".join(f"`{t}`" for t in note_tags), inline=False
+                name="Tags",
+                value=_cap_field(", ".join(f"`{t}`" for t in note_tags)),
+                inline=False,
             )
         embed.set_footer(text="Note updated.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -557,7 +568,7 @@ class NotesCog(commands.Cog):
     @app_commands.describe(note_id="ID of the note to delete")
     @app_commands.checks.cooldown(2, 5.0)
     async def notes_delete(
-        self, interaction: discord.Interaction, note_id: int
+        self, interaction: discord.Interaction[GURPSBot], note_id: int
     ) -> None:
         async with interaction.client.db() as session:
             deleted = await delete_note(
@@ -582,7 +593,7 @@ class NotesCog(commands.Cog):
     def _notes_list_embed(
         self, title: str, notes: list, *, tag: str | None = None
     ) -> discord.Embed:
-        embed = discord.Embed(title=title, color=BLUE)
+        embed = discord.Embed(title=_cap_title(title), color=BLUE)
         if not notes:
             suffix = f" tagged `{tag}`" if tag else ""
             embed.description = f"*No notes found{suffix}.*"
@@ -616,7 +627,7 @@ class TimersCog(commands.Cog):
     )
 
     def _require_channel(
-        self, interaction: discord.Interaction
+        self, interaction: discord.Interaction[GURPSBot]
     ) -> tuple[int, int] | None:
         if interaction.guild_id is None or interaction.channel_id is None:
             return None
@@ -634,7 +645,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_add(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         label: str,
         duration: int,
         unit: str = "turns",
@@ -681,9 +692,9 @@ class TimersCog(commands.Cog):
             inline=True,
         )
         if target:
-            embed.add_field(name="Target", value=target, inline=True)
+            embed.add_field(name="Target", value=_cap_field(target), inline=True)
         if note:
-            embed.add_field(name="Note", value=note, inline=False)
+            embed.add_field(name="Note", value=_cap_field(note), inline=False)
         embed.set_footer(text=f"#{timer_id} • /timer tick to advance")
         await interaction.response.send_message(embed=embed)
 
@@ -699,7 +710,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_tick(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         unit: str = "turns",
         amount: int = 1,
         target: str | None = None,
@@ -773,7 +784,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_list(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str | None = None,
         include_expired: bool = True,
     ) -> None:
@@ -826,7 +837,7 @@ class TimersCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def timer_remove(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         timer_id: int | None = None,
         clear_all: bool = False,
         expired_only: bool = False,
@@ -893,7 +904,7 @@ class WealthCog(commands.Cog):
     )
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_show(
-        self, interaction: discord.Interaction, character_scoped: bool = True
+        self, interaction: discord.Interaction[GURPSBot], character_scoped: bool = True
     ) -> None:
         char_id, char_name = (
             await _active_character_id(interaction)
@@ -936,7 +947,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_adjust(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         amount: float,
         reason: str | None = None,
         character_scoped: bool = True,
@@ -966,7 +977,7 @@ class WealthCog(commands.Cog):
             name="New Balance", value=_fmt_money(new_balance), inline=True
         )
         if reason:
-            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Reason", value=_cap_field(reason), inline=False)
         embed.set_footer(text=f"Scope: {_scope_suffix(char_name)}")
         await interaction.response.send_message(embed=embed)
 
@@ -980,7 +991,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_set(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         balance: float,
         character_scoped: bool = True,
     ) -> None:
@@ -1014,7 +1025,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_status(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         status: int,
         character_scoped: bool = True,
     ) -> None:
@@ -1058,7 +1069,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_upkeep(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         living_status: int | None = None,
         character_scoped: bool = True,
     ) -> None:
@@ -1122,7 +1133,7 @@ class WealthCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def wealth_starting(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         tl: int,
         wealth_level: str,
     ) -> None:
@@ -1143,7 +1154,7 @@ class WealthCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(StudyCog(bot))
     await bot.add_cog(NotesCog(bot))
     await bot.add_cog(TimersCog(bot))

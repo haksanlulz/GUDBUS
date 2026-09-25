@@ -11,22 +11,17 @@ def fuzzy_match(
     *,
     prefix_optimized: bool = False,
 ) -> list[tuple[str, float]]:
-    """(match, score) best-first; prefix_optimized uses partial_ratio, which needs default_process to case-fold"""
+    """(match, score) best-first, ignoring case and punctuation in both modes"""
     if not query or not candidates:
         return []
 
-    if prefix_optimized:
-        scorer = fuzz.partial_ratio
-        processor = utils.default_process
-    else:
-        scorer = fuzz.WRatio
-        processor = None
-
+    scorer = fuzz.partial_ratio if prefix_optimized else fuzz.WRatio
     results = process.extract(
         query,
         candidates,
         scorer=scorer,
-        processor=processor,
+        # without it WRatio compares raw strings: "BRAWLING" missed "Brawling"
+        processor=utils.default_process,
         limit=limit,
         score_cutoff=score_cutoff,
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import signal
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -46,6 +47,29 @@ EXTENSIONS = [
 ]
 
 
+def install_sigterm_handler(bot, loop: asyncio.AbstractEventLoop) -> None:
+    """Route SIGTERM to bot.close() so shutdown disposes the database.
+
+    asyncio.run, inside discord.py's Client.run, handles SIGINT only. Under
+    Docker the bot is PID 1, and the kernel drops SIGTERM for a PID 1 with no
+    handler: `docker stop` waited out the grace period and SIGKILLed it. Under
+    systemd, SIGTERM's default action killed it before close() ran.
+    """
+    pending: set[asyncio.Task] = set()
+
+    def _close() -> None:
+        log.info("SIGTERM received — closing")
+        task = loop.create_task(bot.close())
+        pending.add(task)  # keep a reference until it finishes
+        task.add_done_callback(pending.discard)
+
+    try:
+        loop.add_signal_handler(signal.SIGTERM, _close)
+    except (NotImplementedError, RuntimeError):
+        # Windows' event loops have no add_signal_handler; nothing to route
+        log.debug("SIGTERM handler not installed on this platform")
+
+
 class GURPSBot(commands.Bot):
     db: async_sessionmaker[AsyncSession]
     start_time: datetime
@@ -67,6 +91,7 @@ class GURPSBot(commands.Bot):
         self.start_time = datetime.now(timezone.utc)
 
     async def setup_hook(self) -> None:
+        install_sigterm_handler(self, asyncio.get_running_loop())
         self.db = init_engine()
         log.info("Initializing database...")
         await init_db()

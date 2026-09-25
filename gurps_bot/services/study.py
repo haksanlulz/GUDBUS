@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.study import StudyLog
@@ -107,5 +108,6 @@ async def reset_skill(
     else:
         stmt = stmt.where(StudyLog.character_id == character_id)
 
-    result = await session.execute(stmt)
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(stmt))
     return result.rowcount

@@ -97,7 +97,8 @@ def _assert_rejected(interaction):
     interaction.response.send_message.assert_awaited_once()
     call = interaction.response.send_message.await_args
     assert call.kwargs.get("ephemeral") is True
-    assert "GM" in call.args[0]
+    content = call.args[0] if call.args else call.kwargs.get("content", "")
+    assert "GM" in content
 
 
 class TestHpPermission:

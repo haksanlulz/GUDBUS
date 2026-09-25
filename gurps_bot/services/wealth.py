@@ -43,6 +43,38 @@ async def get_wealth(
     return result.scalar_one_or_none()
 
 
+async def fold_character_wallet(
+    session: AsyncSession, discord_user_id: int, character_id: int
+) -> None:
+    """Before a character is deleted: keep its money without a second default wallet.
+
+    The FK's ON DELETE SET NULL re-parents the character's wallet onto the
+    user-wide slot, which is right when that slot is empty. When it is not,
+    the result is two default rows and get_wealth reads only the older one,
+    so the user-wide balance silently changes hands. Fold the balance into the
+    existing default wallet instead (keeping that wallet's Status) and drop the
+    character's row; with no default wallet, leave SET NULL to do its job.
+    """
+    char_wallet = await get_wealth(session, discord_user_id, character_id)
+    if char_wallet is None:
+        return
+    default = await get_wealth(session, discord_user_id, None)
+    if default is None:
+        return
+    await session.execute(
+        update(Wealth)
+        .where(Wealth.id == default.id)
+        .values(balance=Wealth.balance + char_wallet.balance)
+    )
+    await session.delete(char_wallet)
+    await session.flush()
+    await session.refresh(default)
+    log.info(
+        "Folded character %d's wallet into user %d's default wallet",
+        character_id, discord_user_id,
+    )
+
+
 async def get_or_create_wealth(
     session: AsyncSession,
     discord_user_id: int,

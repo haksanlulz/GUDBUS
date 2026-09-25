@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.timers import UNITS, Timer
@@ -164,9 +165,10 @@ async def clear_timers(
     if expired_only:
         stmt = stmt.where(Timer.remaining <= 0)
 
-    result = await session.execute(
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(
         stmt.execution_options(synchronize_session=False)
-    )
+    ))
     return result.rowcount
 
 

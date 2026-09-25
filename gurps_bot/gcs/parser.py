@@ -15,6 +15,12 @@ _MAX_NEST_DEPTH = 64
 #: transaction); a real character has a few hundred
 _MAX_ITEMS_PER_CATEGORY = 4000
 
+#: weapon modes are not items, so the item cap never saw them: one 5MB sheet of
+#: `{}` weapons parsed for 8s, took 1.3GB and stored a 316MB JSON blob. Real
+#: rows carry a handful of modes; a whole character, a few dozen.
+_MAX_WEAPONS_PER_ITEM = 64
+_MAX_WEAPONS_PER_CHARACTER = 1000
+
 #: the name becomes an embed title (256 max); unbounded -> HTTP 400 on send
 _MAX_NAME_LEN = 100
 
@@ -66,6 +72,27 @@ def _guard_item_cap(out: list, kind: str) -> None:
         raise GCSParseError(
             f"character has too many {kind} (max {_MAX_ITEMS_PER_CATEGORY})"
         )
+
+
+class _WeaponBudget:
+    """One character's weapon allowance, shared across traits and equipment."""
+
+    def __init__(self) -> None:
+        self.used = 0
+
+    def take(self, raw: list) -> list[dict]:
+        # checked on the raw length, before building anything from it
+        if len(raw) > _MAX_WEAPONS_PER_ITEM:
+            raise GCSParseError(
+                f"an item has too many weapons (max {_MAX_WEAPONS_PER_ITEM})"
+            )
+        weapons = [w for w in raw if isinstance(w, dict)]
+        self.used += len(weapons)
+        if self.used > _MAX_WEAPONS_PER_CHARACTER:
+            raise GCSParseError(
+                f"character has too many weapons (max {_MAX_WEAPONS_PER_CHARACTER})"
+            )
+        return weapons
 
 
 def _has_calc_or_difficulty(item: dict, calc: dict) -> bool:
@@ -143,6 +170,7 @@ def parse_gcs(data: dict[str, Any]) -> ParsedCharacter:
         raise GCSParseError(f"Unsupported GCS version: {version} (expected 5)")
 
     name = _parse_name(_as_dict(data.get("profile")))
+    weapons = _WeaponBudget()
 
     char = ParsedCharacter(
         name=name,
@@ -150,7 +178,7 @@ def parse_gcs(data: dict[str, Any]) -> ParsedCharacter:
         profile=_as_dict(data.get("profile")),
         # pre-computed swing/thrust/basic_lift/move[]/dodge[]
         calc=_as_dict(data.get("calc")),
-        equipment=_parse_equipment(data),
+        equipment=_parse_equipment(data, weapons),
         # body_type feeds hit-location/DR lookups
         settings={"body_type": _as_dict(data.get("settings")).get("body_type", {})},
     )
@@ -158,7 +186,7 @@ def parse_gcs(data: dict[str, Any]) -> ParsedCharacter:
     _parse_attributes(_as_list(data.get("attributes")), char.attributes)
     _parse_skills(_as_list(data.get("skills")), char.skills)
     _parse_spells(_as_list(data.get("spells")), char.spells)
-    _parse_traits(_as_list(data.get("traits")), char.traits, group_name=None)
+    _parse_traits(_as_list(data.get("traits")), char.traits, None, weapons)
 
     return char
 
@@ -171,10 +199,12 @@ def _parse_name(profile: dict) -> str:
     return name[:_MAX_NAME_LEN]
 
 
-def _parse_equipment(data: dict) -> list[dict]:
-    carried = _flatten_equipment(_as_list(data.get("equipment")))
-    other = _flatten_equipment(_as_list(data.get("other_equipment")))
-    return carried + other
+def _parse_equipment(data: dict, weapons: _WeaponBudget) -> list[dict]:
+    # one list for both, so the item cap counts the whole inventory
+    out: list[dict] = []
+    _flatten_equipment(_as_list(data.get("equipment")), out, weapons)
+    _flatten_equipment(_as_list(data.get("other_equipment")), out, weapons)
+    return out
 
 
 def _parse_attributes(items: list, out: list[ParsedAttribute]) -> None:
@@ -262,6 +292,7 @@ def _parse_traits(
     items: list,
     out: list[ParsedTrait],
     group_name: str | None,
+    weapons: _WeaponBudget,
     _depth: int = 0,
 ) -> None:
     """meta_trait containers ARE one trait (Vampirism) — emit, don't descend; other containers just group, so descend and tag children with the group name"""
@@ -279,11 +310,12 @@ def _parse_traits(
                     _as_list(item["children"]),
                     out,
                     group_name=item.get("name", group_name),
+                    weapons=weapons,
                     _depth=_depth + 1,
                 )
             continue
 
-        out.append(_build_leaf_trait(item, group_name))
+        out.append(_build_leaf_trait(item, group_name, weapons))
 
 
 def _build_meta_trait(item: dict, group_name: str | None) -> ParsedTrait:
@@ -300,9 +332,11 @@ def _build_meta_trait(item: dict, group_name: str | None) -> ParsedTrait:
     )
 
 
-def _build_leaf_trait(item: dict, group_name: str | None) -> ParsedTrait:
+def _build_leaf_trait(
+    item: dict, group_name: str | None, budget: _WeaponBudget
+) -> ParsedTrait:
     calc = _as_dict(item.get("calc"))
-    weapons = [w for w in _as_list(item.get("weapons")) if isinstance(w, dict)]
+    weapons = budget.take(_as_list(item.get("weapons")))
     return ParsedTrait(
         name=item.get("name", "Unknown"),
         group_name=group_name,
@@ -346,27 +380,30 @@ def _parse_weapon(w: dict, *, include_ranged: bool = False) -> dict:
     return result
 
 
-def _flatten_equipment(items: list, _depth: int = 0) -> list[dict]:
-    """flatten, parent before children (backpack, then its contents)"""
+def _flatten_equipment(
+    items: list, out: list[dict], weapons: _WeaponBudget, _depth: int = 0
+) -> None:
+    """flatten, parent before children (backpack, then its contents)
+
+    Appends into the caller's list: a per-level list let every container hold
+    its own 4000, so nesting multiplied the cap instead of respecting it.
+    """
     _guard_depth(_depth)
-    result: list[dict] = []
     for item in items:
-        _guard_item_cap(result, "equipment")
+        _guard_item_cap(out, "equipment")
         if not isinstance(item, dict):
             continue
 
-        result.append(_build_equipment_entry(item))
+        out.append(_build_equipment_entry(item, weapons))
 
         children = item.get("children")
         if children:
-            result.extend(_flatten_equipment(_as_list(children), _depth + 1))
-
-    return result
+            _flatten_equipment(_as_list(children), out, weapons, _depth + 1)
 
 
-def _build_equipment_entry(item: dict) -> dict:
+def _build_equipment_entry(item: dict, budget: _WeaponBudget) -> dict:
     calc = _as_dict(item.get("calc"))
-    weapons = [w for w in _as_list(item.get("weapons")) if isinstance(w, dict)]
+    weapons = budget.take(_as_list(item.get("weapons")))
     return {
         "description": item.get("description", ""),
         "quantity": _as_int(item.get("quantity", 1), 1),

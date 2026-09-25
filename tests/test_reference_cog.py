@@ -429,3 +429,31 @@ def test_categories_cover_all_commands():
     # the five user-facing commands map to the five catalog categories
     assert set(CATEGORIES) == {"skill", "trait", "spell", "technique", "item"}
     assert CATEGORIES["item"] == "equipment"  # /item queries the 'equipment' catalog
+
+
+class TestAutocompleteRanksTheTypedNameFirst:
+    """partial_ratio scores every name that CONTAINS the query at 100, ties keep
+    the catalog's alphabetical order, and the list is cut at 25 — so with 30+
+    names containing "Shield" ahead of it alphabetically, typing "Shield"
+    did not offer Shield at all."""
+
+    def test_an_exact_name_survives_the_cut(self):
+        from gurps_bot.cogs.reference import _rank_suggestions
+
+        candidates = sorted(["Shield"] + [f"A{i:02d} Shield" for i in range(30)])
+        assert _rank_suggestions("Shield", candidates)[0] == "Shield"
+
+    def test_prefix_matches_come_before_substring_matches(self):
+        from gurps_bot.cogs.reference import _rank_suggestions
+
+        candidates = sorted(
+            [f"A{i:02d} Shield" for i in range(30)] + ["Shield-Wall", "Shield Bash"]
+        )
+        top = _rank_suggestions("shield", candidates)
+        assert set(top[:2]) == {"Shield-Wall", "Shield Bash"}
+
+    def test_it_still_caps_at_twenty_five(self):
+        from gurps_bot.cogs.reference import _rank_suggestions
+
+        candidates = [f"Skill {i}" for i in range(100)]
+        assert len(_rank_suggestions("skill", candidates)) == 25

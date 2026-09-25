@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from gurps_bot.gcs.parser import GCSParseError, parse_gcs
 from gurps_bot.services.character_context import CharacterContext
 from gurps_bot.services.characters import (
+    CharacterNameTaken,
     delete_character,
     get_active_character,
     get_character_by_name,
@@ -26,6 +27,7 @@ from gurps_bot.services.characters import (
     import_character,
     set_active_character,
 )
+from gurps_bot.services.limits import StorageLimitExceeded
 from gurps_bot.ui import embeds
 from gurps_bot.ui.formatters import (
     format_equipment_line,
@@ -37,15 +39,15 @@ from gurps_bot.ui.formatters import (
 from gurps_bot.cogs._autocomplete import make_autocomplete
 from gurps_bot.ui.views import ConfirmView, PaginatorView
 from gurps_bot.utils.fuzzy import fuzzy_match
+from gurps_bot.utils.scope import guild_id_of
 
 log = logging.getLogger(__name__)
 
 MAX_IMPORT_SIZE = 5 * 1024 * 1024  # 5 MB
-MAX_CHARACTERS_PER_USER = 20
 
 
 async def _fetch_char_names(
-    session: AsyncSession, interaction: discord.Interaction,
+    session: AsyncSession, interaction: discord.Interaction[GURPSBot],
 ) -> list[str]:
     return await get_user_character_names(session, interaction.user.id)
 
@@ -54,7 +56,7 @@ _char_name_autocomplete = make_autocomplete(_fetch_char_names)
 
 
 async def _send_paginated(
-    interaction: discord.Interaction,
+    interaction: discord.Interaction[GURPSBot],
     title: str,
     lines: list[str],
     char_name: str,
@@ -92,7 +94,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
     @app_commands.checks.cooldown(1, 10.0)
     @app_commands.command(name="import", description="Import a .gcs character file")
     @app_commands.describe(file="A .gcs character sheet file")
-    async def import_char(self, interaction: discord.Interaction, file: discord.Attachment) -> None:
+    async def import_char(self, interaction: discord.Interaction[GURPSBot], file: discord.Attachment) -> None:
         # extension check is just ux; the json parse below is the real validation
         if not file.filename.endswith(".gcs"):
             await interaction.response.send_message(
@@ -144,21 +146,17 @@ class CharGroup(commands.GroupCog, group_name="char"):
             return
 
         user_id = interaction.user.id
-        guild_id = interaction.guild_id
+        guild_id = guild_id_of(interaction)
 
         async with interaction.client.db() as session:
-            # cap check; replacing an existing character is exempt
-            existing_names = await get_user_character_names(session, user_id)
-            if parsed.name not in existing_names and len(existing_names) >= MAX_CHARACTERS_PER_USER:
-                await interaction.followup.send(
-                    f"You have {len(existing_names)} characters (max {MAX_CHARACTERS_PER_USER}). "
-                    "Delete one before importing a new one.",
+            # the service owns the cap: only it knows whether this is a new row
+            try:
+                char, was_replacement = await import_character(
+                    session, user_id, parsed, file.filename, raw_data=data,
                 )
+            except (StorageLimitExceeded, CharacterNameTaken) as e:
+                await interaction.followup.send(str(e))
                 return
-
-            char, was_replacement = await import_character(
-                session, user_id, parsed, file.filename, raw_data=data,
-            )
             await set_active_character(session, user_id, guild_id, char.id)
             await session.commit()
             # Cache invalidation is owned by services/characters.py
@@ -180,7 +178,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         )
 
     @app_commands.command(name="view", description="View your active character summary")
-    async def view(self, interaction: discord.Interaction) -> None:
+    async def view(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -193,7 +191,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
 
     @app_commands.command(name="skills", description="List your character's skills")
     @app_commands.describe(search="Filter skills by name")
-    async def skills(self, interaction: discord.Interaction, search: str | None = None) -> None:
+    async def skills(self, interaction: discord.Interaction[GURPSBot], search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -214,7 +212,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
 
     @app_commands.command(name="spells", description="List your character's spells")
     @app_commands.describe(search="Filter spells by name")
-    async def spells(self, interaction: discord.Interaction, search: str | None = None) -> None:
+    async def spells(self, interaction: discord.Interaction[GURPSBot], search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -235,7 +233,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
 
     @app_commands.command(name="traits", description="List your character's advantages and disadvantages")
     @app_commands.describe(search="Filter traits by name")
-    async def traits(self, interaction: discord.Interaction, search: str | None = None) -> None:
+    async def traits(self, interaction: discord.Interaction[GURPSBot], search: str | None = None) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -255,7 +253,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         await _send_paginated(interaction, "Traits", lines, char_name)
 
     @app_commands.command(name="equipment", description="View your character's equipment")
-    async def equipment(self, interaction: discord.Interaction) -> None:
+    async def equipment(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with CharacterContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -276,7 +274,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
         )
 
     @app_commands.command(name="export", description="Export your active character as .gcs")
-    async def export(self, interaction: discord.Interaction) -> None:
+    async def export(self, interaction: discord.Interaction[GURPSBot]) -> None:
         await interaction.response.defer(ephemeral=True)
         async with CharacterContext(interaction, defer=False) as ctx:
             if not ctx.ok:
@@ -300,10 +298,10 @@ class CharGroup(commands.GroupCog, group_name="char"):
         )
 
     @app_commands.command(name="list", description="List all your imported characters")
-    async def list_chars(self, interaction: discord.Interaction) -> None:
+    async def list_chars(self, interaction: discord.Interaction[GURPSBot]) -> None:
         await interaction.response.defer()
         user_id = interaction.user.id
-        guild_id = interaction.guild_id
+        guild_id = guild_id_of(interaction)
 
         async with interaction.client.db() as session:
             chars = await get_user_characters(session, user_id)
@@ -320,9 +318,9 @@ class CharGroup(commands.GroupCog, group_name="char"):
     @app_commands.command(name="switch", description="Switch your active character")
     @app_commands.describe(name="Character name to switch to")
     @app_commands.autocomplete(name=_char_name_autocomplete)
-    async def switch(self, interaction: discord.Interaction, name: str) -> None:
+    async def switch(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         user_id = interaction.user.id
-        guild_id = interaction.guild_id
+        guild_id = guild_id_of(interaction)
 
         async with interaction.client.db() as session:
             char = await get_character_by_name(session, user_id, name)
@@ -341,7 +339,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
     @app_commands.command(name="delete", description="Delete an imported character")
     @app_commands.describe(name="Character name to delete")
     @app_commands.autocomplete(name=_char_name_autocomplete)
-    async def delete_char(self, interaction: discord.Interaction, name: str) -> None:
+    async def delete_char(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         user_id = interaction.user.id
 
         async with interaction.client.db() as session:
@@ -373,5 +371,5 @@ class CharGroup(commands.GroupCog, group_name="char"):
                     )
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CharGroup(bot))

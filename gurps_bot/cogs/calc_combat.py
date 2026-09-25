@@ -114,7 +114,7 @@ class CalcCombatCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def fall(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         height: float,
         hp: int,
         unit: str = "yards",
@@ -215,7 +215,7 @@ class CalcCombatCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def collision(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         striker_hp: int,
         striker_velocity: int,
         struck_hp: int,
@@ -294,7 +294,7 @@ class CalcCombatCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def explosion(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         basic_damage: int,
         distances: str,
         frag_dice: int | None = None,
@@ -383,7 +383,7 @@ class CalcCombatCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def knockback(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         basic_damage: int,
         target_st: int,
         damage_type: str = "cr",
@@ -450,5 +450,5 @@ class CalcCombatCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CalcCombatCog(bot))
