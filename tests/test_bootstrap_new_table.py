@@ -25,7 +25,9 @@ from gurps_bot.db import bootstrap
 from gurps_bot.db.models import Base
 
 
-def _build_pre_migration_db(db_path, drop_tables: list[str], drop_columns: dict):
+def _build_pre_migration_db(
+    db_path, drop_tables: list[str], drop_columns: dict, drop_indexes: list[str] = (),
+):
     """Create the schema as it was BEFORE a migration, stamped at that revision.
 
     Mirrors a real deployed database: tables from an older release, an
@@ -35,6 +37,13 @@ def _build_pre_migration_db(db_path, drop_tables: list[str], drop_columns: dict)
 
     removed_tables = []
     removed_cols = []
+    removed_indexes = []
+    for name in drop_indexes:
+        for table in Base.metadata.tables.values():
+            for index in list(table.indexes):
+                if index.name == name:
+                    removed_indexes.append((table, index))
+                    table.indexes.discard(index)
     for name in drop_tables:
         table = Base.metadata.tables[name]
         removed_tables.append(table)
@@ -53,6 +62,8 @@ def _build_pre_migration_db(db_path, drop_tables: list[str], drop_columns: dict)
             Base.metadata._add_table(table.name, table.schema, table)
         for tbl, col in removed_cols:
             tbl.append_column(col)
+        for tbl, index in removed_indexes:
+            tbl.indexes.add(index)
 
 
 @pytest.fixture
@@ -76,6 +87,8 @@ def legacy_db(tmp_path):
         db,
         drop_tables=["campaign_settings", "crafting_charges", "crafting_projects"],
         drop_columns={"combatants": "parries_by_weapon"},
+        # same rule for indexes a later migration creates
+        drop_indexes=["uq_wealth_default"],
     )
     con = sqlite3.connect(db)
     con.execute("create table alembic_version (version_num varchar(32) not null primary key)")

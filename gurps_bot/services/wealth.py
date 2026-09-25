@@ -8,6 +8,7 @@ import math
 log = logging.getLogger(__name__)
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.wealth import Wealth
@@ -99,17 +100,24 @@ async def get_or_create_wealth(
     log.info(
         "Creating wallet for user=%d character_id=%s", discord_user_id, character_id
     )
-    wealth = Wealth(
-        discord_user_id=discord_user_id,
-        character_id=character_id,
-        balance=0.0,
-        status=0,
+    # First-touch race: two commands both find no wallet and both insert. The
+    # unique indexes (uq_wealth_owner per character, uq_wealth_default for the
+    # default wallet) make the second insert a no-op here, and the re-read
+    # below returns whichever row won. Not a savepoint: pysqlite opens no
+    # transaction before SAVEPOINT, so RELEASE would commit the caller's work.
+    await session.execute(
+        sqlite_insert(Wealth)
+        .values(
+            discord_user_id=discord_user_id,
+            character_id=character_id,
+            balance=0.0,
+            status=0,
+        )
+        .on_conflict_do_nothing()
     )
-    session.add(wealth)
-    await session.flush()
-    # first-touch race: uq_wealth_owner rejects a duplicate per-character wallet
-    # (one transient error, retry finds the winner); duplicate default wallets are
-    # defused by get_wealth's limit(1)
+    wealth = await get_wealth(session, discord_user_id, character_id)
+    if wealth is None:  # pragma: no cover - inserted or won just above
+        raise RuntimeError("wallet row vanished between insert and read")
     return wealth
 
 

@@ -9,8 +9,10 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -19,12 +21,19 @@ from gurps_bot.db.models import Base
 
 class Wealth(Base):
     __tablename__ = "wealth"
-    # sqlite treats NULL character_id rows as distinct, so this does NOT stop
-    # duplicate default wallets — get_wealth's limit(1) is the real guard
-    # against the first-touch race; the constraint only covers per-character
-    # wallets (and create_all only applies it to fresh DBs)
+    # uq_wealth_owner covers per-character wallets only: SQLite treats two NULL
+    # character_ids as distinct. The partial index covers the default wallet,
+    # so a first-touch race cannot leave a second one whose money get_wealth
+    # (oldest row only) would never show.
     __table_args__ = (
         UniqueConstraint("discord_user_id", "character_id", name="uq_wealth_owner"),
+        Index(
+            "uq_wealth_default",
+            "discord_user_id",
+            unique=True,
+            sqlite_where=text("character_id IS NULL"),
+            postgresql_where=text("character_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

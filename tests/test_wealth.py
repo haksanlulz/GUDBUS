@@ -21,15 +21,19 @@ OTHER_USER_ID = 7
 
 
 class TestWalletRaceAndValidation:
-    async def test_get_wealth_tolerates_duplicate_default_wallet_rows(self, db_session):
+    async def test_a_second_default_wallet_cannot_exist(self, db_session):
+        """SQLite treats NULL character_ids as distinct, so uq_wealth_owner never
+        covered the default wallet and a first-touch race could leave two, one
+        of them invisible. uq_wealth_default (partial, character_id IS NULL)
+        makes the second a constraint violation."""
+        from sqlalchemy.exc import IntegrityError
+
         from gurps_bot.db.wealth import Wealth
-        # sqlite treats NULL character_id rows as distinct, so a first-touch race
-        # can dup the default wallet; return one, not MultipleResultsFound
+
         db_session.add(Wealth(discord_user_id=USER_ID, character_id=None, balance=10.0, status=0))
         db_session.add(Wealth(discord_user_id=USER_ID, character_id=None, balance=20.0, status=0))
-        await db_session.commit()
-        w = await get_wealth(db_session, USER_ID)
-        assert w is not None
+        with pytest.raises(IntegrityError):
+            await db_session.commit()
 
     async def test_set_balance_rejects_non_finite(self, db_session):
         for bad in (float("inf"), float("-inf"), float("nan")):
