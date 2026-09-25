@@ -17,11 +17,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.crafting import (
-    CHARGE_KINDS,
     ENDINGS,
-    STAGES,
+    VOCABULARIES,
     CraftingCharge,
     CraftingProject,
+    ProjectVocabulary,
 )
 #: Owned by services/limits.py, which holds the whole storage surface in one
 #: readable place; imported rather than redeclared so there is one number.
@@ -31,20 +31,44 @@ from gurps_bot.services.limits import (  # noqa: F401
 )
 
 
+def vocabulary_for(domain: str) -> ProjectVocabulary:
+    """The stages and charge kinds a domain's projects may use.
+
+    Refused rather than defaulted: a project in an unknown domain has no rules
+    to be resolved by, and treating it as invention would charge it invention's
+    figures.
+    """
+    try:
+        return VOCABULARIES[domain]
+    except KeyError:
+        raise ValueError(
+            f"unknown crafting domain {domain!r}; expected one of {tuple(VOCABULARIES)}"
+        ) from None
+
+
 async def start_project(
     session: AsyncSession,
     *,
     discord_user_id: int,
     guild_id: int | None,
     name: str,
-    complexity: str,
     skill: int,
+    complexity: str | None = None,
     retail_price: int = 0,
     domain: str = "invention",
     character_id: int | None = None,
     modifiers: dict | None = None,
+    state: dict | None = None,
 ) -> CraftingProject:
-    """Open a project at the Concept stage. Caller commits."""
+    """Open a project at its domain's first stage. Caller commits.
+
+    Invention needs a ``complexity`` (B473's rating) and keeps its figures in
+    the typed columns; the other domains pass ``state`` instead, in the shape
+    their own service module owns, and leave ``complexity`` NULL.
+    """
+    vocabulary = vocabulary_for(domain)
+    if domain == "invention" and complexity is None:
+        raise ValueError("an invention project needs its B473 complexity rating")
     await enforce_row_cap(
         session,
         CraftingProject,
@@ -60,14 +84,25 @@ async def start_project(
         name=name,
         domain=domain,
         complexity=complexity,
-        stage="concept",
+        stage=vocabulary.stages[0],
         skill=skill,
         retail_price=retail_price,
         modifiers_json=modifiers or {},
+        state_json=None if state is None else dict(state),
     )
     session.add(project)
     await session.flush()
     return project
+
+
+async def set_state(session: AsyncSession, project: CraftingProject, state: dict) -> None:
+    """Replace a project's domain state whole. Caller commits.
+
+    Whole, because a JSON column does not see an in-place mutation: a caller
+    that edits ``project.state_json["progress"]`` in place writes nothing.
+    """
+    project.state_json = dict(state)
+    await session.flush()
 
 
 async def get_project(
@@ -116,10 +151,15 @@ async def record_charge(
 
     ``facilities`` and ``copy`` legitimately have no outcome — they buy the
     right to roll and a finished item respectively. ``attempt`` does, and
-    :func:`record_attempt` is the only way to write one.
+    :func:`record_attempt` is the only way to write one. The kinds are the
+    project's own domain's: a smith cannot record an invention's facilities.
     """
-    if kind not in CHARGE_KINDS:
-        raise ValueError(f"unknown charge kind {kind!r}; expected one of {CHARGE_KINDS}")
+    kinds = vocabulary_for(project.domain).charge_kinds
+    if kind not in kinds:
+        raise ValueError(
+            f"unknown charge kind {kind!r} for a {project.domain} project; "
+            f"expected one of {kinds}"
+        )
     if project.is_finished:
         raise ValueError(
             f"project {project.id} is {project.stage} — a finished project takes "
@@ -141,12 +181,17 @@ async def record_attempt(
     amount: int,
     outcome: str | None,
     elapsed_days: int = 0,
+    kind: str = "attempt",
+    note: str | None = None,
 ) -> CraftingCharge:
-    """Charge an attempt and record what it bought, in one write.
+    """Charge a roll and record what it bought, in one write.
 
     The outcome is required. An attempt row without one is precisely the state
     the spec forbids — the money is gone and nothing says why — so it is
-    refused here rather than defaulted to something plausible.
+    refused here rather than defaulted to something plausible. ``kind`` is the
+    domain's word for its roll (invention's and repair's ``attempt``,
+    crafting's and alchemy's ``roll``, enchantment's ``casting``); whichever it
+    is, the project's attempt counter moves with the row.
     """
     if not outcome:
         raise ValueError(
@@ -155,7 +200,7 @@ async def record_attempt(
         )
 
     charge = await record_charge(
-        session, project, kind="attempt", amount=amount, outcome=outcome
+        session, project, kind=kind, amount=amount, outcome=outcome, note=note
     )
     # Same flush, same transaction as the charge above: the counter and the
     # ledger cannot end up disagreeing, in either direction.
@@ -194,8 +239,12 @@ async def spent_by_kind(session: AsyncSession, project_id: int) -> dict[str, int
 async def advance_stage(
     session: AsyncSession, project: CraftingProject, stage: str
 ) -> None:
-    if stage not in STAGES:
-        raise ValueError(f"unknown stage {stage!r}; expected one of {STAGES}")
+    stages = vocabulary_for(project.domain).stages
+    if stage not in stages:
+        raise ValueError(
+            f"unknown stage {stage!r} for a {project.domain} project; "
+            f"expected one of {stages}"
+        )
     if project.is_finished:
         raise ValueError(f"project {project.id} is already {project.stage}")
     project.stage = stage
