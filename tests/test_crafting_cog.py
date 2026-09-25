@@ -675,6 +675,27 @@ class TestSavingFromTheGuidedFlow:
         await modal.on_submit(interaction)
         return interaction
 
+    async def test_an_absurd_price_is_refused_with_a_reason(self, db):
+        """It reached SQLite as a 20-digit int and raised OverflowError on
+        flush; the modal has no error hook, so the user got no reply at all."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        interaction = await self._submit(db, view, price="9" * 20)
+        said = interaction.response.send_message.await_args.kwargs["content"]
+        assert "price" in said.lower()
+        async with db() as s:
+            assert await service.list_projects(s, 1, 99, include_finished=True) == []
+
+    async def test_the_largest_allowed_price_saves(self, db):
+        from gurps_bot.cogs.crafting import MAX_RETAIL_PRICE
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await self._submit(db, view, price=str(MAX_RETAIL_PRICE))
+        async with db() as s:
+            (found,) = await service.list_projects(s, 1, 99)
+            assert found.retail_price == MAX_RETAIL_PRICE
+
     async def test_it_stores_the_menu_choices(self, db):
         view = InventionFlowView(skill=18, invoker_id=1)
         await _choose(view.complexity_select, _interaction(), "amazing")

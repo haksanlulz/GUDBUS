@@ -56,6 +56,11 @@ log = logging.getLogger(__name__)
 
 _INVENTION = discord.Color.dark_gold()
 
+#: A trillion dollars. The retail price is multiplied into per-attempt and
+#: facility charges and stored as a 64-bit integer; unbounded, a 20-digit entry
+#: raised OverflowError on flush and the modal answered nothing at all.
+MAX_RETAIL_PRICE = 10**12
+
 #: How long a guided flow stays clickable. Matches the other views in the bot.
 _VIEW_TIMEOUT = 300
 
@@ -446,6 +451,13 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
             return
         if price < 0:
             await respond(interaction, "Retail price cannot be negative.", ephemeral=True)
+            return
+        if price > MAX_RETAIL_PRICE:
+            await respond(
+                interaction,
+                f"Retail price can be at most ${MAX_RETAIL_PRICE:,}.",
+                ephemeral=True,
+            )
             return
 
         name = sanitize_name(self.project_name.value)
