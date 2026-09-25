@@ -318,7 +318,7 @@ uv run python -m pytest -m "not slow and not integration and not load"
 Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options]` with strict markers on, so a misspelled mark on a test fails collection instead of warning.
 
 Counts, to the nearest thousand lines, pinned to the tree by `tests/test_readme.py`:
-- application code: 21K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
+- application code: 22K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
 - tests: 30K lines (`find tests -name '*.py' | xargs cat | wc -l`)
 
 Rounded and pinned instead of exact and dated. The previous figures carried a

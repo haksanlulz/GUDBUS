@@ -430,9 +430,28 @@ def previous_turn(combat: Combat) -> None:
     if pos is None:
         pos = combat.current_index % len(ordered)
 
-    pos -= 1
-    if pos < 0:
-        pos = len(ordered) - 1
+    # the mirror of advance_turn's skip: step back over Dead/Unconscious seats,
+    # so Prev undoes a Next that skipped them instead of landing on a corpse
+    # with the round still incremented. Bounded to n steps; if everyone is
+    # down, move exactly one seat, as advance_turn does.
+    n = len(ordered)
+    target: int | None = None
+    wrapped = False
+    for step in range(1, n + 1):
+        np = pos - step
+        if np < 0:
+            np += n
+            wrapped = True
+        effects = set(ordered[np].status_effects or [])
+        if StatusEffect.DEAD in effects or StatusEffect.UNCONSCIOUS in effects:
+            continue
+        target = np
+        break
+    if target is None:
+        target = (pos - 1) % n
+        wrapped = pos - 1 < 0
+    pos = target
+    if wrapped:
         combat.round_number = max(1, combat.round_number - 1)
 
     combat.current_index = pos
