@@ -239,6 +239,20 @@ once — the bootstrap refuses to guess and will tell you the same thing.
 Command changes re-register themselves on the next start. Never overwrite
 `data/gurps_bot.db` — if you rsync instead of pull, exclude it.
 
+**One bot per database.** On its first `on_ready` the bot purges every guild
+that has rows in the database but is not in the guild list Discord just gave
+it — that is how a server that removed the bot while it was offline gets the
+deletion `/legal` promises. Two bot applications sharing one database file
+(a dev app pointed at production data, a `:nightly` container on the same
+appdata) will therefore purge each other's servers. Give a second instance
+its own database; copy the file if you want its data.
+
+**Back up before an update that carries a data migration.** Migrations may
+rewrite rows, not only add columns (`a3d9e5f71c08` merges duplicate default
+wallets and cannot be reversed), and the bootstrap step takes no backup of
+its own. `deploy/backup-db.sh` or the Python online-backup one-liner under
+Docker above, then update.
+
 ## Backups
 
 ```sh
