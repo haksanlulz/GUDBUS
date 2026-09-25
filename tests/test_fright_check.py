@@ -18,7 +18,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
 from gurps_bot.mechanics.dice import DiceSpec, RollResult
-from gurps_bot.mechanics.tables import FRIGHT_CHECK_TABLE, fright_table_effect
+from gurps_bot.mechanics.tables import fright_table_result
 
 
 def _interaction():
@@ -117,7 +117,7 @@ class TestFrightRollComposition:
         effect = _field(_sent_embed(interaction), "Effect")
         assert effect is not None
         assert "13" in effect
-        assert fright_table_effect(13) in effect
+        assert fright_table_result(13) in effect
 
     async def test_huge_total_reads_the_40_plus_row(self):
         # Fail by 25 (never plausible with the cap in place, but the row has to
@@ -129,8 +129,8 @@ class TestFrightRollComposition:
         ):
             await cog.fright_check.callback(cog, interaction, modifier=-19)
         effect = _field(_sent_embed(interaction), "Effect")
-        assert fright_table_effect(43) in effect
-        assert FRIGHT_CHECK_TABLE[40] in effect
+        assert fright_table_result(43) in effect
+        assert "40+" in effect
 
     async def test_success_rolls_no_fright_dice(self):
         cog, interaction = _cog(), _interaction()

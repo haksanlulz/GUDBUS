@@ -21,7 +21,8 @@ gurps_bot/data/gcs_library/
 data/*.db
 data/*.db-shm
 data/*.db-wal
-*.log
+**/*.log
+**/*.log.*
 backups/
 
 # Python caches / build output

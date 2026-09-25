@@ -34,7 +34,7 @@ class ProjectVocabulary:
     charge can buy; and what `/craft work` logs, if the domain has a calendar.
 
     Shared SHAPE, per-domain DATA — the line `ModifierBreakdown` draws for the
-    rules. Five domains disagree on nearly every rule (GAUNTLET §3), and they
+    rules. Five domains disagree on nearly every rule, and they
     disagree here too: repair has no calendar because an attempt is its clock,
     alchemy has a stage invention lacks (the pending disaster roll), and no two
     charge-kind lists are the same.

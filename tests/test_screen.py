@@ -9,13 +9,7 @@ from gurps_bot.mechanics import hiking
 from gurps_bot.mechanics import speed_range as sr
 from gurps_bot.mechanics.combat_constants import STATUS_ICONS, Maneuver, StatusEffect
 from gurps_bot.mechanics.reaction import REACTION_BANDS
-from gurps_bot.mechanics.tables import (
-    CRITICAL_HEAD_BLOW_TABLE,
-    CRITICAL_HIT_TABLE,
-    CRITICAL_MISS_TABLE,
-    FRIGHT_CHECK_TABLE,
-    UNARMED_CRITICAL_MISS_TABLE,
-)
+from gurps_bot.mechanics.tables import CRITICAL_TABLES, FRIGHT_TABLE_PAGES
 from gurps_bot.ui import screen
 
 _EMBED_FIELD_LIMIT = 1024
@@ -68,13 +62,11 @@ class TestSourcing:
         assert rng["Disastrous"].startswith("≤")
         assert rng["Excellent"].startswith("≥")
 
-    def test_crit_and_fright_reference_are_the_owned_tables(self):
-        assert screen.crit_hit_reference() == CRITICAL_HIT_TABLE
-        assert screen.crit_miss_reference() == CRITICAL_MISS_TABLE
-        assert screen.head_blow_reference() == CRITICAL_HEAD_BLOW_TABLE
-        assert screen.unarmed_crit_miss_reference() == UNARMED_CRITICAL_MISS_TABLE
-        # Fright table keys are 3d+margin totals (4-40+), not margins (B360).
-        assert screen.fright_reference()[4] == FRIGHT_CHECK_TABLE[4]
+    def test_critical_tables_are_cited_not_reproduced(self):
+        page = screen.rolls_page()
+        crit = next(f for f in page.fields if f.name.startswith("Critical"))
+        for t in CRITICAL_TABLES:
+            assert f"{t.name} ({t.page})" in crit.value
 
 
 class TestPages:
@@ -105,15 +97,9 @@ class TestPages:
 
 
 class TestCritsAndFrightPages:
-    def test_crits_category_exists(self):
-        assert "crits" in screen.CATEGORIES
-        assert "crits" in screen.CATEGORY_INDEX
-
-    def test_crits_page_shows_head_blow_and_unarmed(self):
-        page = screen.build_screen_pages()[screen.CATEGORY_INDEX["crits"]]
-        names = " ".join(f.name for f in page.fields)
-        assert "Head Blow" in names
-        assert "Unarmed" in names
+    def test_fright_page_cites_rather_than_reproduces(self):
+        # SJG Online Policy: no copied tables — the procedure and the page only.
+        assert screen.fright_page().fields == []
 
     def test_screen_cog_choices_cover_every_category(self):
         # The /screen category picker is hand-listed in the cog; a category
@@ -131,6 +117,7 @@ class TestCritsAndFrightPages:
         assert "14" in desc
         assert "HT" not in desc
         assert "3d" in desc and "margin" in desc
+        assert FRIGHT_TABLE_PAGES in desc
 
 
 from gurps_bot.mechanics import damage

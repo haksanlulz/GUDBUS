@@ -20,7 +20,9 @@ The grant is revocable at any time, and it voids if you charge money.
 
 1. **Free.** No paywall, no donation-gating on the data.
 2. **No rules text.** Name + attribute + difficulty + page cite per entry. Never
-   the descriptive paragraph, never copied tables.
+   the descriptive paragraph, never copied tables. A result-table roll (e.g.
+   `/fright-check`) shows an original label of three words or fewer for the one
+   row rolled, plus the page; no command lists a result table's rows.
 3. **Verbatim game-aid notice** (the §IV boilerplate) in `/legal` — pinned
    character-exact by `tests/test_legal.py`.
 4. **Exhaustive, mechanically ordered.** "Every skill in the library," sorted

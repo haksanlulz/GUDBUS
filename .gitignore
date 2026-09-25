@@ -11,9 +11,10 @@ __pycache__/
 dist/
 build/
 
-# Database
+# Database (WAL/SHM sidecars hold uncommitted user data too)
 *.db
-data/*.db
+*.db-shm
+*.db-wal
 
 # Local DB snapshots. Versioned here rather than only in .git/info/exclude, so a
 # fresh clone inherits the protection instead of losing it with the exclude file.
@@ -33,8 +34,9 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 
-# Logs
+# Logs, rotated copies included
 *.log
+*.log.*
 
 # Local env / tooling
 .venv/

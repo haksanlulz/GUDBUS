@@ -1,6 +1,6 @@
 """Persistent projects for the four non-invention crafting domains.
 
-Written red-first on 2026-09-25 (DESIGN_v0.5). Each domain keeps its own
+Written red-first on 2026-09-25. Each domain keeps its own
 vocabulary (stages, charge kinds, what `/craft work` logs) and its own
 `state_json`, on the one `crafting_projects` table invention already uses.
 The rules themselves are not restated here: every expected number below is

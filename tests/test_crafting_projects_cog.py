@@ -1,8 +1,8 @@
 """The four calculators' **Save as project** buttons, `/craft work`, `/craft roll`
-and the per-domain project views — the surface half of DESIGN_v0.5.
+and the per-domain project views — the surface half of persistent projects.
 
-Mock-interaction tests for the wiring; whether the flows are usable is the
-GAUNTLET §2 manual rung the operator closes on the hosted bot. What IS
+Mock-interaction tests for the wiring; whether the flows are usable is a
+manual check the operator closes on the hosted bot. What IS
 testable is here: each button opens the right modal and the modal saves the
 calculator's own figures, `/craft work` counts the domain's unit, `/craft roll`
 rolls the domain's dice (patched here), and the enchanting roll never reaches

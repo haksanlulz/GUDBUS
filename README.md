@@ -117,10 +117,10 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/check` | Roll 3d6 vs skill/attribute |
 | `/contest` | Quick contest between two targets |
 | `/damage` | Roll damage with type and DR |
-| `/attack` | Roll attack with equipped weapon |
+| `/attack` | Roll attack with equipped weapon; a critical rolls the crit table |
 | `/defend` | Roll dodge/parry/block |
 | `/hit-location` | Random hit location (3d6) |
-| `/fright-check` | Fright check with table lookup |
+| `/fright-check` | Fright check: rolls vs Will, gives a three-word result and the page |
 | `/posture` | Posture combat modifiers lookup (B551) |
 | `/target` | Deliberate hit-location penalty + effect (B552) |
 | `/macro save` | Save a named dice macro |
@@ -196,7 +196,7 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 | `/craft delete` | Delete a finished project and its history |
 | `/craft work` | Log time on a project: hours (making), weeks (brewing) or days (Slow and Sure enchanting) |
 | `/craft roll` | Make a project's roll: the piece's quality, the brew, the enchantment, or one repair attempt |
-| `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction, crits, fright |
+| `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction; page cites for crits and fright |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 | `/campaign show` | Show this server's house rules |
 | `/campaign rule-of-14` | Turn B360's Rule of 14 on (RAW) or off (house rule) |
@@ -216,10 +216,11 @@ it rather than 1 (B380/B419). The tracker redraws itself:
 ## Reference data
 
 The `/skill`, `/trait`, `/spell`, `/technique`, and `/item` lookups read an
-in-memory **facts-only** catalog vendored from the upstream
+in-memory **facts-only** catalog built from the upstream
 [`richardwilkes/gcs_master_library`](https://github.com/richardwilkes/gcs_master_library)
-(the GURPS Character Sheet master library, MPL-2.0). The snapshot is pinned to a
-specific commit and synced with:
+(the GURPS Character Sheet master library, MPL-2.0). It is not in this repository:
+a snapshot pinned to a specific commit is fetched at build time, and the Docker
+image carries it with its upstream LICENSE. Sync a local copy with:
 
 ```bash
 uv run python tools/sync_gcs_library.py          # clone + vendor the pinned snapshot
@@ -260,7 +261,7 @@ gurps_bot/
     checks.py         # GURPS 3d6 roll-under engine
     damage.py         # Damage + wounding multipliers
     dice.py           # Dice parser and roller
-    tables.py         # Fright check, critical hit/miss tables
+    tables.py         # Fright check row lookup, critical-table page cites
     combat_constants.py  # Maneuvers, status effects, display helpers
     ...               # + 21 more (defense, injury, speed_range, encumbrance, ...)
   gcs/
@@ -352,5 +353,11 @@ code.
 
 ## License
 
-MIT (see `LICENSE`). The vendored reference data is MPL-2.0; see
+MIT (see `LICENSE`). The reference data fetched at build time is MPL-2.0; see
 [Reference data](#reference-data).
+
+The MIT license covers this project's own code only. It grants no rights in
+GURPS or any other Steve Jackson Games trademark or material. The bot runs under
+the [SJ Games Online Policy](https://www.sjgames.com/general/online_policy.html),
+which permits free game aids only: anyone who forks, redistributes, or hosts it
+must follow that policy themselves, including not charging for it.
