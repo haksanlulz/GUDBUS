@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -137,6 +138,231 @@ class TestBootstrapEntryPoint:
         assert "stamp head" in err
         # and it must not have guessed a stamp
         assert asyncio.run(_stamped_revision(url)) is None
+
+
+class TestNoMigrationScriptsAtAll:
+    """A head of None is a packaging fault, and has to say so.
+
+    Alembic returns None for the head when it finds no revision files —
+    `script_location` points somewhere wrong, or `versions/` never made it into
+    the image. That is a different fault from "this database is behind the
+    code", with a different fix, and before this the operator got the stale
+    refusal with `head: None` printed in it.
+
+    The condition cannot occur in a correctly packaged tree, so it is built
+    here out of a real versions-less Alembic config rather than asserted about.
+    """
+
+    def _versionless_root(self, tmp_path: Path) -> Path:
+        (tmp_path / "migrations" / "versions").mkdir(parents=True)
+        (tmp_path / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/migrations\n", encoding="utf-8"
+        )
+        return tmp_path
+
+    def test_script_head_refuses_rather_than_returning_none(
+        self, tmp_path, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(tmp_path))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "alembic.ini" in message, message
+        assert "script_location" in message, message
+        assert "versions" in message, message
+
+    def test_the_gate_names_the_packaging_fault_not_a_stale_schema(
+        self, tmp_path, monkeypatch
+    ):
+        """The whole point: a real stamped DB must not be blamed for this."""
+        from gurps_bot.db import bootstrap
+
+        # Built with the real alembic.ini, so the database itself is fine.
+        url = _url(tmp_path, "stamped.db")
+        assert bootstrap.main(url) == 0
+
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        message = str(exc.value)
+        assert "script_location" in message, message
+        assert "head:     None" not in message, message
+        assert "behind the code" not in message, message
+
+    def test_the_gate_refuses_a_fresh_db_instead_of_booting_unstamped(
+        self, tmp_path, monkeypatch
+    ):
+        """The fresh-DB branch was the fail-open: it returned before any check.
+
+        Measured before the fix: the gate took `not has_tables ->
+        create_and_stamp -> return`, alembic resolved "head" to nothing, and
+        the bot booted on a database left (has_tables=True, revision=None) out
+        of an image carrying no migrations at all.
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "fresh.db")
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        assert "script_location" in str(exc.value), exc.value
+        assert not (tmp_path / "fresh.db").exists(), "the gate created a database"
+
+    def test_the_deploy_path_blames_packaging_not_a_brand_new_database(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """main() is the entry point deploy/deploy.sh and the Dockerfile run.
+
+        Before the fix a fresh database here drew the LEGACY refusal, which
+        blames a correctly-created database and prescribes `alembic stamp
+        head` — a no-op in a tree with no revisions.
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "fresh_deploy.db")
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        assert bootstrap.main(url) == 2
+        err = capsys.readouterr().err
+        assert "script_location" in err, err
+        assert "predates Alembic" not in err, err
+
+    def test_the_deploy_path_refuses_a_stamped_db_without_a_raw_traceback(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        """Before the fix this reached upgrade_head, and alembic raised
+        CommandError("Can't locate revision identified by ...") out of main().
+        """
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "stamped.db")
+        assert bootstrap.main(url) == 0  # built with the real alembic.ini
+
+        root = tmp_path / "alembic_root"
+        root.mkdir()
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._versionless_root(root))
+
+        assert bootstrap.main(url) == 2
+        assert "script_location" in capsys.readouterr().err
+
+
+class TestPackagingFaultsAlembicRaisesOn:
+    """The other two shapes of the same fault, which Alembic RAISES on.
+
+    An empty ``versions/`` is the only one that returns None. Measured against
+    built trees: a tree with no alembic.ini at all raises ``CommandError("No
+    'script_location' key found in configuration.")``, and a script_location
+    naming a directory that is not there raises ``CommandError("Path doesn't
+    exist: ...")``. Both escaped as a raw traceback out of BOTH entry points —
+    past ``run_bot``'s ``except SchemaGateError``, so the refusal never reached
+    the rotating log file either, and out of ``main()`` instead of an exit 2.
+
+    Each root below is a real Alembic config, not a mock, so these stay honest
+    if Alembic changes which faults it raises on.
+    """
+
+    def _no_ini_root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "no_ini"
+        root.mkdir()
+        return root
+
+    def _bad_location_root(self, tmp_path: Path) -> Path:
+        root = tmp_path / "bad_location"
+        root.mkdir()
+        (root / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/not_shipped\n", encoding="utf-8"
+        )
+        return root
+
+    @pytest.fixture(params=["_no_ini_root", "_bad_location_root"])
+    def broken_root(self, request, tmp_path):
+        return getattr(self, request.param)(tmp_path)
+
+    def test_script_head_refuses_instead_of_raising_commanderror(
+        self, broken_root, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "script_location" in message, message
+        # Alembic's own words are quoted, because they are the only thing that
+        # tells these two faults apart for the operator reading the log.
+        assert "alembic says:" in message, message
+
+    def test_the_startup_gate_refuses_and_touches_no_database(
+        self, tmp_path, broken_root, monkeypatch
+    ):
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "untouched.db")
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.ensure_schema_current(url)
+        assert "script_location" in str(exc.value), exc.value
+        assert not (tmp_path / "untouched.db").exists(), "the gate created a database"
+
+    def test_the_deploy_path_exits_2_instead_of_a_traceback(
+        self, tmp_path, broken_root, monkeypatch, capsys
+    ):
+        from gurps_bot.db import bootstrap
+
+        url = _url(tmp_path, "deploy.db")
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", broken_root)
+        assert bootstrap.main(url) == 2
+        err = capsys.readouterr().err
+        assert "script_location" in err, err
+        assert "predates Alembic" not in err, err
+
+
+class TestMultipleHeadsIsNotAPackagingFault:
+    """Two migrations authored on parallel branches leave versions/ with two
+    heads. Alembic raises the same ``CommandError`` type the packaging faults
+    raise, so a plain ``except CommandError`` told the operator to audit
+    alembic.ini and their Docker COPY lines for a build that was fine, and
+    named no merge. Built out of a real two-root versions/ dir.
+    """
+
+    def _two_head_root(self, tmp_path: Path) -> Path:
+        versions = tmp_path / "gurps_bot" / "db" / "migrations" / "versions"
+        versions.mkdir(parents=True)
+        (tmp_path / "gurps_bot" / "db" / "migrations" / "script.py.mako").write_text("", encoding="utf-8")
+        (tmp_path / "gurps_bot" / "db" / "migrations" / "env.py").write_text("", encoding="utf-8")
+        for rev in ("aaaa00000001", "bbbb00000002"):
+            (versions / f"{rev}_root.py").write_text(
+                f'revision = "{rev}"\ndown_revision = None\n'
+                "def upgrade():\n    pass\n\ndef downgrade():\n    pass\n",
+                encoding="utf-8",
+            )
+        (tmp_path / "alembic.ini").write_text(
+            "[alembic]\nscript_location = %(here)s/gurps_bot/db/migrations\n", encoding="utf-8"
+        )
+        return tmp_path
+
+    def test_script_head_names_the_merge_not_the_packaging(self, tmp_path, monkeypatch):
+        from gurps_bot.db import bootstrap
+
+        monkeypatch.setattr(bootstrap, "REPO_ROOT", self._two_head_root(tmp_path))
+        with pytest.raises(bootstrap.SchemaGateError) as exc:
+            bootstrap.script_head()
+        message = str(exc.value)
+        assert "more than one head" in message, message
+        assert "alembic merge heads" in message, message
+        assert "alembic says:" in message, message
+        # The packaging prescription is wrong here and must not be printed.
+        assert "shipped with this build" not in message, message
+        assert "script_location" not in message, message
 
 
 class TestDeployScriptRunsMigrations:

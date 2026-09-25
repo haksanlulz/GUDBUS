@@ -5,6 +5,9 @@ Two entry points, one implementation:
 ``uv run python -m gurps_bot.db.bootstrap`` — the DEPLOY path (deploy.sh runs it
 on every update):
 
+* no revision files at all -> refuses FIRST, naming the packaging fault: a
+  tree that cannot find a head can judge no database, and every branch below
+  misreports the fault as a database one;
 * brand-new DB -> ``create_tables()`` builds the full current schema and
   stamps it at Alembic head. create_all can never ADD columns to an existing
   table, so the stamp is what makes every future ``upgrade head`` meaningful;
@@ -95,14 +98,56 @@ def upgrade_head(url: str) -> None:
 
 
 def script_head() -> str:
-    """The Alembic head revision THIS code expects (single owner of the lookup)."""
+    """The Alembic head revision THIS code expects (single owner of the lookup).
+
+    A packaging fault rather than a schema one — `script_location` points
+    somewhere wrong, `alembic.ini` never shipped, or `versions/` did not make it
+    into the image — reaches this function in two different shapes, and both are
+    caught here. Refuse and name it, because every path that reaches a database
+    compares this against a stamp, where a missing head reads as "your schema is
+    behind the code": a true refusal pointing at the wrong fix.
+
+    * the config resolves but holds no revision files -> Alembic returns None;
+    * the config cannot resolve at all -> Alembic RAISES ``CommandError``.
+      Measured against built trees: no alembic.ini -> "No 'script_location' key
+      found in configuration."; script_location naming a directory that does not
+      exist -> "Path doesn't exist: ...". Both used to escape as a raw traceback
+      out of BOTH entry points, and past ``run_bot``'s ``except SchemaGateError``,
+      so the refusal never reached the log file either.
+
+    ``CommandError`` also carries a THIRD, unrelated fault that is not a
+    packaging one: a correctly shipped ``versions/`` whose migrations resolve to
+    more than one head (two authored on parallel branches, merged). That one is
+    told apart by Alembic's own words and gets its own refusal, because the
+    packaging advice cannot fix it and names no merge.
+
+    Both entry points call this BEFORE looking at the database, so the refusal
+    is reached whatever state the database is in — see the comments in
+    :func:`ensure_schema_current` and :func:`main` for the three ways a
+    versions-less tree misreports the fault when it does not.
+    """
     from alembic.config import Config
     from alembic.script import ScriptDirectory
+    from alembic.util.exc import CommandError
 
     cfg = Config(str(REPO_ROOT / "alembic.ini"))
-    head = ScriptDirectory.from_config(cfg).get_current_head()
+    try:
+        head = ScriptDirectory.from_config(cfg).get_current_head()
+    except CommandError as exc:
+        # get_current_head() raises CommandError for TWO unrelated families:
+        # the packaging ones this function is named for, and BRANCHING - a
+        # correctly packaged tree whose versions/ holds more than one head.
+        # Measured on a two-root versions/ dir: alembic says "The script
+        # directory has multiple heads (due to branching).Please use
+        # get_heads(), or merge the branches using alembic merge.", and the
+        # packaging refusal answered it with "check that alembic.ini shipped
+        # with this build" - advice that cannot fix it, for a build that is
+        # fine, while naming no merge.
+        if "multiple heads" in str(exc):
+            raise SchemaGateError(_multiple_heads_refusal(str(exc))) from exc
+        raise SchemaGateError(_no_scripts_refusal(str(exc))) from exc
     if head is None:
-        raise RuntimeError("alembic has no revisions — the migrations directory is empty")
+        raise SchemaGateError(_no_scripts_refusal())
     return head
 
 
@@ -181,6 +226,50 @@ def _display_url(url: str) -> str:
         return url
 
 
+def _no_scripts_refusal(detail: str | None = None) -> str:
+    """Message for a tree/image that cannot produce an Alembic head at all.
+
+    Says nothing about the database, because the database is not the problem.
+    ``detail`` carries Alembic's own words for the faults it raises on rather
+    than returning None from — a missing alembic.ini, or a script_location
+    pointing at a directory that is not there.
+    """
+    lines = [
+        "!!  REFUSING: Alembic could not resolve a head revision, so there is",
+        "    nothing to compare this database against.",
+        f"        alembic.ini: {REPO_ROOT / 'alembic.ini'}",
+    ]
+    if detail:
+        lines.append(f"        alembic says: {detail}")
+    lines.append(
+        "    This is a packaging fault, not a schema one — the database may be\n"
+        "    perfectly current. Check that alembic.ini shipped with this build,\n"
+        "    that its script_location points at gurps_bot/db/migrations, and\n"
+        "    that its versions/ directory came with it, then relaunch."
+    )
+    return "\n".join(lines)
+
+
+def _multiple_heads_refusal(detail: str) -> str:
+    """Message for a versions/ tree that resolves to more than one head.
+
+    Not a packaging fault: everything shipped, and two migrations were
+    authored on parallel branches. Says nothing about the database, and
+    nothing about alembic.ini, because neither is the problem.
+    """
+    return (
+        "!!  REFUSING: this build's migrations have more than one head, so\n"
+        "    there is no single revision to compare this database against.\n"
+        f"        migrations: {REPO_ROOT / 'gurps_bot' / 'db' / 'migrations' / 'versions'}\n"
+        f"        alembic says: {detail}\n"
+        "    The build is fine and the database may be perfectly current - two\n"
+        "    migrations were written on parallel branches and merged. List them,\n"
+        "    then join them into one head and commit the merge revision:\n"
+        "        uv run python -m alembic heads\n"
+        "        uv run python -m alembic merge heads -m 'merge branches'"
+    )
+
+
 def _legacy_refusal(url: str) -> str:
     """Message for a DB with tables but no stamp (shared by deploy + startup)."""
     return (
@@ -217,6 +306,8 @@ def ensure_schema_current(url: str | None = None) -> None:
     in-memory URL is a no-op here for the same reason.
 
     * transient / in-memory URL -> no-op;
+    * no migration scripts       -> REFUSE (a packaging fault — checked FIRST,
+      because a tree with no revisions can judge no database at all);
     * absent or empty database   -> :func:`create_and_stamp` (first run works);
     * tables but no stamp        -> REFUSE (never guess a legacy revision);
     * stamped below head         -> REFUSE, loudly, naming the fix;
@@ -233,13 +324,20 @@ def ensure_schema_current(url: str | None = None) -> None:
     if is_transient_sqlite_url(url):
         return
 
+    # Packaging before schema, and before the branch on the database: a tree
+    # with no revision files can judge no database at all, and the fresh-DB
+    # branch below would otherwise create_all a schema, stamp nothing (alembic
+    # resolves "head" to an empty set), and let the bot boot UNSTAMPED out of
+    # an image carrying no migrations — measured, the gate returned and the
+    # database came back (has_tables=True, revision=None).
+    head = script_head()
+
     has_tables, revision = asyncio.run(_inspect_db(url))
     if not has_tables:
         create_and_stamp(url)
         return
     if not revision:
         raise SchemaGateError(_legacy_refusal(url))
-    head = script_head()
     if revision != head:
         raise SchemaGateError(_stale_refusal(url, revision, head))
 
@@ -250,6 +348,18 @@ def main(url: str | None = None) -> int:
     if is_transient_sqlite_url(url):
         print("In-memory database URL — nothing to bootstrap.")
         return 0
+
+    # Packaging before schema, same reason as the startup gate. Measured on a
+    # versions-less tree without this check: a fresh database drew the LEGACY
+    # refusal, which blames a brand-new correctly-created database and
+    # prescribes `alembic stamp head` — a no-op in a tree with no revisions —
+    # and a stamped database drew a raw alembic CommandError traceback out of
+    # upgrade_head ("Can't locate revision identified by ...").
+    try:
+        script_head()
+    except SchemaGateError as exc:
+        print(exc, file=sys.stderr)
+        return 2
 
     # create_and_stamp runs create_all, so it is ONLY correct on a database
     # with no tables. On an existing one create_all cannot ALTER a table, but it

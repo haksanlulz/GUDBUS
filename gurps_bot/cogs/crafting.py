@@ -41,12 +41,14 @@ from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.crafting import Complexity, Method, Stage
 from gurps_bot.services.crafting import (
     charge_history,
+    delete_project,
     finish_project,
     get_project,
     list_projects,
     spent_by_kind,
 )
 from gurps_bot.ui.respond import respond
+from gurps_bot.ui.views import PaginatorView
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
@@ -54,6 +56,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 _INVENTION = discord.Color.dark_gold()
+
+#: A trillion dollars. The retail price is multiplied into per-attempt and
+#: facility charges and stored as a 64-bit integer; unbounded, a 20-digit entry
+#: raised OverflowError on flush and the modal answered nothing at all.
+MAX_RETAIL_PRICE = 10**12
+
+_PROJECTS_PAGE = 10
 
 #: How long a guided flow stays clickable. Matches the other views in the bot.
 _VIEW_TIMEOUT = 300
@@ -445,6 +454,13 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
             return
         if price < 0:
             await respond(interaction, "Retail price cannot be negative.", ephemeral=True)
+            return
+        if price > MAX_RETAIL_PRICE:
+            await respond(
+                interaction,
+                f"Retail price can be at most ${MAX_RETAIL_PRICE:,}.",
+                ephemeral=True,
+            )
             return
 
         name = sanitize_name(self.project_name.value)
@@ -1217,18 +1233,39 @@ class CraftingCog(commands.Cog):
             )
             return
 
-        embed = discord.Embed(title="Crafting projects", colour=_INVENTION)
-        for project in found:
-            embed.add_field(
-                name=f"`{project.id}` {project.name}",
-                value=(
-                    f"{project.complexity.capitalize()} · **{project.stage}** · "
-                    f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
-                ),
-                inline=False,
-            )
-        embed.set_footer(text="B473-474")
-        await respond(interaction, embed=embed, ephemeral=True)
+        # one field per project had no cap: Discord allows 25 fields and 6000
+        # chars per embed, and the per-user cap is 50 — so the list 400'd
+        # before the cap was reached. Pages of _PROJECTS_PAGE keep every one
+        # reachable (names are <=200 chars, so a page stays well inside 6000).
+        chunks = [
+            found[i : i + _PROJECTS_PAGE] for i in range(0, len(found), _PROJECTS_PAGE)
+        ]
+        pages = []
+        for n, chunk in enumerate(chunks, 1):
+            embed = discord.Embed(title="Crafting projects", colour=_INVENTION)
+            for project in chunk:
+                embed.add_field(
+                    name=f"`{project.id}` {project.name}"[:256],
+                    value=(
+                        f"{project.complexity.capitalize()} · **{project.stage}** · "
+                        f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
+                    ),
+                    inline=False,
+                )
+            footer = "B473-474"
+            if len(chunks) > 1:
+                footer = f"Page {n}/{len(chunks)} · {footer}"
+            embed.set_footer(text=footer)
+            pages.append(embed)
+        if len(pages) == 1:
+            await respond(interaction, embed=pages[0], ephemeral=True)
+            return
+        view = PaginatorView(pages, interaction.user.id)
+        await respond(interaction, embed=pages[0], view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # paging still works; only the timeout cleanup needs it
 
     @craft.command(name="project", description="One project: stage, time, and what it has cost")
     @app_commands.describe(id="The project id from /craft projects")
@@ -1308,6 +1345,37 @@ class CraftingCog(commands.Cog):
             interaction,
             f"Abandoned **{name}**. Its charge history stays — the money was "
             f"still spent.",
+            ephemeral=True,
+        )
+
+    @craft.command(name="delete", description="Delete a finished project and its history")
+    @app_commands.describe(id="The project id from /craft projects include_finished:True")
+    async def delete(self, interaction: discord.Interaction[GURPSBot], id: int) -> None:
+        # Finished projects count toward the per-user cap on purpose (limits.py),
+        # so this is the way to free a slot. Only finished ones: an active
+        # project has to be abandoned first, which is the deliberate step.
+        async with interaction.client.db() as session:
+            found = await get_project(session, id, interaction.user.id)
+            if found is None:
+                await respond(
+                    interaction, f"No project `{id}` of yours.", ephemeral=True
+                )
+                return
+            if not found.is_finished:
+                await respond(
+                    interaction,
+                    f"`{id}` is still {found.stage}. Abandon it first with "
+                    f"`/craft abandon`, then delete it.",
+                    ephemeral=True,
+                )
+                return
+            name = found.name
+            await delete_project(session, found)
+            await session.commit()
+
+        await respond(
+            interaction,
+            f"Deleted **{name}** and its charge history.",
             ephemeral=True,
         )
 

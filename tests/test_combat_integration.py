@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from unittest.mock import patch
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -22,6 +23,8 @@ from gurps_bot.services.combat import (
     record_defense,
     start_combat,
 )
+
+pytestmark = pytest.mark.integration
 
 
 GM_ID = 555_001

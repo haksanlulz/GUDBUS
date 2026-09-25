@@ -36,6 +36,7 @@ from gurps_bot.services.characters import (
 )
 from gurps_bot.ui import embeds
 from gurps_bot.ui.formatters import format_modifier_suffix
+from gurps_bot.ui.respond import defer, respond
 from gurps_bot.utils._cache_instances import skill_cache as _skill_cache
 from gurps_bot.utils.fuzzy import fuzzy_match
 
@@ -114,10 +115,9 @@ async def _resolve_target(
 ) -> tuple[int, str] | None:
     """Try raw int, then attribute, then fuzzy skill; sends the error itself and returns None on failure."""
     async def _send_error(msg: str) -> None:
-        if use_followup:
-            await interaction.followup.send(msg, ephemeral=True)
-        else:
-            await interaction.response.send_message(msg, ephemeral=True)
+        # respond() routes on is_done() and keeps an error private after a
+        # public defer; a direct followup would have posted it to the channel
+        await respond(interaction, msg, ephemeral=True)
 
     try:
         value = int(target_str)
@@ -226,7 +226,7 @@ class RollingCog(commands.Cog):
         label_b: str = "Side B",
         hidden: bool = False,
     ) -> None:
-        await interaction.response.defer(ephemeral=hidden)
+        await defer(interaction, ephemeral=hidden)
 
         resolved_a = await _resolve_target(interaction, target_a, use_followup=True)
         if resolved_a is None:
@@ -244,7 +244,7 @@ class RollingCog(commands.Cog):
 
         result_a, result_b, winner = contest(val_a, val_b)
         embed = embeds.contest_embed(result_a, result_b, winner, label_a, label_b)
-        await interaction.followup.send(embed=embed, ephemeral=hidden)
+        await respond(interaction, embed=embed, ephemeral=hidden)
 
     @app_commands.checks.cooldown(2, 5.0)
     @app_commands.command(name="fright-check", description="Roll a Fright Check")

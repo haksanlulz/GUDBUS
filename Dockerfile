@@ -48,6 +48,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #    cached until the pin changes — after `COPY . .` it re-cloned upstream on
 #    every source edit. .dockerignore keeps the local copy out of the context,
 #    so the COPY below cannot overwrite it.
+#
+#    GCS_GIT_TIMEOUT is the per-git-call ceiling in tools/sync_gcs_library.py.
+#    docker build does not inherit the host environment, so without this ARG the
+#    documented escape hatch cannot reach the caller most likely to trip the
+#    ceiling: this fetch pulls the pinned commit WITH blobs (~201 MB) on a cold
+#    cache. Build args are exposed to RUN as environment variables, so declaring
+#    it here is the whole delivery:
+#        docker build --build-arg GCS_GIT_TIMEOUT=1800 .
+#    (compose: pass it under `build: args:`.) The default must stay in step with
+#    _GIT_TIMEOUT_DEFAULT in the script — tests/test_sync.py asserts both.
+ARG GCS_GIT_TIMEOUT=600
 COPY tools/sync_gcs_library.py tools/
 RUN python tools/sync_gcs_library.py \
     && python tools/sync_gcs_library.py --check

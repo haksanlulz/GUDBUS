@@ -21,6 +21,7 @@ from gurps_bot.cogs.trackers import (
     EMBED_FIELD_LIMIT,
     EMBED_TITLE_LIMIT,
     NotesCog,
+    StudyCog,
     TimersCog,
     WealthCog,
     _cap_desc,
@@ -171,3 +172,20 @@ class TestTheOtherUserTextFields:
             cog, interaction, amount=-10.0, reason="R" * 1500, character_scoped=False
         )
         _assert_fits(_sent_embed(interaction))
+
+
+class TestStudyListCountsWhatItHides:
+    """The "…and N more" count came from a 50-row fetch minus the 10 shown,
+    so it could never exceed 40: a user with 120 logs was told 40, not 110."""
+
+    async def test_the_hidden_count_is_the_real_count(self, session_factory):
+        from gurps_bot.services.study import log_study
+
+        async with session_factory() as s:
+            for _ in range(120):
+                await log_study(s, 42, "Broadsword", "self_teaching", 1.0)
+            await s.commit()
+        cog = StudyCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.study_list.callback(cog, interaction, character_scoped=False)
+        assert "and 110 more" in _sent_embed(interaction).description

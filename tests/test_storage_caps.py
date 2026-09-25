@@ -141,6 +141,53 @@ class TestReplacingIsNotCreating:
         assert again.expression == "2d6+1"
 
 
+class TestAnUnreadableCountRefuses:
+    """A cap that cannot read its own count refuses, rather than waving the row in.
+
+    `SELECT count(*)` always returns a row, so `session.scalar` returning None
+    is not reachable on SQLite and this is not a live hole. What these pin is
+    which side the unreachable branch is written on: this module bounds what
+    strangers can write to the operator's disk, so a count it cannot read has
+    to fail closed.
+    """
+
+    async def test_a_none_count_raises_instead_of_permitting_the_insert(
+        self, session, monkeypatch
+    ):
+        from gurps_bot.db.notes import Note
+
+        async def blind_scalar(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(session, "scalar", blind_scalar)
+        with pytest.raises(StorageLimitExceeded):
+            await limits.enforce_row_cap(
+                session,
+                Note,
+                limits.MAX_NOTES_PER_USER_PER_GUILD,
+                "notes",
+                discord_user_id=USER,
+                guild_id=GUILD,
+            )
+
+    async def test_the_refusal_does_not_print_the_unreadable_count(
+        self, session, monkeypatch
+    ):
+        """The message is user-facing, and "You have None notes" is not one."""
+        from gurps_bot.db.notes import Note
+
+        async def blind_scalar(*_args, **_kwargs):
+            return None
+
+        monkeypatch.setattr(session, "scalar", blind_scalar)
+        with pytest.raises(StorageLimitExceeded) as exc:
+            await limits.enforce_row_cap(
+                session, Note, 250, "notes", discord_user_id=USER
+            )
+        assert "None" not in str(exc.value), str(exc.value)
+        assert "notes" in str(exc.value), str(exc.value)
+
+
 class TestTheUserIsTold:
     """A cap the user cannot see is indistinguishable from a broken command."""
 
@@ -163,8 +210,9 @@ class TestTheUserIsTold:
         await handler.on_app_command_error(interaction, wrapped)
 
         sent = interaction.response.send_message.await_args
-        assert "250 notes" in sent.args[0], (
-            f"the cap message was swallowed; user saw: {sent.args[0]!r}"
+        text = sent.args[0] if sent.args else sent.kwargs.get("content", "")
+        assert "250 notes" in text, (
+            f"the cap message was swallowed; user saw: {text!r}"
         )
         assert sent.kwargs.get("ephemeral") is True
 

@@ -20,7 +20,12 @@ dependencies = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
-    "pyright>=1.1",
+    # Pinned exactly, not floored. A pyright minor release adds checks, so a
+    # floor turns a green gate red on a bump nobody made, and
+    # .github/workflows/tests.yml gates on it. Bump deliberately, with whatever
+    # errors the new version finds in the same commit. (1.1.409 is what the
+    # gate was measured against; 1.1.414 was current at the time.)
+    "pyright==1.1.409",
     # tools/make_icon.py and make_banner.py declare this themselves via PEP 723,
     # but tests/test_brand_art.py has to import them, and a smoke test that
     # skips itself for a missing dependency is a rung that never fires. The
@@ -36,7 +41,7 @@ dev = [
 dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
-    "pyright>=1.1",
+    "pyright==1.1.409",  # pinned; see the dependency-group above
     "pillow>=10",
     "pyyaml>=6",
 ]
@@ -55,6 +60,16 @@ pythonVersion = "3.10"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# pytest 9 does not honour --strict-markers when it arrives via addopts (measured
+# 2026-09-11 on 9.0.3: an unregistered mark only warned); the ini key is what fires
+# there. addopts covers pytest 7/8, which predate the key. Drop it once >=9 is required.
+addopts = "--strict-markers"
+strict_markers = true
+markers = [
+    "slow: takes more than a few seconds (renders images, drives a shell script); skipped by the fast tier",
+    "integration: exercises real DB sessions or the full extension tree end to end rather than one unit",
+    "load: concurrency and throughput shapes, many combats or guilds at once",
+]
 
 [build-system]
 requires = ["setuptools>=68.0"]

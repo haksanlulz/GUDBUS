@@ -262,9 +262,14 @@ def long_distance_modifier(
     *, yards: float | None = None, miles: float | None = None
 ) -> int:
     """Long-distance penalty for Information/Seek spells (B241); between rows use the worse bracket."""
-    if yards is not None and miles is None:
+    # Branches rather than one conditional expression: the XOR guard proves
+    # exactly one argument is set, but a checker cannot derive that, so `miles`
+    # still reads as float | None in the else. Same three outcomes as before.
+    if yards is not None and miles is not None:
+        raise ValueError("Provide exactly one of yards or miles.")
+    if yards is not None:
         distance_miles = yards / _YARDS_PER_MILE
-    elif miles is not None and yards is None:
+    elif miles is not None:
         distance_miles = float(miles)
     else:
         raise ValueError("Provide exactly one of yards or miles.")

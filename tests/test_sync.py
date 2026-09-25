@@ -15,6 +15,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -168,3 +169,141 @@ class TestVendoredLibrary:
             pytest.skip("snapshot not vendored yet (run tools/sync_gcs_library.py)")
         # --check is a network-free dry run; returns 0 when skills are present.
         assert sync.cmd_check() == 0
+
+
+# ---------------------------------------------------------------------------
+# Every git call is bounded.
+# ---------------------------------------------------------------------------
+class TestGitCallsAreBounded:
+    """A stalled fetch must fail with a message, not hang the deploy.
+
+    ``subprocess.run`` blocks indefinitely on a stalled TCP connection (as
+    opposed to a refused one), and this script shells out to git over the
+    network. deploy.sh runs it at deploy time, which is where an unbounded hang
+    is worst — the deploy simply looks like it is still working.
+    """
+
+    def test_git_passes_an_explicit_timeout(self, monkeypatch):
+        seen = {}
+
+        def fake_run(argv, **kwargs):
+            seen.update(kwargs)
+            return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        sync._git(["ls-remote", "--heads", sync.REPO_URL, "main"])
+        assert seen.get("timeout") == sync.GIT_TIMEOUT_SECONDS
+        assert isinstance(sync.GIT_TIMEOUT_SECONDS, (int, float))
+        assert sync.GIT_TIMEOUT_SECONDS > 0
+
+    def test_a_timeout_becomes_a_runtime_error_naming_the_upstream(self, monkeypatch):
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError) as exc:
+            sync._git(["fetch", "--depth", "1", "origin", sync.PINNED_REF])
+        message = str(exc.value)
+        assert sync.REPO_URL in message, message
+        assert str(sync.GIT_TIMEOUT_SECONDS) in message, message
+
+    def test_the_cli_turns_it_into_a_nonzero_exit_rather_than_a_traceback(
+        self, monkeypatch, capsys
+    ):
+        """main() already funnels exceptions into exit 2 — pin that it still does."""
+
+        def fake_run(argv, **kwargs):
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        assert sync.main(["--verify-upstream"]) == 2
+        assert sync.REPO_URL in capsys.readouterr().err
+
+    def test_there_is_no_retry(self, monkeypatch):
+        """A deploy-time tool fails with a message; it does not quietly try again.
+
+        Asserted by counting attempts rather than by grepping _git's source
+        for loop keywords: a recursive re-call, a second subprocess.run in the
+        except block, and `return _git(args) if proc.returncode else proc`
+        all carry neither `for ` nor `while `, and a future docstring
+        containing either word would have failed a passing implementation.
+        """
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append(argv)
+            raise subprocess.TimeoutExpired(cmd=argv, timeout=kwargs["timeout"])
+
+        monkeypatch.setattr(sync.subprocess, "run", fake_run)
+        with pytest.raises(RuntimeError):
+            sync._git(["fetch", "--depth", "1", "origin", sync.PINNED_REF])
+        assert len(calls) == 1, calls
+
+    def test_the_ceiling_is_overridable_without_editing_the_file(self, monkeypatch):
+        """The ceiling fires inside `docker build` and deploy/deploy.sh, where
+        raising the constant in the source means rebuilding the thing that is
+        timing out. A slow-but-working link that used to finish is the one
+        regression direction a ceiling has, so the escape hatch has to reach
+        the place the failure happens.
+        """
+        monkeypatch.setenv("GCS_GIT_TIMEOUT", "1800")
+        assert _load_module().GIT_TIMEOUT_SECONDS == 1800
+
+        monkeypatch.delenv("GCS_GIT_TIMEOUT")
+        assert _load_module().GIT_TIMEOUT_SECONDS == 600
+
+    def test_a_garbage_override_is_refused_rather_than_silently_ignored(
+        self, monkeypatch
+    ):
+        """Falling back to the default would hand back the hang the ceiling
+        exists to bound, with the operator believing they had raised it.
+        """
+        monkeypatch.setenv("GCS_GIT_TIMEOUT", "ten minutes")
+        with pytest.raises(ValueError) as exc:
+            _load_module()
+        assert "GCS_GIT_TIMEOUT" in str(exc.value)
+
+    def test_docker_build_can_actually_deliver_the_override(self):
+        """The test above proves the module READS the variable. It cannot see
+        whether the caller the escape hatch names can SEND it, and for a while
+        the primary one could not: `docker build` does not inherit the host
+        environment, so with no `ARG GCS_GIT_TIMEOUT` declared, both
+        `GCS_GIT_TIMEOUT=1800 docker build .` and `--build-arg
+        GCS_GIT_TIMEOUT=1800` changed nothing — on the one path that does the
+        cold-cache ~201 MB fetch.
+
+        Ordering matters as much as presence: an ARG only reaches RUN
+        instructions after it in the same build stage.
+        """
+        dockerfile = (_TOOLS_SCRIPT.parent.parent / "Dockerfile").read_text(
+            encoding="utf-8"
+        )
+        lines = dockerfile.splitlines()
+
+        arg_at = [
+            i
+            for i, line in enumerate(lines)
+            if line.strip().startswith("ARG GCS_GIT_TIMEOUT")
+        ]
+        assert arg_at, "Dockerfile declares no ARG GCS_GIT_TIMEOUT"
+
+        run_at = [
+            i
+            for i, line in enumerate(lines)
+            if "sync_gcs_library.py" in line and line.lstrip().startswith("RUN")
+        ]
+        assert run_at, "no RUN invokes sync_gcs_library.py"
+
+        for run_line in run_at:
+            earlier = [i for i in arg_at if i < run_line]
+            assert earlier, f"ARG declared after the RUN on line {run_line + 1}"
+            # ...and in the same stage: a FROM between them resets the ARG.
+            assert not any(
+                lines[i].startswith("FROM ") for i in range(max(earlier) + 1, run_line)
+            ), "a FROM sits between the ARG and the RUN, which resets it"
+
+        default = lines[arg_at[0]].split("=", 1)[1].strip()
+        assert default == str(sync._GIT_TIMEOUT_DEFAULT), (
+            f"Dockerfile default {default} != _GIT_TIMEOUT_DEFAULT "
+            f"{sync._GIT_TIMEOUT_DEFAULT}"
+        )

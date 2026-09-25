@@ -8,6 +8,7 @@ import math
 log = logging.getLogger(__name__)
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.wealth import Wealth
@@ -43,6 +44,10 @@ async def get_wealth(
     return result.scalar_one_or_none()
 
 
+class WalletOverflow(ValueError):
+    """Folding a character's wallet would push the user-wide balance past float range."""
+
+
 async def fold_character_wallet(
     session: AsyncSession, discord_user_id: int, character_id: int
 ) -> None:
@@ -61,6 +66,13 @@ async def fold_character_wallet(
     default = await get_wealth(session, discord_user_id, None)
     if default is None:
         return
+    # the same guard adjust_balance has: two huge-but-finite balances can sum
+    # to inf, and a non-finite balance bricks the wallet (see _require_finite)
+    if not math.isfinite(default.balance + char_wallet.balance):
+        raise WalletOverflow(
+            "Deleting this character would overflow your user-wide wallet. "
+            "Lower one of the two balances with /wealth set first."
+        )
     await session.execute(
         update(Wealth)
         .where(Wealth.id == default.id)
@@ -88,17 +100,24 @@ async def get_or_create_wealth(
     log.info(
         "Creating wallet for user=%d character_id=%s", discord_user_id, character_id
     )
-    wealth = Wealth(
-        discord_user_id=discord_user_id,
-        character_id=character_id,
-        balance=0.0,
-        status=0,
+    # First-touch race: two commands both find no wallet and both insert. The
+    # unique indexes (uq_wealth_owner per character, uq_wealth_default for the
+    # default wallet) make the second insert a no-op here, and the re-read
+    # below returns whichever row won. Not a savepoint: pysqlite opens no
+    # transaction before SAVEPOINT, so RELEASE would commit the caller's work.
+    await session.execute(
+        sqlite_insert(Wealth)
+        .values(
+            discord_user_id=discord_user_id,
+            character_id=character_id,
+            balance=0.0,
+            status=0,
+        )
+        .on_conflict_do_nothing()
     )
-    session.add(wealth)
-    await session.flush()
-    # first-touch race: uq_wealth_owner rejects a duplicate per-character wallet
-    # (one transient error, retry finds the winner); duplicate default wallets are
-    # defused by get_wealth's limit(1)
+    wealth = await get_wealth(session, discord_user_id, character_id)
+    if wealth is None:  # pragma: no cover - inserted or won just above
+        raise RuntimeError("wallet row vanished between insert and read")
     return wealth
 
 

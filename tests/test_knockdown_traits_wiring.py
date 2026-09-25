@@ -9,12 +9,15 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gurps_bot.db.models import Base, Character, Combat, Combatant, Trait
 from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
 from gurps_bot.mechanics.dice import DiceSpec, RollResult
+
+pytestmark = pytest.mark.integration
 
 _REFRESH = "gurps_bot.services.combat_session.CombatContext.refresh_tracker"
 

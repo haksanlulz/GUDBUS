@@ -110,3 +110,54 @@ class TestRespondAfterAPublicDefer:
         i.followup.send = MagicMock(side_effect=_send)
         await respond(i, "x", ephemeral=True)
         i.delete_original_response.assert_not_called()
+
+
+class TestTheRepliesThatBypassedRespond:
+    """The first fix reached only replies routed through respond(). Three
+    paths still called followup.send(ephemeral=True) directly after a public
+    defer, so their "private" messages went to the whole channel."""
+
+    async def test_the_error_handler_after_a_helper_defer(self):
+        from discord import app_commands
+
+        from gurps_bot.cogs.error_handler import ErrorHandler
+
+        i = _FakeInteraction()
+        i.command = None
+        i.user = MagicMock(id=1)
+        i.guild_id = 1
+        i.channel_id = 1
+        i.data = {}
+        await defer(i)
+        cog = ErrorHandler(MagicMock())
+        await cog.on_app_command_error(i, app_commands.CheckFailure("nope"))
+        assert i.sent and all(not public for _, public in i.sent), i.sent
+
+    async def test_an_empty_character_list_after_a_helper_defer(self):
+        from gurps_bot.cogs.characters import _send_paginated
+
+        i = _FakeInteraction()
+        await defer(i)
+        await _send_paginated(i, "Skills", [], "Hero", empty_msg="No matching items found.")
+        assert i.sent == [("No matching items found.", False)]
+
+    async def test_a_public_list_then_a_private_note_keeps_the_list(self):
+        """A public reply must consume the placeholder, or a later private
+        reply would delete the public list it became."""
+        from gurps_bot.cogs.characters import _send_paginated
+
+        i = _FakeInteraction()
+        await defer(i)
+        await _send_paginated(i, "Skills", ["a", "b"], "Hero")
+        await respond(i, "psst", ephemeral=True)
+        assert not i.deleted_original
+
+    async def test_roll_contest_errors_stay_private(self):
+        from gurps_bot.cogs.rolling import RollingCog
+
+        i = _FakeInteraction()
+        i.user = MagicMock(id=1)
+        i.guild_id = None  # no character context: a skill name cannot resolve
+        cog = RollingCog(MagicMock())
+        await cog.contest_roll.callback(cog, i, target_a="Stealth", target_b="12")
+        assert i.sent and all(not public for _, public in i.sent), i.sent

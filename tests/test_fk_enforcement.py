@@ -83,3 +83,25 @@ class TestDeletingACharacterWithADefaultWalletAlready:
         await delete_character(db_session, 100)
         await db_session.commit()
         assert (await get_wealth(db_session, 555)).status == 1
+
+    async def test_a_fold_that_would_overflow_refuses_instead_of_writing_inf(
+        self, db_session, make_character
+    ):
+        """Two huge-but-finite balances can sum to inf, which the module's own
+        _require_finite calls bricking the wallet. adjust_balance guards this;
+        the fold did not."""
+        import pytest
+
+        from gurps_bot.services.characters import delete_character
+        from gurps_bot.services.wealth import WalletOverflow, get_wealth
+
+        await make_character(100, 555)
+        await set_balance(db_session, 555, 1e308, character_id=100)
+        await set_balance(db_session, 555, 1e308)
+        await db_session.commit()
+
+        with pytest.raises(WalletOverflow):
+            await delete_character(db_session, 100)
+        await db_session.rollback()
+        assert (await get_wealth(db_session, 555)).balance == 1e308
+        assert (await get_wealth(db_session, 555, 100)).balance == 1e308

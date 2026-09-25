@@ -21,8 +21,11 @@ from gurps_bot.services.combat import (
     get_combat,
     modify_hp,
     record_defense,
+    remove_status,
     start_combat,
 )
+
+pytestmark = pytest.mark.load
 
 
 GM_BASE = 700_000
@@ -215,3 +218,75 @@ class TestMultiCombatLoad:
             c = await get_combat(session, GUILD_ID, 13_000)
             assert c is not None, "active combat was clobbered by cleanup"
             assert len(c.combatants) == 1
+
+
+class TestSameCombatantStatusRace:
+    """Six sessions change the same combatant's status list at once.
+
+    status_effects is one JSON list column, so a read-mutate-write loses every
+    write but the last when the reads interleave. Written before the fix; the
+    old code drops statuses here.
+    """
+
+    STATUSES = ["Stunned", "Prone", "Kneeling", "Unconscious", "Dead", "Disarmed"]
+
+    @pytest.fixture(autouse=True)
+    def _hold_the_window_open(self, monkeypatch):
+        # 20 ms between the read and the write is enough for every task in the
+        # gather to read the same list; the old read-mutate-write kept 1 of 6.
+        import gurps_bot.services.combat as combat_module
+
+        monkeypatch.setattr(
+            combat_module, "_STATUS_READ_HOOK", lambda: asyncio.sleep(0.02)
+        )
+
+    async def _one_target(self, session_factory) -> int:
+        async with session_factory() as s:
+            c = await start_combat(s, GUILD_ID, 12_000, GM_BASE + 50)
+            npc = await add_npc_combatant(s, c, "Target", 5.0, 30, 10)
+            await s.commit()
+            return npc.id
+
+    async def test_parallel_adds_on_one_combatant_keep_every_status(
+        self, session_factory
+    ):
+        target_id = await self._one_target(session_factory)
+
+        async def add_one(status: str) -> None:
+            async with session_factory() as s:
+                await add_status(s, target_id, status)
+                await s.commit()
+
+        await asyncio.gather(*[add_one(st) for st in self.STATUSES])
+
+        async with session_factory() as s:
+            c = await get_combat(s, GUILD_ID, 12_000)
+            assert c is not None
+            target = next(x for x in c.combatants if x.id == target_id)
+            assert sorted(target.status_effects or []) == sorted(self.STATUSES), (
+                f"lost statuses under parallel adds: {target.status_effects}"
+            )
+
+    async def test_parallel_removes_on_one_combatant_clear_every_status(
+        self, session_factory
+    ):
+        target_id = await self._one_target(session_factory)
+        async with session_factory() as s:
+            for st in self.STATUSES:
+                await add_status(s, target_id, st)
+            await s.commit()
+
+        async def remove_one(status: str) -> None:
+            async with session_factory() as s:
+                await remove_status(s, target_id, status)
+                await s.commit()
+
+        await asyncio.gather(*[remove_one(st) for st in self.STATUSES])
+
+        async with session_factory() as s:
+            c = await get_combat(s, GUILD_ID, 12_000)
+            assert c is not None
+            target = next(x for x in c.combatants if x.id == target_id)
+            assert (target.status_effects or []) == [], (
+                f"statuses survived parallel removes: {target.status_effects}"
+            )

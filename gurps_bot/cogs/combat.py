@@ -48,6 +48,7 @@ from gurps_bot.services.combat import (
     remove_combatant,
     remove_status,
     set_maneuver,
+    set_message_id,
     start_combat,
 )
 from gurps_bot.services.combat_session import CombatContext, CombatPermissionError, CombatSession
@@ -335,16 +336,24 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 return
 
             embed = embeds.combat_tracker_embed(combat)
-            view = get_tracker_view()
-            await respond(interaction, embed=embed, view=view)
+            # Commit BEFORE the two Discord round trips below. start_combat's
+            # flush holds SQLite's single write lock, and holding it across the
+            # reply and the message fetch queued every write in every guild
+            # behind this command — past busy_timeout, "database is locked".
+            await session.commit()
 
-            # commit even if the message-id fetch fails; losing message_id only
-            # costs tracker auto-refresh, rolling back would lose the combat
-            try:
-                msg = await interaction.original_response()
-                combat.message_id = msg.id
-            except discord.HTTPException:
-                log.warning("Could not fetch tracker message id at combat start")
+        view = get_tracker_view()
+        await respond(interaction, embed=embed, view=view)
+
+        # the message id only feeds tracker auto-refresh; losing it is cheap,
+        # so a failed fetch is logged and the combat stands
+        try:
+            msg = await interaction.original_response()
+        except discord.HTTPException:
+            log.warning("Could not fetch tracker message id at combat start")
+            return
+        async with interaction.client.db() as session:
+            await set_message_id(session, combat.id, msg.id)
             await session.commit()
 
     @app_commands.command(name="join", description="Join the current combat with your active character")
@@ -417,9 +426,14 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 return
 
             combatant_name = my_combatant.name
-            await remove_combatant(ctx.session, ctx.combat, my_combatant.id)
+            said: list[str] = []
+            await remove_combatant(
+                ctx.session, ctx.combat, my_combatant.id, turn_messages=said
+            )
             await ctx.commit()
-            await ctx.respond_and_refresh(f"**{combatant_name}** left combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"**{combatant_name}** left combat.", *said])
+            )
 
     @app_commands.command(name="remove", description="Remove a combatant (GM only)")
     @app_commands.describe(target="Combatant name")
@@ -431,9 +445,12 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             ctx.cs.require_gm()
             c = ctx.cs.find_combatant(target)
             combatant_name = c.name
-            await remove_combatant(ctx.session, ctx.combat, c.id)
+            said: list[str] = []
+            await remove_combatant(ctx.session, ctx.combat, c.id, turn_messages=said)
             await ctx.commit()
-            await ctx.respond_and_refresh(f"Removed **{combatant_name}** from combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"Removed **{combatant_name}** from combat.", *said])
+            )
 
     @app_commands.command(name="hp", description="Modify a combatant's HP")
     @app_commands.describe(

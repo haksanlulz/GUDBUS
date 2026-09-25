@@ -48,7 +48,11 @@ def db_without_crafting(tmp_path):
     entirely the fixture's doing.
     """
     db = tmp_path / "gurps_bot.db"
-    _build_pre_migration_db(db, drop_tables=list(NEW_TABLES), drop_columns={})
+    _build_pre_migration_db(
+        db, drop_tables=list(NEW_TABLES), drop_columns={},
+        # created by a later migration (a3d9e5f71c08), so absent at this stamp
+        drop_indexes=["uq_wealth_default"],
+    )
     con = sqlite3.connect(db)
     con.execute(
         "create table alembic_version "

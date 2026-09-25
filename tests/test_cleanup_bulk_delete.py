@@ -206,3 +206,98 @@ class TestItStrandsNothing:
             survivor = await get_combat(s, 2, CHANNEL)
             assert survivor is not None
             assert len(survivor.combatants) == 4
+
+
+class TestActivityKeepsACombatAlive:
+    """The sweep keys on Combat.updated_at, and only Next/Prev turn wrote it.
+    HP, FP, status, maneuver, defend, add and remove all changed combatants
+    without touching the combat row, so a slow game that kept applying damage
+    for a day was deleted mid-fight."""
+
+    import pytest as _pytest
+
+    @_pytest.mark.parametrize("op", [
+        "hp", "fp", "status_add", "status_remove", "maneuver", "defend",
+        "add_npc", "remove",
+    ])
+    async def test_each_mutation_counts_as_activity(self, session_factory, op):
+        from gurps_bot.services import combat as svc
+
+        guild = 9_100
+        await _combat(session_factory, guild)
+        await _age(session_factory, [guild])
+        async with session_factory() as s:
+            combat = await get_combat(s, guild, CHANNEL)
+            cid = combat.combatants[0].id
+            if op == "hp":
+                await svc.modify_hp(s, cid, -3)
+            elif op == "fp":
+                await svc.modify_fp(s, cid, -1)
+            elif op == "status_add":
+                await svc.add_status(s, cid, "Stunned")
+            elif op == "status_remove":
+                await svc.add_status(s, cid, "Stunned")
+                await s.commit()
+                await _age(session_factory, [guild])
+                await svc.remove_status(s, cid, "Stunned")
+            elif op == "maneuver":
+                await svc.set_maneuver(s, cid, "Attack")
+            elif op == "defend":
+                await svc.record_defense(s, cid, "parry")
+            elif op == "add_npc":
+                await add_npc_combatant(s, combat, name="New", basic_speed=5.0, hp=10, fp=10, ht=10)
+            elif op == "remove":
+                await svc.remove_combatant(s, combat, cid)
+            await s.commit()
+
+        async with session_factory() as s:
+            removed = await cleanup_stale_combats(s, max_age_hours=24)
+            await s.commit()
+        assert removed == 0, f"a combat just touched by {op} was swept"
+
+
+class TestTheTrackerRedrawsFromTheDatabase:
+    """refresh_tracker re-ran get_combat on the command's own session, and with
+    expire_on_commit=False the identity map handed back the rows as they were
+    first read — so a concurrent command's HP change, or a combatant it added,
+    was painted over by whichever redraw reached Discord last."""
+
+    async def test_a_concurrent_change_appears_in_the_redraw(self, session_factory, monkeypatch):
+        from unittest.mock import AsyncMock, MagicMock
+
+        from gurps_bot.services import combat as svc
+        from gurps_bot.services.combat_session import CombatContext
+
+        guild = 9_200
+        await _combat(session_factory, guild, combatants=2)
+
+        interaction = MagicMock()
+        interaction.guild_id = guild
+        interaction.channel_id = CHANNEL
+        interaction.user.id = GM
+        interaction.extras = {}
+        interaction.client.db = session_factory
+        interaction.response.is_done.return_value = True
+
+        drawn = {}
+
+        async def fake_refresh(self, combat):
+            drawn["hp"] = {c.name: c.hp_current for c in combat.combatants}
+            drawn["names"] = {c.name for c in combat.combatants}
+            return True
+
+        monkeypatch.setattr("gurps_bot.ui.tracker.TrackerManager.refresh", fake_refresh)
+
+        async with CombatContext(interaction, defer=False) as ctx:
+            first = ctx.combat.combatants[0]
+            # another command, on its own session, lands in between
+            async with session_factory() as other:
+                c = await svc.get_combat(other, guild, CHANNEL)
+                await svc.modify_hp(other, c.combatants[1].id, -4)
+                await svc.add_npc_combatant(other, c, name="Late", basic_speed=4.0, hp=10, fp=10, ht=10)
+                await other.commit()
+            await svc.modify_hp(ctx.session, first.id, -2)
+            await ctx.commit()
+            await ctx.refresh_tracker()
+
+        assert drawn["hp"] == {"M0": 8, "M1": 6, "Late": 10}, drawn

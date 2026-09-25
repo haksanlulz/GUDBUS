@@ -9,6 +9,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from gurps_bot.services.limits import StorageLimitExceeded
+from gurps_bot.ui.respond import respond
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
@@ -145,10 +146,9 @@ class ErrorHandler(commands.Cog):
                 )
                 msg = "Something went wrong. The error has been logged."
 
-            if interaction.response.is_done():
-                await interaction.followup.send(msg, ephemeral=True)
-            else:
-                await interaction.response.send_message(msg, ephemeral=True)
+            # respond(), not a direct followup: after a context's public defer
+            # a followup's ephemeral flag is ignored and the error goes public
+            await respond(interaction, msg, ephemeral=True)
         except Exception:
             # responding itself broke; still log the interaction details
             log.exception(

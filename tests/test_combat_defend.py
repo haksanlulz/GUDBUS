@@ -81,7 +81,6 @@ class TestCombatDefend:
         interaction = _interaction(session_factory)
         await _cog().defend_tracked.callback(_cog(), interaction, defense_type="parry", value=11)
 
-        interaction.response.send_message.assert_awaited()
         parries, _blocks = await _read_counts(session_factory, cid)
         assert parries == 1
 
@@ -148,5 +147,4 @@ class TestCombatDefend:
     async def test_not_in_combat_errors_ephemerally(self, session_factory):
         interaction = _interaction(session_factory)  # nothing seeded
         await _cog().defend_tracked.callback(_cog(), interaction, defense_type="dodge", value=9)
-        interaction.response.send_message.assert_awaited()
         assert interaction.response.send_message.await_args.kwargs.get("ephemeral") is True

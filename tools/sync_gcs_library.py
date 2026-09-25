@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import os
 import re
 import shutil
 import subprocess
@@ -41,14 +42,86 @@ def _utc_now_iso() -> str:
     return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+#: Wall-clock ceiling on any single git subprocess, in seconds.
+#:
+#: subprocess.run blocks forever on a STALLED connection, as opposed to a
+#: refused one, and every git call here talks to the network. This script is
+#: run by hand and by deploy.sh at deploy time, where an unbounded hang is
+#: worst: the deploy does not fail, it just appears to still be working.
+#:
+#: Sized by the one genuinely slow call, `_clone_pinned`'s fetch, which pulls
+#: the pinned commit WITH blobs — about 201 MB, per the figure in
+#: `_pinned_ref_is_fetchable`'s docstring. Ten minutes covers any link that
+#: sustains roughly 350 KB/s, so a cold-cache fetch of a large upstream over a
+#: slow connection still finishes well inside it; the goal is to bound a hang,
+#: not to police throughput.
+#:
+#: Overridable at the point of failure, because "edit the constant" is not a
+#: fix where this runs: the Dockerfile calls it inside `docker build` and
+#: deploy/deploy.sh calls it at deploy time, so raising it in the source means
+#: rebuilding the thing that is timing out. The one regression direction a
+#: ceiling has is a slow-but-working link that used to finish, and that failure
+#: is indistinguishable from an unreachable upstream — so the escape hatch has
+#: to exist where the failure does. The two callers take it differently:
+#:
+#:     deploy/deploy.sh   GCS_GIT_TIMEOUT=1800 deploy/deploy.sh
+#:     docker build       docker build --build-arg GCS_GIT_TIMEOUT=1800 .
+#:
+#: `docker build` does not inherit the host environment, so the env-var form is
+#: inert there. The Dockerfile declares a matching `ARG GCS_GIT_TIMEOUT` ahead
+#: of the RUN; Docker passes an ARG to every subsequent RUN in that stage as a
+#: build-time environment variable, which is how it reaches os.environ below.
+#:
+#: No retry, deliberately: a manual/deploy-time tool should stop and say so,
+#: because a silent second attempt doubles the wait and buries the cause.
+_GIT_TIMEOUT_DEFAULT = 600
+
+
+def _timeout_seconds() -> int:
+    raw = os.environ.get("GCS_GIT_TIMEOUT")
+    if raw is None:
+        return _GIT_TIMEOUT_DEFAULT
+    try:
+        seconds = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"GCS_GIT_TIMEOUT must be a whole number of seconds, got {raw!r}"
+        ) from None
+    if seconds <= 0:
+        raise ValueError(f"GCS_GIT_TIMEOUT must be positive, got {seconds}")
+    return seconds
+
+
+GIT_TIMEOUT_SECONDS = _timeout_seconds()
+
+
 def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
-    """Run git and hand back the result. Callers decide what a failure means."""
-    return subprocess.run(
-        ["git", *args],
-        cwd=str(cwd) if cwd else None,
-        capture_output=True,
-        text=True,
-    )
+    """Run git and hand back the result. Callers decide what a failure means.
+
+    A timeout is the exception to that: there is no result to hand back, and
+    every caller here reads a CompletedProcess as "git ran and said no", which
+    a hung network is not. It raises instead, and `main` turns that into a
+    non-zero exit with the message attached.
+    """
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        cmd = " ".join(["git", *args])
+        raise RuntimeError(
+            f"git timed out after {GIT_TIMEOUT_SECONDS}s: {cmd}\n"
+            f"upstream: {REPO_URL}\n"
+            f"A stalled connection blocks indefinitely without this ceiling, so "
+            f"this is a refusal to hang rather than a report that git failed. "
+            f"Check reachability of the upstream host and re-run; set "
+            f"GCS_GIT_TIMEOUT to a larger number of seconds if the link is "
+            f"simply slow."
+        ) from exc
 
 
 def _run_git(args: list[str], *, cwd: Path | None = None) -> None:

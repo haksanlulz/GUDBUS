@@ -539,6 +539,28 @@ async def _seed_project(db, **kwargs):
 
 
 class TestProjectsList:
+    async def test_a_full_list_of_long_names_fits_and_is_all_reachable(self, db):
+        """One field per project with no cap: past 25 projects (or ~22 with
+        200-char names) Discord rejected the embed and the list was gone."""
+        from gurps_bot.services.limits import MAX_CRAFTING_PROJECTS_PER_USER
+        from gurps_bot.ui.views import PaginatorView
+
+        ids = []
+        for n in range(MAX_CRAFTING_PROJECTS_PER_USER):
+            ids.append(await _seed_project(db, name=f"{n:02d}" + "x" * 198))
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.projects.callback(cog, interaction, True)
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        view = kwargs.get("view")
+        assert isinstance(view, PaginatorView)
+        for page in view.pages:
+            assert len(page.fields) <= 25
+            assert len(page) <= 6000
+        shown = " ".join(f.name for p in view.pages for f in p.fields)
+        assert all(f"`{i}`" in shown for i in ids)
+
     async def test_an_empty_list_says_how_to_start_one(self, db):
         cog = CraftingCog(MagicMock())
         interaction = _interaction_with_db(db)
@@ -674,6 +696,27 @@ class TestSavingFromTheGuidedFlow:
         interaction = _interaction_with_db(db)
         await modal.on_submit(interaction)
         return interaction
+
+    async def test_an_absurd_price_is_refused_with_a_reason(self, db):
+        """It reached SQLite as a 20-digit int and raised OverflowError on
+        flush; the modal has no error hook, so the user got no reply at all."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        interaction = await self._submit(db, view, price="9" * 20)
+        said = interaction.response.send_message.await_args.kwargs["content"]
+        assert "price" in said.lower()
+        async with db() as s:
+            assert await service.list_projects(s, 1, 99, include_finished=True) == []
+
+    async def test_the_largest_allowed_price_saves(self, db):
+        from gurps_bot.cogs.crafting import MAX_RETAIL_PRICE
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await self._submit(db, view, price=str(MAX_RETAIL_PRICE))
+        async with db() as s:
+            (found,) = await service.list_projects(s, 1, 99)
+            assert found.retail_price == MAX_RETAIL_PRICE
 
     async def test_it_stores_the_menu_choices(self, db):
         view = InventionFlowView(skill=18, invoker_id=1)
@@ -1070,3 +1113,59 @@ class TestTheFlowLeavesDiscordsHooksAlone:
     def test_discords_refresh_hook_is_not_overridden(self):
         view = InventionFlowView(skill=14, invoker_id=1)
         assert view._refresh([]) is None
+
+
+class TestDelete:
+    """The project cap counts finished projects on purpose and tells the user
+    to "Delete some first" — but nothing could delete one, so reaching it was
+    a permanent lockout. /craft delete removes a FINISHED project."""
+
+    async def test_a_finished_project_goes_with_its_history(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_attempt(s, project, amount=10, outcome="failure")
+            await service.finish_project(s, project, "abandoned")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is None
+            assert await service.charge_history(s, project_id) == []
+
+    async def test_an_active_project_must_be_abandoned_first(self, db):
+        project_id = await _seed_project(db)
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.delete.callback(cog, interaction, project_id)
+        assert "abandon" in interaction.response.send_message.await_args.kwargs["content"].lower()
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is not None
+
+    async def test_another_users_project_is_untouched(self, db):
+        project_id = await _seed_project(db, discord_user_id=2)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 2), "abandoned")
+            await s.commit()
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db, user_id=1), project_id)
+        async with db() as s:
+            assert await service.get_project(s, project_id, 2) is not None
+
+    async def test_deleting_frees_a_slot_under_the_cap(self, db, monkeypatch):
+        from gurps_bot.services import crafting as svc_mod
+        from gurps_bot.services.limits import StorageLimitExceeded
+
+        monkeypatch.setattr(svc_mod, "MAX_CRAFTING_PROJECTS_PER_USER", 1)
+        project_id = await _seed_project(db)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 1), "complete")
+            await s.commit()
+        with pytest.raises(StorageLimitExceeded):
+            await _seed_project(db, name="second")
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+        await _seed_project(db, name="second")  # no longer refused

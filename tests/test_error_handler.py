@@ -15,6 +15,11 @@ from discord import app_commands
 from gurps_bot.cogs.error_handler import ErrorHandler
 
 
+def _content(call) -> str:
+    """The reply text, however it was passed (respond() passes it by keyword)."""
+    return call.args[0] if call.args else call.kwargs.get("content", "")
+
+
 def _interaction(*, response_done: bool):
     interaction = MagicMock()
     interaction.user.id = 42
@@ -41,7 +46,7 @@ class TestKnownErrorClasses:
         )
         interaction.response.send_message.assert_awaited_once()
         args = interaction.response.send_message.await_args
-        assert "permission" in args.args[0]
+        assert "permission" in _content(args)
         assert args.kwargs.get("ephemeral") is True
 
     async def test_cooldown_never_says_zero_seconds(self):
@@ -54,7 +59,7 @@ class TestKnownErrorClasses:
             interaction,
             app_commands.CommandOnCooldown(cooldown, retry_after=0.2),
         )
-        msg = interaction.response.send_message.await_args.args[0]
+        msg = _content(interaction.response.send_message.await_args)
         assert "cooldown" in msg.lower()
         assert "1s" in msg and "0s" not in msg
 
@@ -65,7 +70,7 @@ class TestKnownErrorClasses:
             interaction,
             app_commands.MissingPermissions(["manage_guild"]),
         )
-        msg = interaction.response.send_message.await_args.args[0]
+        msg = _content(interaction.response.send_message.await_args)
         assert "manage_guild" in msg
 
 
@@ -101,7 +106,7 @@ class TestUnknownErrorLogging:
         mock_log.exception.assert_called_once()
         assert "Unhandled command error" in mock_log.exception.call_args.args[0]
         # the generic user-facing message, not the raw exception text
-        msg = interaction.response.send_message.await_args.args[0]
+        msg = _content(interaction.response.send_message.await_args)
         assert "logged" in msg
         assert "kaboom" not in msg
 
