@@ -9,7 +9,13 @@ def _interaction(*, guild_id=None):
     interaction = MagicMock()
     interaction.guild_id = guild_id
     interaction.response.send_message = AsyncMock()
-    interaction.response.defer = AsyncMock()
+    interaction.response.is_done.return_value = False
+
+    async def _defer(**_):
+        # as Discord does: once deferred, the interaction counts as answered
+        interaction.response.is_done.return_value = True
+
+    interaction.response.defer = AsyncMock(side_effect=_defer)
     interaction.followup.send = AsyncMock()
     return interaction
 

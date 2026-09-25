@@ -37,6 +37,7 @@ from gurps_bot.ui.formatters import (
     paginate,
 )
 from gurps_bot.cogs._autocomplete import make_autocomplete
+from gurps_bot.ui.respond import respond
 from gurps_bot.ui.views import ConfirmView, PaginatorView
 from gurps_bot.utils.fuzzy import fuzzy_match
 from gurps_bot.utils.scope import guild_id_of
@@ -65,7 +66,7 @@ async def _send_paginated(
 ) -> None:
     """Send a paginated embed list, with PaginatorView if multi-page."""
     if not lines:
-        await interaction.followup.send(empty_msg, ephemeral=True)
+        await respond(interaction, empty_msg, ephemeral=True)
         return
 
     page_embeds = []
@@ -74,12 +75,17 @@ async def _send_paginated(
         text, pg, tp = paginate(lines, p, per_page)
         page_embeds.append(embeds.paginated_list_embed(title, text, pg, tp, char_name))
 
+    # through respond(): a public reply here must consume CharacterContext's
+    # placeholder, or a later private reply would delete this list
     if len(page_embeds) == 1:
-        await interaction.followup.send(embed=page_embeds[0])
+        await respond(interaction, embed=page_embeds[0])
     else:
         view = PaginatorView(page_embeds, interaction.user.id)
-        msg = await interaction.followup.send(embed=page_embeds[0], view=view, wait=True)
-        view.message = msg
+        await respond(interaction, embed=page_embeds[0], view=view)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # paging still works; only the timeout cleanup needs it
 
 
 
@@ -187,7 +193,7 @@ class CharGroup(commands.GroupCog, group_name="char"):
                 ctx.char_name, ctx.char.total_points, attrs,
                 ctx.char.calc_json, ctx.char.source_filename,
             )
-        await interaction.followup.send(embed=embed)
+        await respond(interaction, embed=embed)
 
     @app_commands.command(name="skills", description="List your character's skills")
     @app_commands.describe(search="Filter skills by name")
