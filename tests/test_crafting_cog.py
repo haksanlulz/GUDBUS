@@ -1483,9 +1483,14 @@ class TestMakeFlowAssemblesTheSameReport:
         }
 
     async def test_all_four_typed_never_opens_a_flow(self):
+        from gurps_bot.cogs.crafting import MakeFlowView, SaveProjectView
+
         interaction = _interaction()
         cog = CraftingCog(MagicMock())
         await cog.make.callback(
             cog, interaction, list_price=90, weight=22.5, cost_per_lb=2.70, monthly_pay=790
         )
-        assert interaction.response.send_message.await_args.kwargs.get("view") is None
+        # The typed answer carries the save button (2026-09-25), never the menus.
+        view = interaction.response.send_message.await_args.kwargs.get("view")
+        assert not isinstance(view, MakeFlowView)
+        assert isinstance(view, SaveProjectView)
