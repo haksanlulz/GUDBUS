@@ -7,7 +7,7 @@ from typing import Any, cast
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import CursorResult, delete, func, select
+from sqlalchemy import CursorResult, case, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.timers import UNITS, Timer
@@ -75,31 +75,36 @@ async def tick_timers(
     if amount < 1:
         raise ValueError("amount must be a positive integer")
 
-    stmt = (
-        select(Timer)
-        .where(
-            Timer.guild_id == guild_id,
-            Timer.channel_id == channel_id,
-            Timer.unit == unit,
-            Timer.remaining > 0,
-        )
-        .order_by(Timer.id.asc())
-    )
+    # One UPDATE, computed from the row's current value: a read-then-write
+    # tick read the old value, waited on the lock, and wrote its stale result,
+    # so two overlapping ticks decremented once and the expiry came a round late.
+    conditions = [
+        Timer.guild_id == guild_id,
+        Timer.channel_id == channel_id,
+        Timer.unit == unit,
+        Timer.remaining > 0,
+    ]
     if target is not None:
-        stmt = stmt.where(func.lower(Timer.target) == target.strip().lower())
-
-    result = await session.execute(stmt)
-    rows = result.scalars().all()
-
-    expired: list[Timer] = []
-    for t in rows:
-        new_remaining = max(0, t.remaining - amount)
-        t.remaining = new_remaining
-        if new_remaining <= 0:
-            expired.append(t)
-
-    await session.flush()
-    return expired
+        conditions.append(func.lower(Timer.target) == target.strip().lower())
+    after = Timer.remaining - amount
+    ticked = await session.execute(
+        update(Timer)
+        .where(*conditions)
+        .values(remaining=case((after < 0, 0), else_=after))
+        .returning(Timer.id, Timer.remaining)
+        # timers this session already holds see the new values too
+        .execution_options(synchronize_session="fetch")
+    )
+    expired_ids = [row.id for row in ticked if row.remaining <= 0]
+    if not expired_ids:
+        return []
+    result = await session.execute(
+        select(Timer)
+        .where(Timer.id.in_(expired_ids))
+        .order_by(Timer.id.asc())
+        .execution_options(populate_existing=True)
+    )
+    return list(result.scalars().all())
 
 
 async def list_timers(
