@@ -539,6 +539,28 @@ async def _seed_project(db, **kwargs):
 
 
 class TestProjectsList:
+    async def test_a_full_list_of_long_names_fits_and_is_all_reachable(self, db):
+        """One field per project with no cap: past 25 projects (or ~22 with
+        200-char names) Discord rejected the embed and the list was gone."""
+        from gurps_bot.services.limits import MAX_CRAFTING_PROJECTS_PER_USER
+        from gurps_bot.ui.views import PaginatorView
+
+        ids = []
+        for n in range(MAX_CRAFTING_PROJECTS_PER_USER):
+            ids.append(await _seed_project(db, name=f"{n:02d}" + "x" * 198))
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.projects.callback(cog, interaction, True)
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        view = kwargs.get("view")
+        assert isinstance(view, PaginatorView)
+        for page in view.pages:
+            assert len(page.fields) <= 25
+            assert len(page) <= 6000
+        shown = " ".join(f.name for p in view.pages for f in p.fields)
+        assert all(f"`{i}`" in shown for i in ids)
+
     async def test_an_empty_list_says_how_to_start_one(self, db):
         cog = CraftingCog(MagicMock())
         interaction = _interaction_with_db(db)

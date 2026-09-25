@@ -48,6 +48,7 @@ from gurps_bot.services.crafting import (
     spent_by_kind,
 )
 from gurps_bot.ui.respond import respond
+from gurps_bot.ui.views import PaginatorView
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
@@ -60,6 +61,8 @@ _INVENTION = discord.Color.dark_gold()
 #: facility charges and stored as a 64-bit integer; unbounded, a 20-digit entry
 #: raised OverflowError on flush and the modal answered nothing at all.
 MAX_RETAIL_PRICE = 10**12
+
+_PROJECTS_PAGE = 10
 
 #: How long a guided flow stays clickable. Matches the other views in the bot.
 _VIEW_TIMEOUT = 300
@@ -1230,18 +1233,39 @@ class CraftingCog(commands.Cog):
             )
             return
 
-        embed = discord.Embed(title="Crafting projects", colour=_INVENTION)
-        for project in found:
-            embed.add_field(
-                name=f"`{project.id}` {project.name}",
-                value=(
-                    f"{project.complexity.capitalize()} · **{project.stage}** · "
-                    f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
-                ),
-                inline=False,
-            )
-        embed.set_footer(text="B473-474")
-        await respond(interaction, embed=embed, ephemeral=True)
+        # one field per project had no cap: Discord allows 25 fields and 6000
+        # chars per embed, and the per-user cap is 50 — so the list 400'd
+        # before the cap was reached. Pages of _PROJECTS_PAGE keep every one
+        # reachable (names are <=200 chars, so a page stays well inside 6000).
+        chunks = [
+            found[i : i + _PROJECTS_PAGE] for i in range(0, len(found), _PROJECTS_PAGE)
+        ]
+        pages = []
+        for n, chunk in enumerate(chunks, 1):
+            embed = discord.Embed(title="Crafting projects", colour=_INVENTION)
+            for project in chunk:
+                embed.add_field(
+                    name=f"`{project.id}` {project.name}"[:256],
+                    value=(
+                        f"{project.complexity.capitalize()} · **{project.stage}** · "
+                        f"{project.attempts} attempt(s) · {project.elapsed_days} day(s)"
+                    ),
+                    inline=False,
+                )
+            footer = "B473-474"
+            if len(chunks) > 1:
+                footer = f"Page {n}/{len(chunks)} · {footer}"
+            embed.set_footer(text=footer)
+            pages.append(embed)
+        if len(pages) == 1:
+            await respond(interaction, embed=pages[0], ephemeral=True)
+            return
+        view = PaginatorView(pages, interaction.user.id)
+        await respond(interaction, embed=pages[0], view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # paging still works; only the timeout cleanup needs it
 
     @craft.command(name="project", description="One project: stage, time, and what it has cost")
     @app_commands.describe(id="The project id from /craft projects")
