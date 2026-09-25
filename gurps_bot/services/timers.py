@@ -109,11 +109,15 @@ async def list_timers(
     target: str | None = None,
     include_expired: bool = True,
 ) -> list[Timer]:
-    """A channel's timers, soonest-to-expire first."""
+    """A channel's timers: running ones soonest-to-expire first, then expired.
+
+    Expired timers sit at remaining 0, so a plain ascending sort put them all
+    first; the list shows ten, and ten expired timers hid every live one.
+    """
     stmt = (
         select(Timer)
         .where(Timer.guild_id == guild_id, Timer.channel_id == channel_id)
-        .order_by(Timer.remaining.asc(), Timer.id.asc())
+        .order_by((Timer.remaining <= 0).asc(), Timer.remaining.asc(), Timer.id.asc())
     )
     if target is not None:
         stmt = stmt.where(func.lower(Timer.target) == target.strip().lower())
