@@ -18,6 +18,28 @@ from __future__ import annotations
 
 import discord
 
+#: Set in ``interaction.extras`` by `defer()` while a PUBLIC placeholder is
+#: waiting for its first followup. Discord turns that followup into an edit of
+#: the placeholder and ignores its ephemeral flag, so an ephemeral reply has to
+#: remove the placeholder first or it is posted to the whole channel.
+_PUBLIC_PLACEHOLDER = "gudbus_public_placeholder"
+
+
+def _extras(interaction: discord.Interaction) -> dict | None:
+    extras = getattr(interaction, "extras", None)
+    # a MagicMock interaction has a MagicMock here, whose .get() is truthy
+    return extras if isinstance(extras, dict) else None
+
+
+async def defer(interaction: discord.Interaction, *, ephemeral: bool = False) -> None:
+    """Acknowledge now, answer later — and remember who the answer is for."""
+    if interaction.response.is_done():
+        return
+    await interaction.response.defer(ephemeral=ephemeral)
+    extras = _extras(interaction)
+    if extras is not None and not ephemeral:
+        extras[_PUBLIC_PLACEHOLDER] = True
+
 
 async def respond(
     interaction: discord.Interaction,
@@ -48,6 +70,12 @@ async def respond(
         payload["view"] = view
 
     if interaction.response.is_done():
+        extras = _extras(interaction)
+        if extras is not None and extras.pop(_PUBLIC_PLACEHOLDER, False) and ephemeral:
+            try:
+                await interaction.delete_original_response()
+            except discord.HTTPException:
+                pass  # already gone; the followup below is a fresh message either way
         await interaction.followup.send(ephemeral=ephemeral, **payload)
     else:
         await interaction.response.send_message(ephemeral=ephemeral, **payload)

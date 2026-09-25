@@ -24,6 +24,6 @@ echo "==> Bootstrapping database (create/stamp + migrations)"
 python -m gurps_bot.db.bootstrap
 
 echo "==> Starting bot"
-# exec so the bot becomes PID 1's replacement and receives SIGTERM directly
+# exec so the bot becomes PID 1 and receives SIGTERM directly; bot.py routes it
 # (clean shutdown: disposes the DB engine).
 exec python -m gurps_bot

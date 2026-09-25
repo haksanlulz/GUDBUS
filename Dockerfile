@@ -42,15 +42,20 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# 2) Project source, then install the package.
+# 2) Vendor the pinned GCS reference data (gitignored; required at runtime for
+#    /skill, /spell, etc.), then verify the snapshot matches the pin. Its own
+#    layer, fed only the stdlib-only script that holds the pin, so it stays
+#    cached until the pin changes — after `COPY . .` it re-cloned upstream on
+#    every source edit. .dockerignore keeps the local copy out of the context,
+#    so the COPY below cannot overwrite it.
+COPY tools/sync_gcs_library.py tools/
+RUN python tools/sync_gcs_library.py \
+    && python tools/sync_gcs_library.py --check
+
+# 3) Project source, then install the package.
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev
-
-# 3) Vendor the pinned GCS reference data (gitignored; required at runtime for
-#    /skill, /spell, etc.), then verify the snapshot matches the pin.
-RUN uv run python tools/sync_gcs_library.py \
-    && uv run python tools/sync_gcs_library.py --check
 
 ############################
 # Stage 2 — runtime

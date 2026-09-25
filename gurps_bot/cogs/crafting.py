@@ -102,6 +102,8 @@ class InventionFlowView(discord.ui.View):
         #: the anchor scene is a TL+3 superscience item and a boolean cannot say
         #: so — at -5 per step, TL+3 is -15, not -5.
         self.tl_gap = 0
+        #: set by /craft invent after sending, so the timeout can edit it
+        self.message: discord.Message | None = None
 
     # The flow belongs to whoever opened it; a shared message otherwise lets a
     # bystander rewrite the GM's calls mid-decision.
@@ -119,6 +121,14 @@ class InventionFlowView(discord.ui.View):
         for item in self.children:
             if isinstance(item, (discord.ui.Button, discord.ui.Select)):
                 item.disabled = True
+        # disabling the view object changes nothing anyone sees until the
+        # message is edited; without this the menus looked live and every
+        # click after the timeout answered "This interaction failed"
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass  # deleted, or no longer editable; nothing left to disable
 
     def modifier(self) -> crafting.ModifierBreakdown:
         complexity = self.complexity or Complexity.AVERAGE
@@ -514,6 +524,10 @@ class CraftingCog(commands.Cog):
         )
         embed.set_footer(text="B473")
         await respond(interaction, embed=embed, view=view)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # the flow works without it; only the timeout cleanup is lost
 
     @craft.command(name="costs", description="What an invention costs to prototype and produce (B474)")
     @app_commands.describe(

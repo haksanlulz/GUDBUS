@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 from gurps_bot.gcs.parser import GCSParseError, parse_gcs
 from gurps_bot.services.character_context import CharacterContext
 from gurps_bot.services.characters import (
+    CharacterNameTaken,
     delete_character,
     get_active_character,
     get_character_by_name,
@@ -26,6 +27,7 @@ from gurps_bot.services.characters import (
     import_character,
     set_active_character,
 )
+from gurps_bot.services.limits import StorageLimitExceeded
 from gurps_bot.ui import embeds
 from gurps_bot.ui.formatters import (
     format_equipment_line,
@@ -42,7 +44,6 @@ from gurps_bot.utils.scope import guild_id_of
 log = logging.getLogger(__name__)
 
 MAX_IMPORT_SIZE = 5 * 1024 * 1024  # 5 MB
-MAX_CHARACTERS_PER_USER = 20
 
 
 async def _fetch_char_names(
@@ -148,18 +149,14 @@ class CharGroup(commands.GroupCog, group_name="char"):
         guild_id = guild_id_of(interaction)
 
         async with interaction.client.db() as session:
-            # cap check; replacing an existing character is exempt
-            existing_names = await get_user_character_names(session, user_id)
-            if parsed.name not in existing_names and len(existing_names) >= MAX_CHARACTERS_PER_USER:
-                await interaction.followup.send(
-                    f"You have {len(existing_names)} characters (max {MAX_CHARACTERS_PER_USER}). "
-                    "Delete one before importing a new one.",
+            # the service owns the cap: only it knows whether this is a new row
+            try:
+                char, was_replacement = await import_character(
+                    session, user_id, parsed, file.filename, raw_data=data,
                 )
+            except (StorageLimitExceeded, CharacterNameTaken) as e:
+                await interaction.followup.send(str(e))
                 return
-
-            char, was_replacement = await import_character(
-                session, user_id, parsed, file.filename, raw_data=data,
-            )
             await set_active_character(session, user_id, guild_id, char.id)
             await session.commit()
             # Cache invalidation is owned by services/characters.py

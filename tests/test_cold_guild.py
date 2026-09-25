@@ -215,6 +215,8 @@ class TestTheFirstThingsAStrangerTypes:
             for call in mock.await_args_list:
                 parts += [str(a) for a in call.args]
                 for k, v in call.kwargs.items():
+                    if k == "content" and v is not None:
+                        parts.append(str(v))
                     if k == "embed" and v is not None:
                         parts += [str(v.title), str(v.description)]
                         parts += [f"{f.name} {f.value}" for f in v.fields]

@@ -82,6 +82,13 @@ def _cap_desc(text: str) -> str:
         return text
     return text[: EMBED_DESC_LIMIT - 40] + "\n*…truncated*"
 
+
+def _cap_field(text: str) -> str:
+    """Fit user text into an embed field value (1024). Display-only."""
+    if len(text) <= EMBED_FIELD_LIMIT:
+        return text
+    return text[: EMBED_FIELD_LIMIT - 1] + "…"
+
 # no 'adventuring' choice — it's GM-set per session and needs a multiplier arg.
 # B292's own names where .title() mangles them ("On The Job", bare "Intensive")
 _METHOD_DISPLAY = {
@@ -433,7 +440,9 @@ class NotesCog(commands.Cog):
         )
         if note_tags:
             embed.add_field(
-                name="Tags", value=", ".join(f"`{t}`" for t in note_tags), inline=False
+                name="Tags",
+                value=_cap_field(", ".join(f"`{t}`" for t in note_tags)),
+                inline=False,
             )
         if secret:
             embed.add_field(name="Visibility", value="GM secret (only you)", inline=True)
@@ -548,7 +557,9 @@ class NotesCog(commands.Cog):
         )
         if note_tags:
             embed.add_field(
-                name="Tags", value=", ".join(f"`{t}`" for t in note_tags), inline=False
+                name="Tags",
+                value=_cap_field(", ".join(f"`{t}`" for t in note_tags)),
+                inline=False,
             )
         embed.set_footer(text="Note updated.")
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -582,7 +593,7 @@ class NotesCog(commands.Cog):
     def _notes_list_embed(
         self, title: str, notes: list, *, tag: str | None = None
     ) -> discord.Embed:
-        embed = discord.Embed(title=title, color=BLUE)
+        embed = discord.Embed(title=_cap_title(title), color=BLUE)
         if not notes:
             suffix = f" tagged `{tag}`" if tag else ""
             embed.description = f"*No notes found{suffix}.*"
@@ -681,9 +692,9 @@ class TimersCog(commands.Cog):
             inline=True,
         )
         if target:
-            embed.add_field(name="Target", value=target, inline=True)
+            embed.add_field(name="Target", value=_cap_field(target), inline=True)
         if note:
-            embed.add_field(name="Note", value=note, inline=False)
+            embed.add_field(name="Note", value=_cap_field(note), inline=False)
         embed.set_footer(text=f"#{timer_id} • /timer tick to advance")
         await interaction.response.send_message(embed=embed)
 
@@ -966,7 +977,7 @@ class WealthCog(commands.Cog):
             name="New Balance", value=_fmt_money(new_balance), inline=True
         )
         if reason:
-            embed.add_field(name="Reason", value=reason, inline=False)
+            embed.add_field(name="Reason", value=_cap_field(reason), inline=False)
         embed.set_footer(text=f"Scope: {_scope_suffix(char_name)}")
         await interaction.response.send_message(embed=embed)
 

@@ -27,7 +27,13 @@ from gurps_bot.db.models import (
     Trait,
 )
 from gurps_bot.gcs.parser import ParsedCharacter
+from gurps_bot.services.limits import MAX_CHARACTERS_PER_USER, enforce_row_cap
+from gurps_bot.services.wealth import fold_character_wallet
 from gurps_bot.utils._cache_instances import skill_cache
+
+
+class CharacterNameTaken(ValueError):
+    """A re-import renames a character onto another of the user's names."""
 
 
 class NoActiveCharacter(Exception):
@@ -182,6 +188,22 @@ async def import_character(
             )
         )).scalar_one_or_none()
 
+    if existing and existing.name != parsed.name:
+        # a rename (matched by gcs id) onto a name another row already holds
+        # would break uq_user_character mid-update as a bare IntegrityError
+        clash = await session.scalar(
+            select(Character.id).where(
+                Character.discord_user_id == user_id,
+                Character.name == parsed.name,
+                Character.id != existing.id,
+            )
+        )
+        if clash is not None:
+            raise CharacterNameTaken(
+                f"You already have a character named **{parsed.name}**. "
+                "Rename one of them in GCS, or delete the other first."
+            )
+
     if existing:
         # in-place update keeps row id + active_character refs alive
         log.info("Re-importing character '%s' (id=%d) for user %d", parsed.name, existing.id, user_id)
@@ -206,6 +228,12 @@ async def import_character(
 
         char = existing
     else:
+        # checked here, after the id-then-name lookup, so only a genuinely new
+        # row counts; a renamed re-import is a replacement
+        await enforce_row_cap(
+            session, Character, MAX_CHARACTERS_PER_USER, "characters",
+            discord_user_id=user_id,
+        )
         log.info("Importing new character '%s' for user %d", parsed.name, user_id)
         char = Character(
             discord_user_id=user_id,
@@ -292,6 +320,7 @@ async def delete_character(session: AsyncSession, char_id: int) -> bool:
     if char:
         log.info("Deleting character '%s' (id=%d)", char.name, char_id)
         skill_cache.invalidate_user(char.discord_user_id)
+        await fold_character_wallet(session, char.discord_user_id, char_id)
         await session.delete(char)
         return True
     return False

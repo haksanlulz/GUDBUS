@@ -12,7 +12,7 @@ from discord.ext import commands
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
 
-from gurps_bot.services.admin import cleanup_guild_data
+from gurps_bot.services.admin import cleanup_guild_data, reconcile_departed_guilds
 from gurps_bot.services.characters import count_characters
 from gurps_bot.services.combat import count_combats
 
@@ -24,6 +24,7 @@ class AdminCog(commands.Cog):
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
+        self._reconciled = False
 
     # Registration is single-scope (global) and normally happens at startup,
     # fingerprint-gated (command_sync.auto_sync). This is the manual force.
@@ -120,6 +121,18 @@ class AdminCog(commands.Cog):
         # that is table content, so posting it publicly only adds noise to a
         # play channel (operator ruling 2026-07-27).
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        # on_guild_remove below never hears about a removal that happened while
+        # the bot was offline; catch those once per process. on_ready also fires
+        # on every reconnect, which is why the flag.
+        if self._reconciled:
+            return
+        self._reconciled = True
+        async with self.bot.db() as session:
+            await reconcile_departed_guilds(session, {g.id for g in self.bot.guilds})
+            await session.commit()
 
     @commands.Cog.listener()
     async def on_guild_remove(self, guild: discord.Guild) -> None:

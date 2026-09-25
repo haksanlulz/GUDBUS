@@ -32,6 +32,7 @@ def _interaction(user_id: int = 1) -> MagicMock:
     interaction.response.edit_message = AsyncMock()
     interaction.response.defer = AsyncMock()
     interaction.followup.send = AsyncMock()
+    interaction.original_response = AsyncMock()
     return interaction
 
 
@@ -219,6 +220,35 @@ class TestTheFlowBelongsToWhoeverOpenedIt:
         view = InventionFlowView(skill=14, invoker_id=1)
         await view.on_timeout()
         assert all(item.disabled for item in view.children)
+
+    async def test_the_timeout_reaches_the_message(self):
+        """Setting .disabled on the view changes nothing anyone sees; the
+        message has to be edited. Without it the menus stayed live-looking and
+        every click after the timeout answered "This interaction failed"."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock()
+        await view.on_timeout()
+        view.message.edit.assert_awaited_once_with(view=view)
+
+    async def test_a_deleted_message_does_not_break_the_timeout(self):
+        import discord
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock(
+            side_effect=discord.NotFound(MagicMock(status=404), "gone")
+        )
+        await view.on_timeout()  # must not raise
+
+    async def test_invent_remembers_the_message_it_sent(self):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        sent = MagicMock()
+        interaction.original_response = AsyncMock(return_value=sent)
+        await cog.invent.callback(cog, interaction, 14)
+        view = interaction.response.send_message.await_args.kwargs["view"]
+        assert view.message is sent
 
 
 class TestCostsStaysThreeFigures:

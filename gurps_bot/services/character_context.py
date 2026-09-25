@@ -13,6 +13,7 @@ from gurps_bot.services.characters import (
     get_character_spells,
     get_character_traits,
 )
+from gurps_bot.ui.respond import defer, respond
 from gurps_bot.utils.scope import guild_id_of
 
 if TYPE_CHECKING:
@@ -62,8 +63,8 @@ class CharacterContext:
         return self.char is not None  # type: ignore[comparison-overlap]
 
     async def __aenter__(self) -> CharacterContext:
-        if self._defer and not self.interaction.response.is_done():
-            await self.interaction.response.defer()
+        if self._defer:
+            await defer(self.interaction)
 
         self._session_ctx = self.interaction.client.db()
         self.session = await self._session_ctx.__aenter__()
@@ -75,7 +76,8 @@ class CharacterContext:
         )
         if not char:
             # __aexit__ can't suppress an __aenter__ exception, so error goes out here
-            await self.interaction.followup.send(
+            await respond(
+                self.interaction,
                 "No active character. Use `/char import` first.",
                 ephemeral=True,
             )

@@ -44,6 +44,29 @@ _ATTRIBUTE = {
 }
 
 
+
+def _rank_suggestions(current: str, candidates: list[str]) -> list[str]:
+    """Up to 25 names, exact match first, then prefixes, then fuzzy by score.
+
+    partial_ratio scores every name that CONTAINS the query at 100, and ties
+    keep the catalog's alphabetical order, so cutting its own top 25 could drop
+    the exact name the user typed. Rank the whole matching set, then cut —
+    the same exact > prefix precedence ReferenceIndex.search uses.
+    """
+    if not current:
+        return candidates[:25]
+    q = current.strip().casefold()
+    # partial_ratio is cheap enough for per-keystroke scans over ~11k names
+    scored = fuzzy_match(
+        current, candidates, limit=len(candidates), score_cutoff=40, prefix_optimized=True
+    )
+    ranked = sorted(
+        scored,
+        key=lambda ms: (ms[0].casefold() != q, not ms[0].casefold().startswith(q), -ms[1]),
+    )
+    return [m for m, _ in ranked[:25]]
+
+
 class ReferenceService(Protocol):
     """What the cog needs from the reference service (real impl: services/reference)."""
 
@@ -424,16 +447,7 @@ class ReferenceCog(commands.Cog):
         except Exception:
             log.exception("reference autocomplete failed for %s", category)
             return []
-        if not current:
-            names = candidates[:25]
-        else:
-            # partial_ratio is cheap enough for per-keystroke scans over ~11k names
-            names = [
-                m
-                for m, _ in fuzzy_match(
-                    current, candidates, limit=25, score_cutoff=40, prefix_optimized=True
-                )
-            ]
+        names = _rank_suggestions(current, candidates)
         # discord caps choice name/value at 100 chars; over-long would 400
         return [
             app_commands.Choice(name=n[:100], value=n[:100]) for n in names

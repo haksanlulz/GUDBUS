@@ -18,12 +18,17 @@ from gurps_bot.services.macros import (
     normalize_macro_name,
     save_macro,
 )
+from gurps_bot.ui.embeds import paginated_list_embed
+from gurps_bot.ui.formatters import paginate
+from gurps_bot.ui.views import PaginatorView
 from gurps_bot.utils.fuzzy import fuzzy_match
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
 
 log = logging.getLogger(__name__)
+
+_LIST_PAGE = 20
 
 
 async def _macro_name_autocomplete(
@@ -152,8 +157,26 @@ class MacroCog(commands.GroupCog, group_name="macro"):
                 "You have no saved macros. Add one with `/macro save`.", ephemeral=True
             )
             return
-        lines = "\n".join(f"**{m.name}** = `{m.expression}`" for m in macros)
-        await interaction.response.send_message(lines, ephemeral=True)
+        # one plain message overflowed Discord's 2000 chars at ~85 macros, well
+        # under the 100-macro cap; pages keep every macro reachable
+        lines = [f"**{m.name}** = `{m.expression[:100]}`" for m in macros]
+        total = max(1, -(-len(lines) // _LIST_PAGE))
+        pages = [
+            paginated_list_embed(
+                "Macros", paginate(lines, p, _LIST_PAGE)[0], p + 1, total,
+                interaction.user.display_name,
+            )
+            for p in range(total)
+        ]
+        if len(pages) == 1:
+            await interaction.response.send_message(embed=pages[0], ephemeral=True)
+            return
+        view = PaginatorView(pages, interaction.user.id)
+        await interaction.response.send_message(embed=pages[0], view=view, ephemeral=True)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # the pager still works; only its timeout cleanup needs this
 
     @app_commands.command(name="delete", description="Delete a saved macro")
     @app_commands.describe(name="Macro name")
