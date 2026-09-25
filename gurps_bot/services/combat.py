@@ -103,6 +103,28 @@ async def end_combat(
     return True
 
 
+async def discard_combat(session: AsyncSession, combat_id: int) -> bool:
+    """Delete one combat by id; True if it existed.
+
+    For /combat start when Discord refuses the reply: the combat is committed
+    before the reply so the write lock is not held across the network, which
+    means a failed reply can no longer roll it back. Keyed on the id rather
+    than the channel so a combat started by someone else in the gap is left
+    alone. Caller commits.
+    """
+    stmt = (
+        select(Combat)
+        .options(selectinload(Combat.combatants))
+        .where(Combat.id == combat_id)
+    )
+    combat = (await session.execute(stmt)).scalar_one_or_none()
+    if combat is None:
+        return False
+    log.info("Discarding combat id=%d (reply failed at start)", combat_id)
+    await session.delete(combat)
+    return True
+
+
 async def _touch_via_combatant(session: AsyncSession, combatant_id: int) -> None:
     """Mark the combatant's combat as active now.
 
