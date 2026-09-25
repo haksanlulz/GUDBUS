@@ -204,6 +204,11 @@ class CombatContext:
         """Re-fetch combat + redraw the tracker; call after commit()."""
         from gurps_bot.ui.tracker import TrackerManager
 
+        # Sessions are expire_on_commit=False, so without this the re-fetch is
+        # answered from the identity map: the rows as this command first read
+        # them, missing any concurrent command's HP change or new combatant,
+        # and whichever redraw reached Discord last would paint over the other.
+        self.session.expire_all()
         self._combat = await get_combat(
             self.session, *channel_scope(self.interaction),
         )
