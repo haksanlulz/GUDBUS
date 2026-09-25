@@ -281,9 +281,19 @@ async def add_npc_combatant(
 
 
 async def remove_combatant(
-    session: AsyncSession, combat: Combat, combatant_id: int,
+    session: AsyncSession,
+    combat: Combat,
+    combatant_id: int,
+    *,
+    turn_messages: list[str] | None = None,
 ) -> bool:
-    """Remove a combatant; removing the current actor passes the turn to the next in order."""
+    """Remove a combatant; removing the current actor passes the turn on.
+
+    Passing the turn goes through advance_turn, so it behaves exactly like Next
+    Turn from the removed combatant: a wrap starts the next round, and the
+    Dead/Unconscious skip, the B419 roll and Stunned all apply. Whatever that
+    announces is appended to `turn_messages` when the caller passes a list.
+    """
     _touch(combat)
     ordered = ordered_combatants(combat)
     found = next(((i, c) for i, c in enumerate(ordered) if c.id == combatant_id), None)
@@ -292,6 +302,12 @@ async def remove_combatant(
     target_idx, target = found
 
     removing_current = combat.current_combatant_id == combatant_id
+    if removing_current and len(ordered) > 1:
+        # hand the turn on BEFORE the row goes, from the removed combatant's
+        # seat — the same step Next Turn takes, round change included
+        message = advance_turn(combat)
+        if message and turn_messages is not None:
+            turn_messages.append(message)
 
     await session.delete(target)
     combat.combatants.remove(target)
@@ -302,12 +318,7 @@ async def remove_combatant(
         combat.current_combatant_id = None
         return True
 
-    if removing_current:
-        # next-in-order slides into target_idx; wrap to the top if the removed was last
-        new_idx = target_idx if target_idx < len(remaining) else 0
-        combat.current_index = new_idx
-        combat.current_combatant_id = remaining[new_idx].id
-    elif combat.current_combatant_id is not None:
+    if combat.current_combatant_id is not None:
         # anchor unchanged — resync its cached index after the shrink
         _sync_index_to_anchor(combat)
     else:

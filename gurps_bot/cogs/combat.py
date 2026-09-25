@@ -417,9 +417,14 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 return
 
             combatant_name = my_combatant.name
-            await remove_combatant(ctx.session, ctx.combat, my_combatant.id)
+            said: list[str] = []
+            await remove_combatant(
+                ctx.session, ctx.combat, my_combatant.id, turn_messages=said
+            )
             await ctx.commit()
-            await ctx.respond_and_refresh(f"**{combatant_name}** left combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"**{combatant_name}** left combat.", *said])
+            )
 
     @app_commands.command(name="remove", description="Remove a combatant (GM only)")
     @app_commands.describe(target="Combatant name")
@@ -431,9 +436,12 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             ctx.cs.require_gm()
             c = ctx.cs.find_combatant(target)
             combatant_name = c.name
-            await remove_combatant(ctx.session, ctx.combat, c.id)
+            said: list[str] = []
+            await remove_combatant(ctx.session, ctx.combat, c.id, turn_messages=said)
             await ctx.commit()
-            await ctx.respond_and_refresh(f"Removed **{combatant_name}** from combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"Removed **{combatant_name}** from combat.", *said])
+            )
 
     @app_commands.command(name="hp", description="Modify a combatant's HP")
     @app_commands.describe(
