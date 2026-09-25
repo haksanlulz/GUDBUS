@@ -18,8 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from gurps_bot.cogs.trackers import (
     EMBED_DESC_LIMIT,
+    EMBED_FIELD_LIMIT,
     EMBED_TITLE_LIMIT,
     NotesCog,
+    StudyCog,
+    TimersCog,
+    WealthCog,
     _cap_desc,
     _cap_title,
 )
@@ -108,3 +112,80 @@ class TestNotesAddCaps:
             note = (await s.execute(select(Note))).scalar_one()
         assert note.title == long_title
         assert note.body == long_body
+
+
+def _sent_embed(interaction):
+    call = interaction.response.send_message.await_args
+    return call.kwargs["embed"]
+
+
+def _assert_fits(embed):
+    assert len(embed.title or "") <= EMBED_TITLE_LIMIT
+    assert len(embed.description or "") <= EMBED_DESC_LIMIT
+    for f in embed.fields:
+        assert len(f.value) <= EMBED_FIELD_LIMIT, (f.name, len(f.value))
+
+
+class TestTheOtherUserTextFields:
+    """Same commit-then-400 shape, in the fields the first pass did not cap:
+    25 tags x 50 chars render to ~1348 chars against a 1024 field cap, and a
+    timer's note/target are not length-limited anywhere."""
+
+    _TAGS = ",".join(f"{i:02d}" + "t" * 48 for i in range(25))
+
+    async def test_notes_add_with_the_maximum_tags(self, session_factory):
+        cog = NotesCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.notes_add.callback(
+            cog, interaction, title="t", body="b", tags=self._TAGS, character_scoped=False
+        )
+        _assert_fits(_sent_embed(interaction))
+
+    async def test_notes_edit_with_the_maximum_tags(self, session_factory):
+        cog = NotesCog(bot=MagicMock())
+        first = _interaction(session_factory)
+        await cog.notes_add.callback(cog, first, title="t", body="b", character_scoped=False)
+        interaction = _interaction(session_factory)
+        await cog.notes_edit.callback(cog, interaction, note_id=1, tags=self._TAGS)
+        _assert_fits(_sent_embed(interaction))
+
+    async def test_notes_search_with_a_long_query(self, session_factory):
+        cog = NotesCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.notes_search.callback(cog, interaction, query="q" * 400)
+        _assert_fits(_sent_embed(interaction))
+
+    async def test_timer_add_with_a_long_note_and_target(self, session_factory):
+        cog = TimersCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.timer_add.callback(
+            cog, interaction, label="L", duration=3, target="T" * 1500, note="N" * 1500
+        )
+        _assert_fits(_sent_embed(interaction))
+
+    async def test_wealth_adjust_with_a_long_reason(self, session_factory):
+        """The worst member of the family: the money moves, the receipt 400s,
+        and the user who retries has now spent it twice."""
+        cog = WealthCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.wealth_adjust.callback(
+            cog, interaction, amount=-10.0, reason="R" * 1500, character_scoped=False
+        )
+        _assert_fits(_sent_embed(interaction))
+
+
+class TestStudyListCountsWhatItHides:
+    """The "…and N more" count came from a 50-row fetch minus the 10 shown,
+    so it could never exceed 40: a user with 120 logs was told 40, not 110."""
+
+    async def test_the_hidden_count_is_the_real_count(self, session_factory):
+        from gurps_bot.services.study import log_study
+
+        async with session_factory() as s:
+            for _ in range(120):
+                await log_study(s, 42, "Broadsword", "self_teaching", 1.0)
+            await s.commit()
+        cog = StudyCog(bot=MagicMock())
+        interaction = _interaction(session_factory)
+        await cog.study_list.callback(cog, interaction, character_scoped=False)
+        assert "and 110 more" in _sent_embed(interaction).description

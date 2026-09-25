@@ -42,13 +42,12 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-install-project --no-dev
 
-# 2) Project source, then install the package.
-COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --frozen --no-dev
-
-# 3) Vendor the pinned GCS reference data (gitignored; required at runtime for
-#    /skill, /spell, etc.), then verify the snapshot matches the pin.
+# 2) Vendor the pinned GCS reference data (gitignored; required at runtime for
+#    /skill, /spell, etc.), then verify the snapshot matches the pin. Its own
+#    layer, fed only the stdlib-only script that holds the pin, so it stays
+#    cached until the pin changes — after `COPY . .` it re-cloned upstream on
+#    every source edit. .dockerignore keeps the local copy out of the context,
+#    so the COPY below cannot overwrite it.
 #
 #    GCS_GIT_TIMEOUT is the per-git-call ceiling in tools/sync_gcs_library.py.
 #    docker build does not inherit the host environment, so without this ARG the
@@ -60,8 +59,14 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 #    (compose: pass it under `build: args:`.) The default must stay in step with
 #    _GIT_TIMEOUT_DEFAULT in the script — tests/test_sync.py asserts both.
 ARG GCS_GIT_TIMEOUT=600
-RUN uv run python tools/sync_gcs_library.py \
-    && uv run python tools/sync_gcs_library.py --check
+COPY tools/sync_gcs_library.py tools/
+RUN python tools/sync_gcs_library.py \
+    && python tools/sync_gcs_library.py --check
+
+# 3) Project source, then install the package.
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev
 
 ############################
 # Stage 2 — runtime

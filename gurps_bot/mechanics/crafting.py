@@ -60,8 +60,8 @@ VARIANT_BONUS_RANGE = (0, 5)
 #: may attempt to create a device of any TL, at a flat -5 per TL above his own."
 #:
 #: An earlier revision of this constant called the per-step reading "the
-#: operator's extension", inferred from sealed probe 1 because only B473-474 had
-#: been read. It was printed in the book one page later the whole time. Reading
+#: operator's extension", inferred from a worked scenario because only B473-474
+#: had been read. It was printed in the book one page later the whole time. Reading
 #: the neighbouring section is what settled it.
 TL_GAP_PENALTY_EACH = -5
 
@@ -418,9 +418,8 @@ def gadgeteer_facility_cost(
     under TL Increment for each TL beyond that."
 
     Additive, not multiplicative — which is what New Inventions' flat "triple"
-    is replaced by, and it is the figure sealed probe 1 reports. B475's own
-    worked example is a Complex gadget three TLs up: $250,000 + 3 x $500,000 =
-    **$1,750,000**, which is the probe's number exactly.
+    is replaced by. B475's own worked example is a Complex gadget three TLs up:
+    $250,000 + 3 x $500,000 = **$1,750,000**.
 
     The reuse discount is narrower here than in B474: it wants a prior project
     of equal or higher complexity **and tech level**, where New Inventions asks
@@ -583,8 +582,8 @@ def invention_costs(
 
     ``tl_cost_multiplier`` defaults to the book's 3 whenever the invention is
     above the inventor's TL at all. It is a parameter because B474 only prices a
-    ONE-step gap and probe 1's TL+3 figures do not follow from any single
-    multiplier — fitting one to two points would be the fabrication this engine
+    ONE-step gap and the TL+3 reference scenario's figures do not follow from
+    any single multiplier — fitting one to two points would be the fabrication this engine
     is meant to avoid, so the GM supplies it instead.
     """
     if inventors < 1:

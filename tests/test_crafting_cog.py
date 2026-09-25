@@ -32,6 +32,7 @@ def _interaction(user_id: int = 1) -> MagicMock:
     interaction.response.edit_message = AsyncMock()
     interaction.response.defer = AsyncMock()
     interaction.followup.send = AsyncMock()
+    interaction.original_response = AsyncMock()
     return interaction
 
 
@@ -220,6 +221,35 @@ class TestTheFlowBelongsToWhoeverOpenedIt:
         await view.on_timeout()
         assert all(item.disabled for item in view.children)
 
+    async def test_the_timeout_reaches_the_message(self):
+        """Setting .disabled on the view changes nothing anyone sees; the
+        message has to be edited. Without it the menus stayed live-looking and
+        every click after the timeout answered "This interaction failed"."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock()
+        await view.on_timeout()
+        view.message.edit.assert_awaited_once_with(view=view)
+
+    async def test_a_deleted_message_does_not_break_the_timeout(self):
+        import discord
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        view.message = MagicMock()
+        view.message.edit = AsyncMock(
+            side_effect=discord.NotFound(MagicMock(status=404), "gone")
+        )
+        await view.on_timeout()  # must not raise
+
+    async def test_invent_remembers_the_message_it_sent(self):
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction()
+        sent = MagicMock()
+        interaction.original_response = AsyncMock(return_value=sent)
+        await cog.invent.callback(cog, interaction, 14)
+        view = interaction.response.send_message.await_args.kwargs["view"]
+        assert view.message is sent
+
 
 class TestCostsStaysThreeFigures:
     """SPEC money-is-never-summed-into-one-number, at the surface.
@@ -276,10 +306,8 @@ class TestCostsStaysThreeFigures:
 class TestRepairAcrossATechLevelGap:
     """`/craft repair`'s tech-line layer, wired 2026-08-15.
 
-    ⚠️ Sealed probe 3 was not read while this was written. Its scenario shape
-    is known from ATTACK.md — a TL10 beam weapon worked on with TL9 skill —
-    but its numbers are not, and the point of the exercise is that this code
-    is finished before they are seen.
+    Written from the book alone. The scenario shape — a TL10 beam weapon
+    worked on with TL9 skill — is the case the tech-level gap exists for.
     """
 
     async def _run(self, **kwargs):
@@ -342,9 +370,9 @@ class TestRepairAcrossATechLevelGap:
         assert "-10" in modifiers.value
 
 
-class TestBrewHonoursProbeTwoAtTheSurface:
-    """`/craft brew` — added 2026-08-15, when re-verifying sealed probe 2
-    found the alchemy domain had no consumer at all.
+class TestBrewHonoursTheReferenceScenarioAtTheSurface:
+    """`/craft brew` — added 2026-08-15, when re-verifying the alchemy
+    reference scenario found the domain had no consumer at all.
 
     Six of its seven conditions passed at module level and the module was
     imported by nothing but its own tests, so conditions 4 (mastery is
@@ -370,7 +398,7 @@ class TestBrewHonoursProbeTwoAtTheSurface:
             "embed"
         ]
 
-    async def test_the_sealed_scenario_reaches_eleven(self):
+    async def test_the_reference_scenario_reaches_eleven(self):
         embed = await self._embed(doses=2, technique=12, formulary=True)
         roll = next(f for f in embed.fields if f.name == "Roll against")
         assert "11" in roll.value
@@ -511,6 +539,28 @@ async def _seed_project(db, **kwargs):
 
 
 class TestProjectsList:
+    async def test_a_full_list_of_long_names_fits_and_is_all_reachable(self, db):
+        """One field per project with no cap: past 25 projects (or ~22 with
+        200-char names) Discord rejected the embed and the list was gone."""
+        from gurps_bot.services.limits import MAX_CRAFTING_PROJECTS_PER_USER
+        from gurps_bot.ui.views import PaginatorView
+
+        ids = []
+        for n in range(MAX_CRAFTING_PROJECTS_PER_USER):
+            ids.append(await _seed_project(db, name=f"{n:02d}" + "x" * 198))
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.projects.callback(cog, interaction, True)
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        view = kwargs.get("view")
+        assert isinstance(view, PaginatorView)
+        for page in view.pages:
+            assert len(page.fields) <= 25
+            assert len(page) <= 6000
+        shown = " ".join(f.name for p in view.pages for f in p.fields)
+        assert all(f"`{i}`" in shown for i in ids)
+
     async def test_an_empty_list_says_how_to_start_one(self, db):
         cog = CraftingCog(MagicMock())
         interaction = _interaction_with_db(db)
@@ -646,6 +696,27 @@ class TestSavingFromTheGuidedFlow:
         interaction = _interaction_with_db(db)
         await modal.on_submit(interaction)
         return interaction
+
+    async def test_an_absurd_price_is_refused_with_a_reason(self, db):
+        """It reached SQLite as a 20-digit int and raised OverflowError on
+        flush; the modal has no error hook, so the user got no reply at all."""
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        interaction = await self._submit(db, view, price="9" * 20)
+        said = interaction.response.send_message.await_args.kwargs["content"]
+        assert "price" in said.lower()
+        async with db() as s:
+            assert await service.list_projects(s, 1, 99, include_finished=True) == []
+
+    async def test_the_largest_allowed_price_saves(self, db):
+        from gurps_bot.cogs.crafting import MAX_RETAIL_PRICE
+
+        view = InventionFlowView(skill=14, invoker_id=1)
+        await _choose(view.complexity_select, _interaction(), "simple")
+        await self._submit(db, view, price=str(MAX_RETAIL_PRICE))
+        async with db() as s:
+            (found,) = await service.list_projects(s, 1, 99)
+            assert found.retail_price == MAX_RETAIL_PRICE
 
     async def test_it_stores_the_menu_choices(self, db):
         view = InventionFlowView(skill=18, invoker_id=1)
@@ -1027,3 +1098,74 @@ class TestEnchantMethodsDisagreeOnAssistants:
         assert self._field(crowded, "⚠️ Too many hands") is not None
         slow = await self._run(method="SLOW_AND_SURE", assistants=5)
         assert self._field(slow, "⚠️ Too many hands") is None
+
+
+class TestTheFlowLeavesDiscordsHooksAlone:
+    """``View._refresh(components)`` is discord.py's, not ours.
+
+    The gateway calls it on every MESSAGE_UPDATE for a message whose view it
+    tracks. The flow once defined its own ``async def _refresh(interaction)``,
+    so each edit of the flow's message handed the component list to our
+    redraw, got back a coroutine nobody awaited, and skipped discord.py's own
+    component sync.
+    """
+
+    def test_discords_refresh_hook_is_not_overridden(self):
+        view = InventionFlowView(skill=14, invoker_id=1)
+        assert view._refresh([]) is None
+
+
+class TestDelete:
+    """The project cap counts finished projects on purpose and tells the user
+    to "Delete some first" — but nothing could delete one, so reaching it was
+    a permanent lockout. /craft delete removes a FINISHED project."""
+
+    async def test_a_finished_project_goes_with_its_history(self, db):
+        project_id = await _seed_project(db)
+        async with db() as s:
+            project = await service.get_project(s, project_id, 1)
+            await service.record_attempt(s, project, amount=10, outcome="failure")
+            await service.finish_project(s, project, "abandoned")
+            await s.commit()
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is None
+            assert await service.charge_history(s, project_id) == []
+
+    async def test_an_active_project_must_be_abandoned_first(self, db):
+        project_id = await _seed_project(db)
+        cog = CraftingCog(MagicMock())
+        interaction = _interaction_with_db(db)
+        await cog.delete.callback(cog, interaction, project_id)
+        assert "abandon" in interaction.response.send_message.await_args.kwargs["content"].lower()
+        async with db() as s:
+            assert await service.get_project(s, project_id, 1) is not None
+
+    async def test_another_users_project_is_untouched(self, db):
+        project_id = await _seed_project(db, discord_user_id=2)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 2), "abandoned")
+            await s.commit()
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db, user_id=1), project_id)
+        async with db() as s:
+            assert await service.get_project(s, project_id, 2) is not None
+
+    async def test_deleting_frees_a_slot_under_the_cap(self, db, monkeypatch):
+        from gurps_bot.services import crafting as svc_mod
+        from gurps_bot.services.limits import StorageLimitExceeded
+
+        monkeypatch.setattr(svc_mod, "MAX_CRAFTING_PROJECTS_PER_USER", 1)
+        project_id = await _seed_project(db)
+        async with db() as s:
+            await service.finish_project(s, await service.get_project(s, project_id, 1), "complete")
+            await s.commit()
+        with pytest.raises(StorageLimitExceeded):
+            await _seed_project(db, name="second")
+
+        cog = CraftingCog(MagicMock())
+        await cog.delete.callback(cog, _interaction_with_db(db), project_id)
+        await _seed_project(db, name="second")  # no longer refused

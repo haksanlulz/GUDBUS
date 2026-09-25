@@ -36,7 +36,12 @@ def _make_interaction(session_factory, *, guild_id=100, user_id=42):
     interaction.guild_id = guild_id
     interaction.user.id = user_id
     interaction.response.is_done.return_value = False
-    interaction.response.defer = AsyncMock()
+
+    async def _defer(**_):
+        # as Discord does: once deferred, the interaction counts as answered
+        interaction.response.is_done.return_value = True
+
+    interaction.response.defer = AsyncMock(side_effect=_defer)
     interaction.followup.send = AsyncMock()
 
     interaction.client.db = session_factory
@@ -70,7 +75,7 @@ class TestCharacterContext:
 
         interaction.followup.send.assert_called_once()
         call_kwargs = interaction.followup.send.call_args
-        assert "No active character" in call_kwargs[0][0]
+        assert "No active character" in call_kwargs.kwargs["content"]
         assert call_kwargs[1]["ephemeral"] is True
 
     async def test_defers_by_default(self, session, session_factory):

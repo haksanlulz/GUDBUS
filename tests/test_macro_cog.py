@@ -88,7 +88,7 @@ class TestMacroCog:
         )
         i2 = _interaction(session_factory)
         await _cog().list_cmd.callback(_cog(), i2)
-        out = _sent(i2).args[0]
+        out = _sent(i2).kwargs["embed"].description
         assert "a" in out and "1d" in out
 
     async def test_delete_found_then_missing(self, session_factory):
@@ -261,3 +261,33 @@ class TestNameAutocomplete:
             assert len(choices) == 1, f"query={query!r}"
             assert len(choices[0].name) <= 100
             assert len(choices[0].value) <= 100
+
+
+class TestAFullMacroListStillSends:
+    """The list was one plain message, and 100 macros (the cap) of ordinary
+    length is ~2400 chars against Discord's 2000. Past ~85 macros /macro list
+    400'd every time and the user could no longer see their own macros."""
+
+    async def test_the_cap_worth_of_long_macros_fits_and_is_all_reachable(
+        self, session_factory
+    ):
+        from gurps_bot.services.limits import MAX_MACROS_PER_USER
+        from gurps_bot.ui.views import PaginatorView
+
+        names = [f"{i:03d}" + "m" * 47 for i in range(MAX_MACROS_PER_USER)]
+        for n in names:
+            await _cog().save.callback(
+                _cog(), _interaction(session_factory), name=n, expression="10d6+100"
+            )
+        i = _interaction(session_factory)
+        i.original_response = AsyncMock()
+        await _cog().list_cmd.callback(_cog(), i)
+
+        sent = _sent(i)
+        assert len(sent.args[0] if sent.args else "") <= 2000
+        view = sent.kwargs.get("view")
+        assert isinstance(view, PaginatorView)
+        pages = view.pages
+        assert all(len(p.description) <= 4096 for p in pages)
+        shown = "\n".join(p.description for p in pages)
+        assert all(n in shown for n in names)

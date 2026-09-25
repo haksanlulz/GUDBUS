@@ -223,8 +223,18 @@ async def mark_flawed_theory(session: AsyncSession, project: CraftingProject) ->
 
 
 async def delete_project(session: AsyncSession, project: CraftingProject) -> None:
-    await session.delete(project)
-    await session.flush()
+    """Remove a project and its charge ledger. Caller commits.
+
+    The ledger is deleted explicitly: the ORM cascade would lazy-load the
+    charges first, which an async session forbids.
+    """
+    await session.execute(
+        delete(CraftingCharge).where(CraftingCharge.project_id == project.id)
+    )
+    await session.execute(
+        delete(CraftingProject).where(CraftingProject.id == project.id)
+    )
+    session.expunge(project)
 
 
 async def purge_guild_crafting_projects(session: AsyncSession, guild_id: int) -> None:

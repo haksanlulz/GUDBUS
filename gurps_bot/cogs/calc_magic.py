@@ -61,7 +61,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def cost(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         base_cost: float,
         skill: int,
         size_modifier: int = 0,
@@ -120,7 +120,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def time(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         base_seconds: int,
         skill: int,
         ceremonial: bool = False,
@@ -163,7 +163,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def ceremonial(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         spell_cost: int,
         caster_energy: int = 0,
         mage_energy: int = 0,
@@ -216,7 +216,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def distance(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         yards: float,
         can_touch: bool = False,
         can_see: bool = True,
@@ -253,7 +253,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def seek(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         distance: float,
         unit: str = "miles",
     ) -> None:
@@ -286,7 +286,7 @@ class CalcMagicCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def missile(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         magery: int,
         seconds: int = 1,
         energy: int | None = None,
@@ -311,5 +311,5 @@ class CalcMagicCog(commands.Cog):
         await interaction.response.send_message(embed=embed)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CalcMagicCog(bot))

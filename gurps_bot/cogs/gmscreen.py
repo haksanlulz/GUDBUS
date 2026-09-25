@@ -92,7 +92,7 @@ class GMScreenCog(commands.Cog):
     @app_commands.checks.cooldown(2, 5.0)
     async def screen(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         category: str | None = None,
     ) -> None:
         pages = screen.build_screen_pages()
@@ -113,7 +113,7 @@ class GMScreenCog(commands.Cog):
         description="GM dashboard — live timers, combat, and your recent study and notes",
     )
     @app_commands.checks.cooldown(2, 5.0)
-    async def gm(self, interaction: discord.Interaction) -> None:
+    async def gm(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with interaction.client.db() as session:
             dash = await get_dashboard(
                 session,
@@ -125,5 +125,5 @@ class GMScreenCog(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(GMScreenCog(bot))

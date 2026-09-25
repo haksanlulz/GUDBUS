@@ -1,6 +1,6 @@
 """Per-guild house rules, and the Rule-of-14 switch on /fright-check.
 
-GAUNTLET §5 SPEC fright-follows-the-book, operator-ratified 2026-07-27:
+SPEC fright-follows-the-book, ratified 2026-07-27:
 Rule of 14 is ON by default (RAW) and a campaign may turn it off, in which case
 modified Will is used uncapped and the bot says which mode it used.
 """
@@ -250,3 +250,38 @@ class TestFrightTraits:
         interaction = await _run_fright(session_factory, mock)
         mock.assert_not_called()
         assert "Exempt" in _embed_text(interaction)
+
+
+class TestOnlyManagersChangeHouseRules:
+    """`default_permissions` on a SUBCOMMAND is never sent to Discord (a
+    Discord limitation discord.py documents), so /campaign rule-of-14 was open
+    to every member. The restriction has to be a check that runs."""
+
+    @staticmethod
+    def _command():
+        from gurps_bot.cogs.campaign import CampaignGroup
+
+        group = CampaignGroup(MagicMock())
+        return next(c for c in group.commands if c.name == "rule-of-14")
+
+    @staticmethod
+    def _member(**perms):
+        import discord
+
+        interaction = MagicMock()
+        interaction.permissions = discord.Permissions(**perms)
+        return interaction
+
+    async def test_a_member_without_manage_server_is_refused(self):
+        import pytest
+        from discord import app_commands
+
+        with pytest.raises(app_commands.MissingPermissions):
+            await self._command()._check_can_run(self._member(send_messages=True))
+
+    async def test_a_manager_passes(self):
+        assert await self._command()._check_can_run(self._member(manage_guild=True))
+
+    def test_the_registered_payload_carries_no_false_promise(self):
+        """Nothing on the subcommand should claim a restriction Discord drops."""
+        assert self._command().default_permissions is None

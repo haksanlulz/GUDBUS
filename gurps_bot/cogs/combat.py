@@ -48,6 +48,7 @@ from gurps_bot.services.combat import (
     remove_combatant,
     remove_status,
     set_maneuver,
+    set_message_id,
     start_combat,
 )
 from gurps_bot.services.combat_session import CombatContext, CombatPermissionError, CombatSession
@@ -59,6 +60,7 @@ from gurps_bot.ui.views import RollDamageView
 from gurps_bot.cogs._autocomplete import make_autocomplete
 from gurps_bot.utils.fuzzy import fuzzy_match
 from gurps_bot.utils.sanitize import sanitize_name
+from gurps_bot.utils.scope import channel_scope, guild_id_of
 
 log = logging.getLogger(__name__)
 
@@ -99,7 +101,7 @@ def _collect_weapons(equipment_json: list, char_traits: list[Trait]) -> list[dic
 
 
 async def _fetch_weapon_names(session, interaction):
-    char = await get_active_character(session, interaction.user.id, interaction.guild_id)
+    char = await get_active_character(session, interaction.user.id, guild_id_of(interaction))
     if not char:
         return []
     traits = await get_character_traits(session, char.id)
@@ -141,14 +143,14 @@ class CombatCog(commands.Cog):
     @app_commands.autocomplete(weapon=_weapon_autocomplete)
     async def attack(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         weapon: str,
         modifier: int = 0,
         hidden: bool = False,
     ) -> None:
         async with interaction.client.db() as session:
             try:
-                char = await require_active_character(session, interaction.user.id, interaction.guild_id)
+                char = await require_active_character(session, interaction.user.id, guild_id_of(interaction))
             except NoActiveCharacter:
                 await respond(
                     interaction,
@@ -207,14 +209,14 @@ class CombatCog(commands.Cog):
     ])
     async def defend(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         defense_type: str,
         modifier: int = 0,
         weapon: str | None = None,
     ) -> None:
         async with interaction.client.db() as session:
             try:
-                char = await require_active_character(session, interaction.user.id, interaction.guild_id)
+                char = await require_active_character(session, interaction.user.id, guild_id_of(interaction))
             except NoActiveCharacter:
                 await respond(
                     interaction,
@@ -282,7 +284,7 @@ class CombatCog(commands.Cog):
 
     @app_commands.checks.cooldown(2, 5.0)
     @app_commands.command(name="hit-location", description="Roll a random hit location (3d6)")
-    async def hit_location(self, interaction: discord.Interaction) -> None:
+    async def hit_location(self, interaction: discord.Interaction[GURPSBot]) -> None:
         result = roll_hit_location()
         embed = embeds.hit_location_embed(result)
         await respond(interaction, embed=embed)
@@ -323,37 +325,45 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
     @app_commands.checks.cooldown(1, 5.0)
     @app_commands.command(name="start", description="Start a new combat in this channel")
-    async def start(self, interaction: discord.Interaction) -> None:
+    async def start(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with interaction.client.db() as session:
             try:
                 combat = await start_combat(
-                    session, interaction.guild_id, interaction.channel_id, interaction.user.id,
+                    session, *channel_scope(interaction), interaction.user.id,
                 )
             except ValueError as e:
                 await respond(interaction, str(e), ephemeral=True)
                 return
 
             embed = embeds.combat_tracker_embed(combat)
-            view = get_tracker_view()
-            await respond(interaction, embed=embed, view=view)
+            # Commit BEFORE the two Discord round trips below. start_combat's
+            # flush holds SQLite's single write lock, and holding it across the
+            # reply and the message fetch queued every write in every guild
+            # behind this command — past busy_timeout, "database is locked".
+            await session.commit()
 
-            # commit even if the message-id fetch fails; losing message_id only
-            # costs tracker auto-refresh, rolling back would lose the combat
-            try:
-                msg = await interaction.original_response()
-                combat.message_id = msg.id
-            except discord.HTTPException:
-                log.warning("Could not fetch tracker message id at combat start")
+        view = get_tracker_view()
+        await respond(interaction, embed=embed, view=view)
+
+        # the message id only feeds tracker auto-refresh; losing it is cheap,
+        # so a failed fetch is logged and the combat stands
+        try:
+            msg = await interaction.original_response()
+        except discord.HTTPException:
+            log.warning("Could not fetch tracker message id at combat start")
+            return
+        async with interaction.client.db() as session:
+            await set_message_id(session, combat.id, msg.id)
             await session.commit()
 
     @app_commands.command(name="join", description="Join the current combat with your active character")
-    async def join(self, interaction: discord.Interaction) -> None:
+    async def join(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
                 return
 
             try:
-                char = await require_active_character(ctx.session, interaction.user.id, interaction.guild_id)
+                char = await require_active_character(ctx.session, interaction.user.id, guild_id_of(interaction))
             except NoActiveCharacter:
                 await respond(interaction, "No active character. Use `/char import` first.", ephemeral=True)
                 return
@@ -380,7 +390,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     )
     async def add_npc(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         name: str,
         speed: float,
         hp: int,
@@ -406,7 +416,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             )
 
     @app_commands.command(name="leave", description="Leave the current combat")
-    async def leave(self, interaction: discord.Interaction) -> None:
+    async def leave(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
                 return
@@ -416,23 +426,31 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
                 return
 
             combatant_name = my_combatant.name
-            await remove_combatant(ctx.session, ctx.combat, my_combatant.id)
+            said: list[str] = []
+            await remove_combatant(
+                ctx.session, ctx.combat, my_combatant.id, turn_messages=said
+            )
             await ctx.commit()
-            await ctx.respond_and_refresh(f"**{combatant_name}** left combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"**{combatant_name}** left combat.", *said])
+            )
 
     @app_commands.command(name="remove", description="Remove a combatant (GM only)")
     @app_commands.describe(target="Combatant name")
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
-    async def remove(self, interaction: discord.Interaction, target: str) -> None:
+    async def remove(self, interaction: discord.Interaction[GURPSBot], target: str) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
                 return
             ctx.cs.require_gm()
             c = ctx.cs.find_combatant(target)
             combatant_name = c.name
-            await remove_combatant(ctx.session, ctx.combat, c.id)
+            said: list[str] = []
+            await remove_combatant(ctx.session, ctx.combat, c.id, turn_messages=said)
             await ctx.commit()
-            await ctx.respond_and_refresh(f"Removed **{combatant_name}** from combat.")
+            await ctx.respond_and_refresh(
+                "\n".join([f"Removed **{combatant_name}** from combat.", *said])
+            )
 
     @app_commands.command(name="hp", description="Modify a combatant's HP")
     @app_commands.describe(
@@ -453,7 +471,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def hp_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str,
         amount: int,
         location: str | None = None,
@@ -521,7 +539,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def fp_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str,
         amount: int,
     ) -> None:
@@ -550,7 +568,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     )
     async def status_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         target: str,
         effect: str,
         action: str = "add",
@@ -582,7 +600,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     )
     async def maneuver_cmd(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         maneuver: str,
     ) -> None:
         async with CombatContext(interaction) as ctx:
@@ -624,7 +642,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
     @app_commands.autocomplete(target=_combatant_name_autocomplete)
     async def defend_tracked(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         defense_type: str,
         value: int,
         modifier: int = 0,
@@ -633,7 +651,7 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
         fencing_or_master: bool = False,
         weapon: str | None = None,
     ) -> None:
-        async with CombatContext(interaction) as ctx:
+        async with CombatContext(interaction, ephemeral=hidden) as ctx:
             if not ctx.ok:
                 return
 
@@ -681,19 +699,19 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
     @app_commands.checks.cooldown(1, 5.0)
     @app_commands.command(name="end", description="End the current combat (GM only)")
-    async def end(self, interaction: discord.Interaction) -> None:
+    async def end(self, interaction: discord.Interaction[GURPSBot]) -> None:
         async with CombatContext(interaction) as ctx:
             if not ctx.ok:
                 return
             ctx.cs.require_gm()
             tracker = TrackerManager(interaction.channel, ctx.combat.message_id)
-            await end_combat(ctx.session, interaction.guild_id, interaction.channel_id)
+            await end_combat(ctx.session, *channel_scope(interaction))
             await ctx.commit()
             # ack before the tracker-clear edit so the interaction doesn't expire
             await respond(interaction, "Combat ended.")
             await tracker.end()
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(CombatCog(bot))
     await bot.add_cog(CombatTrackerGroup(bot))

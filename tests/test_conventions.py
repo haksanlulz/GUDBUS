@@ -368,8 +368,8 @@ _DISCORD_TOP_LEVEL_CAP = 100
 #: 2026-08-07, 45 → 46: slice 1a added the `craft` GROUP. One top-level entry
 #: bought a whole subsystem, and crafting's remaining four domains — alchemy,
 #: repair, enchantment, mundane crafting — now cost zero further entries. That
-#: is the trade this pin exists to make visible, and it is the ruling ATTACK.md
-#: predicted the first slice would force.
+#: is the trade this pin exists to make visible, and the first slice was always
+#: going to force it.
 _TOP_LEVEL_COUNT = 46
 _GROUP_COUNT = 13
 _STANDALONE_COUNT = 33

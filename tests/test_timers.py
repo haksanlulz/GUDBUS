@@ -247,6 +247,22 @@ class TestListTimers:
         timers = await list_timers(db_session, GUILD_ID, CHANNEL_ID)
         assert [t.remaining for t in timers] == [1, 3, 5]  # soonest-to-expire first
 
+    async def test_live_timers_come_before_expired_ones(self, db_session):
+        """Ordering by remaining put every expired timer (remaining 0) first,
+        and the cog shows ten — so ten expired timers hid every live one, and
+        the #ids /timer remove needs."""
+        for i in range(12):
+            await add_timer(
+                db_session, GUILD_ID, CHANNEL_ID, f"E{i}", total=2, unit="turns", remaining=0,
+            )
+        for i in range(3):
+            await add_timer(db_session, GUILD_ID, CHANNEL_ID, f"L{i}", total=100 + i, unit="turns")
+        await db_session.commit()
+
+        timers = await list_timers(db_session, GUILD_ID, CHANNEL_ID)
+        assert [t.label for t in timers[:3]] == ["L0", "L1", "L2"]
+        assert all(t.remaining == 0 for t in timers[3:])
+
     async def test_filter_by_target_case_insensitive(self, db_session):
         await add_timer(
             db_session, GUILD_ID, CHANNEL_ID, "g", total=2, unit="turns", target="Goblin",

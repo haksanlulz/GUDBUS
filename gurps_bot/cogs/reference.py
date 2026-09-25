@@ -44,6 +44,29 @@ _ATTRIBUTE = {
 }
 
 
+
+def _rank_suggestions(current: str, candidates: list[str]) -> list[str]:
+    """Up to 25 names, exact match first, then prefixes, then fuzzy by score.
+
+    partial_ratio scores every name that CONTAINS the query at 100, and ties
+    keep the catalog's alphabetical order, so cutting its own top 25 could drop
+    the exact name the user typed. Rank the whole matching set, then cut —
+    the same exact > prefix precedence ReferenceIndex.search uses.
+    """
+    if not current:
+        return candidates[:25]
+    q = current.strip().casefold()
+    # partial_ratio is cheap enough for per-keystroke scans over ~11k names
+    scored = fuzzy_match(
+        current, candidates, limit=len(candidates), score_cutoff=40, prefix_optimized=True
+    )
+    ranked = sorted(
+        scored,
+        key=lambda ms: (ms[0].casefold() != q, not ms[0].casefold().startswith(q), -ms[1]),
+    )
+    return [m for m, _ in ranked[:25]]
+
+
 class ReferenceService(Protocol):
     """What the cog needs from the reference service (real impl: services/reference)."""
 
@@ -352,7 +375,7 @@ class ReferenceCog(commands.Cog):
 
     async def _lookup(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         command: str,
         name: str,
     ) -> None:
@@ -375,35 +398,35 @@ class ReferenceCog(commands.Cog):
     @app_commands.describe(name="Skill name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def skill(self, interaction: discord.Interaction, name: str) -> None:
+    async def skill(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "skill", name)
 
     @app_commands.command(name="trait", description="Look up a GURPS advantage or disadvantage")
     @app_commands.describe(name="Trait name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def trait(self, interaction: discord.Interaction, name: str) -> None:
+    async def trait(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "trait", name)
 
     @app_commands.command(name="spell", description="Look up a GURPS spell (facts + page cite)")
     @app_commands.describe(name="Spell name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def spell(self, interaction: discord.Interaction, name: str) -> None:
+    async def spell(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "spell", name)
 
     @app_commands.command(name="technique", description="Look up a GURPS technique (facts + page cite)")
     @app_commands.describe(name="Technique name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def technique(self, interaction: discord.Interaction, name: str) -> None:
+    async def technique(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "technique", name)
 
     @app_commands.command(name="item", description="Look up GURPS equipment (facts + page cite)")
     @app_commands.describe(name="Equipment name")
     @app_commands.guild_only()
     @app_commands.checks.cooldown(3, 5.0)
-    async def item(self, interaction: discord.Interaction, name: str) -> None:
+    async def item(self, interaction: discord.Interaction[GURPSBot], name: str) -> None:
         await self._lookup(interaction, "item", name)
 
     # discord.py wants the (self, interaction, current) shape per command —
@@ -411,7 +434,7 @@ class ReferenceCog(commands.Cog):
 
     async def _suggest(
         self,
-        interaction: discord.Interaction,
+        interaction: discord.Interaction[GURPSBot],
         command: str,
         current: str,
     ) -> list[app_commands.Choice[str]]:
@@ -424,41 +447,32 @@ class ReferenceCog(commands.Cog):
         except Exception:
             log.exception("reference autocomplete failed for %s", category)
             return []
-        if not current:
-            names = candidates[:25]
-        else:
-            # partial_ratio is cheap enough for per-keystroke scans over ~11k names
-            names = [
-                m
-                for m, _ in fuzzy_match(
-                    current, candidates, limit=25, score_cutoff=40, prefix_optimized=True
-                )
-            ]
+        names = _rank_suggestions(current, candidates)
         # discord caps choice name/value at 100 chars; over-long would 400
         return [
             app_commands.Choice(name=n[:100], value=n[:100]) for n in names
         ]
 
     @skill.autocomplete("name")
-    async def _skill_ac(self, interaction: discord.Interaction, current: str):
+    async def _skill_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "skill", current)
 
     @trait.autocomplete("name")
-    async def _trait_ac(self, interaction: discord.Interaction, current: str):
+    async def _trait_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "trait", current)
 
     @spell.autocomplete("name")
-    async def _spell_ac(self, interaction: discord.Interaction, current: str):
+    async def _spell_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "spell", current)
 
     @technique.autocomplete("name")
-    async def _technique_ac(self, interaction: discord.Interaction, current: str):
+    async def _technique_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "technique", current)
 
     @item.autocomplete("name")
-    async def _item_ac(self, interaction: discord.Interaction, current: str):
+    async def _item_ac(self, interaction: discord.Interaction[GURPSBot], current: str):
         return await self._suggest(interaction, "item", current)
 
 
-async def setup(bot: commands.Bot) -> None:
+async def setup(bot: GURPSBot) -> None:
     await bot.add_cog(ReferenceCog(bot))

@@ -51,28 +51,14 @@ jobs:
       - name: Run tests
         run: uv run python -m pytest -q
 
-  # Type check, scoped on purpose. pyright has been a declared dev dependency
-  # since before 1.0 and nothing ever ran it; a repo-wide gate is not landable
-  # (measured 2026-09-15 on pyright 1.1.409: 189 errors — cogs 143, services
-  # 23, ui 23, and none anywhere else — mostly discord.py's Interaction.client
-  # not carrying the bot's .db attribute and guild_id: int | None flowing into
-  # int params).
-  #
-  # COVERED: gurps_bot/gcs, gurps_bot/utils, gurps_bot/db, gurps_bot/mechanics,
-  #   and gurps_bot/*.py — the loose root modules (bot.py, __main__.py,
-  #   command_sync.py, config.py) are not a package, so they sat outside both
-  #   lists until the glob was added; they are clean and now gated
-  # NOT COVERED: gurps_bot/cogs, gurps_bot/ui, gurps_bot/services, tools,
-  #   tests, and gurps_bot/data (vendored GCS JSON, gitignored, no Python)
-  #
-  # That is 4 of the 7 packages under gurps_bot/, named rather than implied so
-  # the coverage claim cannot read as total. Not all four were clean when this
-  # landed: gcs and utils were, db came clean one commit earlier (the schema
-  # gate), and mechanics carried 2 reportArgumentType errors in magic.py's
-  # long_distance_modifier that the commit adding this gate fixed. mechanics is
-  # the one that pays: it is the pure-rules layer, where a GURPS constant with
-  # the wrong type is a wrong answer at a table. Widen by moving a package up a
-  # line once it is clean; do not add one that is not.
+  # A separate job rather than a matrix step: the typecheck answers one question
+  # regardless of interpreter, and a type error should read as its own red
+  # check, not as a failed test leg. Being in this workflow is what puts it
+  # behind the publish gate too. Scope (the whole gurps_bot package) and the
+  # 3.10 floor live in [tool.pyright] in pyproject.toml, so a local
+  # `uv run pyright` and this job answer the same question. The package was
+  # first gated a layer at a time on dev; it reached zero errors throughout
+  # on main, which is what let the scope widen to all of it.
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -90,5 +76,5 @@ jobs:
       - name: Sync dependencies
         run: uv sync --frozen
 
-      - name: Type check the covered layers
-        run: uv run pyright gurps_bot/gcs gurps_bot/utils gurps_bot/db gurps_bot/mechanics gurps_bot/*.py
+      - name: Run pyright
+        run: uv run pyright

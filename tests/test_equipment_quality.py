@@ -1,6 +1,6 @@
 """B345 Equipment Modifiers.
 
-Found while re-verifying sealed probe 3: the probe's workspace ladder
+Found while re-verifying a repair reference scenario: its workspace ladder
 (improvised -5 / basic 0 / shop +1 / factory +2) is four fifths of B345, and
 B484's repair rules cite B345 explicitly — so the repair module was passing an
 opaque GM integer where the book has a printed table. This is that table.

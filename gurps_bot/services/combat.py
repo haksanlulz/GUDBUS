@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 import math
 import random
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
+from typing import Any, cast
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, insert, select, update
+from sqlalchemy import CursorResult, delete, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -101,6 +103,31 @@ async def end_combat(
     return True
 
 
+async def _touch_via_combatant(session: AsyncSession, combatant_id: int) -> None:
+    """Mark the combatant's combat as active now.
+
+    cleanup_stale_combats keys on Combat.updated_at, and the row's own onupdate
+    only fires when a Combat column changes. Every mutation below changes a
+    Combatant instead, so without this a game that kept applying HP, status or
+    defends for a day was swept mid-fight; only Next/Prev turn ever wrote it.
+    """
+    await session.execute(
+        update(Combat)
+        .where(
+            Combat.id
+            == select(Combatant.combat_id)
+            .where(Combatant.id == combatant_id)
+            .scalar_subquery()
+        )
+        .values(updated_at=datetime.now(timezone.utc))
+    )
+
+
+def _touch(combat: Combat) -> None:
+    """Same, for callers that hold the Combat; flushed with the caller's changes."""
+    combat.updated_at = datetime.now(timezone.utc)
+
+
 def _next_slot(combat: Combat) -> int:
     """Next slot from the in-memory list — racy; prefer _allocate_slot_and_add."""
     if not combat.combatants:
@@ -115,6 +142,7 @@ async def _allocate_slot_and_add(
 ) -> Combatant:
     """Insert with the slot allocated SQL-side — concurrent adds can't collide on MAX(slot)+1."""
     # slot comes from the SQL subquery, id from autoincrement — omit both
+    _touch(combat)
     values = {
         "combat_id": combatant.combat_id,
         "character_id": combatant.character_id,
@@ -253,21 +281,33 @@ async def add_npc_combatant(
 
 
 async def remove_combatant(
-    session: AsyncSession, combat: Combat, combatant_id: int,
+    session: AsyncSession,
+    combat: Combat,
+    combatant_id: int,
+    *,
+    turn_messages: list[str] | None = None,
 ) -> bool:
-    """Remove a combatant; removing the current actor passes the turn to the next in order."""
+    """Remove a combatant; removing the current actor passes the turn on.
+
+    Passing the turn goes through advance_turn, so it behaves exactly like Next
+    Turn from the removed combatant: a wrap starts the next round, and the
+    Dead/Unconscious skip, the B419 roll and Stunned all apply. Whatever that
+    announces is appended to `turn_messages` when the caller passes a list.
+    """
+    _touch(combat)
     ordered = ordered_combatants(combat)
-    target_idx = None
-    target = None
-    for i, c in enumerate(ordered):
-        if c.id == combatant_id:
-            target_idx = i
-            target = c
-            break
-    if target is None:
+    found = next(((i, c) for i, c in enumerate(ordered) if c.id == combatant_id), None)
+    if found is None:
         return False
+    target_idx, target = found
 
     removing_current = combat.current_combatant_id == combatant_id
+    if removing_current and len(ordered) > 1:
+        # hand the turn on BEFORE the row goes, from the removed combatant's
+        # seat — the same step Next Turn takes, round change included
+        message = advance_turn(combat)
+        if message and turn_messages is not None:
+            turn_messages.append(message)
 
     await session.delete(target)
     combat.combatants.remove(target)
@@ -278,12 +318,7 @@ async def remove_combatant(
         combat.current_combatant_id = None
         return True
 
-    if removing_current:
-        # next-in-order slides into target_idx; wrap to the top if the removed was last
-        new_idx = target_idx if target_idx < len(remaining) else 0
-        combat.current_index = new_idx
-        combat.current_combatant_id = remaining[new_idx].id
-    elif combat.current_combatant_id is not None:
+    if combat.current_combatant_id is not None:
         # anchor unchanged — resync its cached index after the shrink
         _sync_index_to_anchor(combat)
     else:
@@ -395,9 +430,28 @@ def previous_turn(combat: Combat) -> None:
     if pos is None:
         pos = combat.current_index % len(ordered)
 
-    pos -= 1
-    if pos < 0:
-        pos = len(ordered) - 1
+    # the mirror of advance_turn's skip: step back over Dead/Unconscious seats,
+    # so Prev undoes a Next that skipped them instead of landing on a corpse
+    # with the round still incremented. Bounded to n steps; if everyone is
+    # down, move exactly one seat, as advance_turn does.
+    n = len(ordered)
+    target: int | None = None
+    wrapped = False
+    for step in range(1, n + 1):
+        np = pos - step
+        if np < 0:
+            np += n
+            wrapped = True
+        effects = set(ordered[np].status_effects or [])
+        if StatusEffect.DEAD in effects or StatusEffect.UNCONSCIOUS in effects:
+            continue
+        target = np
+        break
+    if target is None:
+        target = (pos - 1) % n
+        wrapped = pos - 1 < 0
+    pos = target
+    if wrapped:
         combat.round_number = max(1, combat.round_number - 1)
 
     combat.current_index = pos
@@ -427,6 +481,7 @@ async def modify_hp(
 ) -> tuple[Combatant, str]:
     """Apply an HP delta atomically; returns (combatant, warning)."""
     # atomic clamp-and-add — read-modify-write loses one of two parallel hits
+    await _touch_via_combatant(session, combatant_id)
     update_stmt = (
         update(Combatant)
         .where(Combatant.id == combatant_id)
@@ -459,6 +514,7 @@ async def modify_fp(
     session: AsyncSession, combatant_id: int, delta: int,
 ) -> Combatant:
     """Apply an FP delta atomically — same race shape as modify_hp."""
+    await _touch_via_combatant(session, combatant_id)
     update_stmt = (
         update(Combatant)
         .where(Combatant.id == combatant_id)
@@ -473,6 +529,7 @@ async def modify_fp(
 async def set_maneuver(
     session: AsyncSession, combatant_id: int, maneuver: str,
 ) -> Combatant:
+    await _touch_via_combatant(session, combatant_id)
     stmt = select(Combatant).where(Combatant.id == combatant_id)
     result = await session.execute(stmt)
     c = result.scalar_one()
@@ -483,7 +540,7 @@ async def set_maneuver(
 # Test seam: awaited after the read and before the compare-and-set in
 # _cas_status_effects, so a test can hold the window open deterministically.
 # Production leaves it None.
-_STATUS_READ_HOOK = None
+_STATUS_READ_HOOK: Callable[[], Awaitable[None]] | None = None
 
 
 async def _cas_status_effects(
@@ -498,6 +555,7 @@ async def _cas_status_effects(
     equality on SQLite (the only dialect this bot ships with); on PostgreSQL
     the column would need to be JSONB for `=` to exist.
     """
+    await _touch_via_combatant(session, combatant_id)
     for _ in range(attempts):
         stmt = select(Combatant).where(Combatant.id == combatant_id)
         c = (await session.execute(stmt)).scalar_one()
@@ -513,11 +571,12 @@ async def _cas_status_effects(
             if old_raw is None
             else Combatant.status_effects == old
         )
-        result = await session.execute(
+        # a DML execute returns a CursorResult; the session API types it as Result
+        result = cast("CursorResult[Any]", await session.execute(
             update(Combatant)
             .where(Combatant.id == combatant_id, guard)
             .values(status_effects=new)
-        )
+        ))
         if result.rowcount == 1:
             session.expire(c, ["status_effects"])
             await session.refresh(c, ["status_effects"])
@@ -592,6 +651,7 @@ async def record_defense(
     update is not portable; the row is re-read under the same session, and the
     turn total keeps the atomic increment that the concurrency tests pin.
     """
+    await _touch_via_combatant(session, combatant_id)
     if defense_type == "parry":
         column = Combatant.parries_this_turn
         update_stmt = (
@@ -657,17 +717,18 @@ async def cleanup_stale_combats(
         .where(Combatant.combat_id.in_(stale_ids))
         .execution_options(synchronize_session=False)
     )
-    result = await session.execute(
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(
         delete(Combat)
         .where(Combat.updated_at < cutoff)
         .execution_options(synchronize_session=False)
-    )
+    ))
     return result.rowcount
 
 
 async def count_combats(session: AsyncSession) -> int:
     """Total active combats across all guilds (/status diagnostics)."""
-    return await session.scalar(select(func.count(Combat.id)))
+    return await session.scalar(select(func.count(Combat.id))) or 0
 
 
 async def purge_guild_combats(session: AsyncSession, guild_id: int) -> None:

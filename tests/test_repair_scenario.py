@@ -1,28 +1,27 @@
-"""Sealed probe 3, SPENT 2026-08-15 against the frozen tech-line repair layer.
+"""The repair reference scenario, checked 2026-08-15 against the frozen
+tech-line repair layer.
 
 The layer was built and committed (`tech_level.py` + the `crafting_repair`
-additions) with this probe unread, and opened only afterwards. That is the
-strongest discipline available here, but it is not a clean held-out result and
-this file will not claim one: a prior session read probe 3 on 2026-08-10,
-judged it inapplicable to the B484 module, and extracted its workspace ladder
-into `mechanics/equipment_quality.py`. So part of its content had already
-shaped the code before today. What was genuinely unread this time is every
-number below.
+additions) before the scenario's numbers were read. It is not a fully clean
+result and this file will not claim one: a pass on 2026-08-10 judged the
+scenario inapplicable to the B484 module and extracted its workspace ladder
+into `mechanics/equipment_quality.py`, so part of it had already shaped the
+code. Every number below was unread until the layer was frozen.
 
-VERDICT — the probe describes a repair procedure that is not the Basic Set's,
+VERDICT — the scenario describes a repair procedure that is not the Basic Set's,
 and now not any tech book's either. Six of its conditions are checkable; the
 scoring is in the classes below. One number is positively contradicted by
 printed text rather than merely unmatched, and it accounts for the entire
 target discrepancy.
 
-⚑ THE WHOLE DELTA IS ONE RULE, AND IT IS A SINGLE VALUE (Rule 23). The probe's
+⚑ THE WHOLE DELTA IS ONE RULE, AND IT IS A SINGLE VALUE. The scenario's
 target is 9 and this code's is 5. The gap is exactly 4, it appears once, and
-it is the TL penalty: the probe prices one TL above the repairer at -1, where
+it is the TL penalty: the scenario prices one TL above the repairer at -1, where
 B168's ladder for IQ-based technological skills prices it at -5. -1 is the
 value that rule gives for one TL *below*, and it is also what the flat rule for
 non-IQ-based skills gives in either direction. A one-row misread of an
-asymmetric table is the most economical explanation, and per Rule 23 a single
-dominant delta points at a definition rather than at confabulation.
+asymmetric table is the most economical explanation, and a single dominant
+delta points at a definition rather than at confabulation.
 
 Why the printed reading is taken as governing, stated so it can be overruled:
 
@@ -34,18 +33,13 @@ Why the printed reading is taken as governing, stated so it can be overruled:
   extend to other skills, or even to IQ-based rolls for DX-based skills". It
   goes out of its way to deny exactly this relief to exactly this case.
 
-✅ **OPERATOR RULING 2026-08-15: the -1 is a PLANTED ERROR. The book wins.**
-So condition 1 is CAUGHT, not failed — the probe was built to see whether a
-deliberately wrong TL penalty would be coded from the check instead of from
-the book, and it was not. The code is unchanged by the ruling because it was
-already right; what changes is the reading of the result.
+✅ **OPERATOR RULING 2026-08-15: the -1 is an error in the scenario. The book
+wins.** So condition 1 is a CATCH, not a failure. The code is unchanged by the
+ruling because it was already right; what changes is the reading of the result.
 
-⚑ Worth stating plainly, because it is the one thing this probe was for: the
-catch did NOT come from reasoning about the rules. It came from opening the
-Basic Set skill list to see what attribute Armoury runs on. The 2026-08-06
-entry recorded that every earlier catch worked the same way and every miss did
-not — probe 5's materials figure passed unchallenged twice while it was being
-reasoned about, and fell the moment LTC3 p. 22 was actually read.
+⚑ Worth stating plainly: the catch did NOT come from reasoning about the rules.
+It came from opening the Basic Set skill list to see what attribute Armoury
+runs on.
 """
 
 from __future__ import annotations
@@ -58,17 +52,17 @@ from gurps_bot.mechanics.crafting_repair import RepairTier
 from gurps_bot.mechanics.equipment_quality import EquipmentQuality
 from gurps_bot.mechanics.tech_level import SkillClass
 
-#: The probe's inputs, verbatim.
+#: The scenario's inputs, verbatim.
 SKILL = 14
 SKILL_TL = 9
 ITEM_TL = 10
-PROBE_TARGET_AT_BASIC = 9
+SCENARIO_TARGET_AT_BASIC = 9
 
 
 def _modifier(**kwargs):
-    """The probe's scenario as this code prices it, minus the price rung.
+    """The scenario's scenario as this code prices it, minus the price rung.
 
-    B484's price modifier is left out on purpose: the probe names no item
+    B484's price modifier is left out on purpose: the scenario names no item
     price, because its model does not have that axis at all. See
     ``TestStructuralDisagreements``.
     """
@@ -85,9 +79,9 @@ def _modifier(**kwargs):
 class TestConditionOneTheTarget:
     """"Target 9 at a basic workspace for the stated inputs."
 
-    Operator-ruled a planted error 2026-08-15, so these assertions record a
-    CATCH. They deliberately assert the disagreement rather than the probe's
-    number: if a future session "fixes" the TL penalty to match the probe,
+    Operator-ruled an error in the scenario 2026-08-15, so these assertions record a
+    CATCH. They deliberately assert the disagreement rather than the scenario's
+    number: if a future session "fixes" the TL penalty to match the scenario,
     every test here goes red, which is the point.
     """
 
@@ -95,25 +89,25 @@ class TestConditionOneTheTarget:
         basic = equipment_quality.modifier(EquipmentQuality.BASIC, technological=True)
         target = SKILL + _modifier(equipment_modifier=basic).total
         assert target == 5
-        assert target != PROBE_TARGET_AT_BASIC
+        assert target != SCENARIO_TARGET_AT_BASIC
 
     def test_and_the_difference_is_exactly_four(self):
         basic = equipment_quality.modifier(EquipmentQuality.BASIC, technological=True)
         target = SKILL + _modifier(equipment_modifier=basic).total
-        assert PROBE_TARGET_AT_BASIC - target == 4
+        assert SCENARIO_TARGET_AT_BASIC - target == 4
 
     def test_which_is_the_tl_rule_and_nothing_else(self):
-        """Substituting the probe's own TL penalty reproduces its target
+        """Substituting the scenario's own TL penalty reproduces its target
         exactly. Nothing else in the scenario contributes to the gap, which is
         what makes this one delta rather than several."""
         governing = tech_level.tl_gap(skill_tl=SKILL_TL, equipment_tl=ITEM_TL).penalty
-        probes = -1
+        scenario_penalty = -1
         assert governing == -5
-        assert SKILL + probes - 2 - 2 + 0 == PROBE_TARGET_AT_BASIC
+        assert SKILL + scenario_penalty - 2 - 2 + 0 == SCENARIO_TARGET_AT_BASIC
 
-    def test_the_probes_value_is_the_ladders_other_direction(self):
+    def test_the_scenarios_value_is_the_ladders_other_direction(self):
         """-1 is what B168 charges for equipment one TL BELOW the skill. The
-        probe's item is one TL above."""
+        scenario's item is one TL above."""
         one_below = tech_level.tl_gap(skill_tl=SKILL_TL, equipment_tl=SKILL_TL - 1)
         assert one_below.penalty == -1
 
@@ -135,7 +129,7 @@ class TestConditionTwoSeparateModifiers:
         assert any("B169" in label for label in labels)
 
     def test_the_structure_passes_even_though_the_value_does_not(self):
-        """The probe's shape is right and its number is not — worth separating,
+        """The scenario's shape is right and its number is not — worth separating,
         because a scoring pass that collapsed them would report a design
         failure where there is only an arithmetic disagreement."""
         terms = dict((label, value) for label, value in _modifier().terms)
@@ -154,7 +148,7 @@ class TestConditionThreeTheTierIsItsOwnModifier:
 class TestConditionFourTheEscalationIsStillUnsourced:
     """"Critical failure escalates the tier, and it persists."
 
-    The probe's distinctive rule, and the reason it was worth holding back.
+    The scenario's distinctive rule, and the one most worth checking against print.
     It is printed in none of the four books read for this domain: B484-485,
     High-Tech, Ultra-Tech. B485's "critical failure requires major repairs"
     belongs to Breakdowns, which is a maintenance roll rather than a repair
@@ -194,8 +188,8 @@ class TestConditionSixNoBatching:
             assert "units" not in params, name
 
 
-class TestWhatTheProbeBoughtTheWorkspaceLadderIsNowFullySourced:
-    """The 2026-08-10 pass found the probe's five-rung ladder to be
+class TestWhatTheScenarioBoughtTheWorkspaceLadderIsNowFullySourced:
+    """The 2026-08-10 pass found the scenario's five-rung ladder to be
     four-fifths of B345 and left the fifth rung unexplained. Reading
     Ultra-Tech for the tech layer supplied it.
 
@@ -230,30 +224,30 @@ class TestWhatTheProbeBoughtTheWorkspaceLadderIsNowFullySourced:
 
 
 class TestStructuralDisagreements:
-    """Beyond the one number: the probe and B484 do not model the same thing.
+    """Beyond the one number: the scenario and B484 do not model the same thing.
 
     Recorded rather than reconciled. Each is a place where a future session
     could mistake one rule set for the other.
     """
 
-    def test_b484s_primary_difficulty_axis_is_absent_from_the_probe(self):
-        """B484 asks what the item COSTS and modifies by price. The probe's
+    def test_b484s_primary_difficulty_axis_is_absent_from_the_scenario(self):
+        """B484 asks what the item COSTS and modifies by price. The scenario's
         difficulty comes from the workspace and never mentions a price, which
         is why the scenario cannot be scored without choosing one."""
         assert repair.price_modifier(500) == 1
         assert repair.price_modifier(50_000) == -1
 
-    def test_parts_are_rolled_in_the_book_and_flat_in_the_probe(self):
-        """B484: 1d x 10% of original price, so a range. The probe states a
+    def test_parts_are_rolled_in_the_book_and_flat_in_the_scenario(self):
+        """B484: 1d x 10% of original price, so a range. The scenario states a
         single figure of $180 with no roll."""
         low = repair.major_repair_parts_cost(1_800, 1)
         high = repair.major_repair_parts_cost(1_800, 6)
         assert low != high
         assert (low, high) == (180, 1_080)
 
-    def test_time_is_flat_in_the_book_and_rolled_in_the_probe(self):
+    def test_time_is_flat_in_the_book_and_rolled_in_the_scenario(self):
         """B484: half an hour per attempt, whatever the item, never divided.
-        The probe: 3d hours divided by workers — which is invention's shape,
+        The scenario: 3d hours divided by workers — which is invention's shape,
         not repair's."""
         spec = repair.minor_repair_time()
         assert spec.dice.count == 0

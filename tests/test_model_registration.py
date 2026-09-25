@@ -21,7 +21,7 @@ is process-global and `sys.modules` is a cache: once any other test in the
 session has imported `gurps_bot.db.crafting`, its table is registered forever
 and an in-process check passes whether or not `db/__init__.py` mentions it.
 The first draft of this file did exactly that and was green with the import
-line broken — a Rule 22 fail-open, in the guard written to close a fail-open.
+line broken — a fail-open, in the guard written to close a fail-open.
 A clean interpreter is the only instrument that can read this.
 """
 

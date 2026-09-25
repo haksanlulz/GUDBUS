@@ -210,8 +210,9 @@ class TestTheUserIsTold:
         await handler.on_app_command_error(interaction, wrapped)
 
         sent = interaction.response.send_message.await_args
-        assert "250 notes" in sent.args[0], (
-            f"the cap message was swallowed; user saw: {sent.args[0]!r}"
+        text = sent.args[0] if sent.args else sent.kwargs.get("content", "")
+        assert "250 notes" in text, (
+            f"the cap message was swallowed; user saw: {text!r}"
         )
         assert sent.kwargs.get("ephemeral") is True
 

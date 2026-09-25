@@ -148,8 +148,8 @@ def batch_penalty(doses: int) -> int:
 def batch_materials_cost(cost_per_dose: int, doses: int) -> int:
     """"multiplying the cost for materials by the number of doses produced".
 
-    The other half of the same rule. Probe-2 elicitation caught this pair being
-    applied one clause at a time, which is why both live in one module with
+    The other half of the same rule. This pair is easily applied one clause at
+    a time, which is why both live in one module with
     tests that assert they move together.
     """
     if cost_per_dose < 0:
@@ -220,8 +220,8 @@ def brewing_modifier(
     ⚠️ ``unmastered=`` used to be a parameter here and is deliberately gone.
     Handing the module its own conclusion is the same defect as a ``quality=``
     argument on a craft call: the rule lives here, so the verdict does too.
-    Sealed probe 2 caught it on re-verify — everything else in the domain
-    passed, and this one condition had no implementation at all.
+    A reference scenario caught it on re-verify — everything else in the
+    domain passed, and this one condition had no implementation at all.
     """
     if technique is None:
         technique = default_technique_level(alchemy_skill)

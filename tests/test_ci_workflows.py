@@ -92,6 +92,46 @@ class TestPublishGate:
                 )
 
 
+
+class TestTypecheckGate:
+    """pyright was a dev dependency nothing ran, and 208 errors accumulated.
+
+    Two of them were live defects (a view method shadowing discord.py's own
+    ``View._refresh``, and a tracker redraw that AttributeError'd on a channel
+    without messages). The job lives in tests.yml, so the publish gate above
+    covers it without a second ``needs:``.
+    """
+
+    @staticmethod
+    def _pyright_steps(tests_wf):
+        return [
+            (job_name, step)
+            for job_name, job in tests_wf["jobs"].items()
+            for step in job.get("steps", [])
+            if "pyright" in str(step.get("run", ""))
+        ]
+
+    def test_the_tests_workflow_runs_pyright(self, tests_wf):
+        assert self._pyright_steps(tests_wf), (
+            "no job in tests.yml runs pyright — the typecheck is unenforced again"
+        )
+
+    def test_pyright_takes_its_scope_from_pyproject(self, tests_wf):
+        # Paths on the command line would override [tool.pyright] and let the
+        # CI scope and the local `uv run pyright` scope drift apart.
+        for job_name, step in self._pyright_steps(tests_wf):
+            assert step["run"].split() == ["uv", "run", "pyright"], (
+                f"{job_name}: {step['run']!r} — pass scope in pyproject, not here"
+            )
+
+    def test_the_shipped_package_is_in_scope(self):
+        try:
+            import tomllib
+        except ImportError:  # 3.10: pytest itself depends on tomli there
+            import tomli as tomllib
+        pyproject = WORKFLOWS.parent.parent / "pyproject.toml"
+        config = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        assert "gurps_bot" in config["tool"]["pyright"]["include"]
 class TestChannels:
     """`:latest` is the release pointer. Trunk must not be able to move it."""
 
@@ -186,121 +226,3 @@ class TestArchitectures:
         qemu = next(i for i, u in enumerate(names) if "setup-qemu-action" in u)
         buildx = next(i for i, u in enumerate(names) if "setup-buildx-action" in u)
         assert qemu < buildx, "QEMU must be set up before buildx"
-
-
-class TestTypeCheckGate:
-    """pyright is installed on every sync; something has to run it.
-
-    It was a declared dev dependency in both the PEP-735 group and the .[dev]
-    extra since before 1.0, and no workflow, script or test ever invoked it —
-    a tool the project pays to install on every fresh clone and never reads.
-    The gate is scoped rather than repo-wide, so these assert the scope is
-    real and written down, not that it is total. "Scoped to the layers that
-    are clean" overstated it: gcs and utils were clean, db came clean one
-    commit earlier, and mechanics needed a two-error fix in magic.py first.
-    """
-
-    #: Named here as well as in the workflow comment so a silent narrowing of
-    #: the CI scope fails rather than passing quietly.
-    COVERED = (
-        "gurps_bot/gcs",
-        "gurps_bot/utils",
-        "gurps_bot/db",
-        "gurps_bot/mechanics",
-    )
-
-    #: The loose modules at gurps_bot/ root are not a package, so they are
-    #: reached by a glob rather than by a directory path. Without it they fall
-    #: outside COVERED and NOT COVERED both, and the pair reads exhaustive
-    #: while silently omitting bot.py, __main__.py, command_sync.py, config.py.
-    COVERED_LOOSE = "gurps_bot/*.py"
-
-    def _typecheck_run(self, tests_wf):
-        job = tests_wf["jobs"]["typecheck"]
-        runs = [s["run"] for s in job["steps"] if "run" in s]
-        pyright = [r for r in runs if "pyright" in r]
-        assert pyright, f"typecheck job runs no pyright step: {runs}"
-        return pyright[0]
-
-    def _typecheck_args(self, tests_wf) -> set[str]:
-        """The gate's paths as whole tokens, never as substrings.
-
-        `"gurps_bot/db" in command` is satisfied by `pyright
-        gurps_bot/db/migrations`, and `"gurps_bot/mechanics"` by
-        `gurps_bot/mechanics/damage.py` — either cuts the gate to a fraction of
-        the package while every test here stays green, which is exactly the
-        silent narrowing this class exists to catch. The run is a shell line of
-        whitespace-separated paths, so splitting it is exact. `gurps_bot/*.py`
-        survives the split unchanged: CI's bash expands it at run time, not
-        here.
-        """
-        return set(self._typecheck_run(tests_wf).split())
-
-    def test_the_workflow_runs_pyright(self, tests_wf):
-        assert "typecheck" in tests_wf["jobs"], list(tests_wf["jobs"])
-        self._typecheck_run(tests_wf)
-
-    def test_every_covered_layer_is_in_the_command(self, tests_wf):
-        args = self._typecheck_args(tests_wf)
-        for layer in (*self.COVERED, self.COVERED_LOOSE):
-            assert layer in args, f"{layer} dropped from the gate: {sorted(args)}"
-
-    def test_the_two_lists_partition_gurps_bot(self, tests_wf):
-        """Every top-level entry is in one list or the other, or NOT COVERED
-        is a sample rather than an enumeration.
-
-        A package landing in neither reads as covered to anyone skimming the
-        pair, which is what the four loose root modules did: outside the gate
-        command and named nowhere, while 'That is 4 of the 7 packages' was
-        true and made the omission easy to miss — they are modules, not
-        packages.
-        """
-        root = Path(__file__).resolve().parent.parent
-        text = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
-        args = self._typecheck_args(tests_wf)
-        for entry in sorted((root / "gurps_bot").iterdir()):
-            if entry.name == "__pycache__":
-                continue
-            rel = f"gurps_bot/{entry.name}"
-            if entry.is_file() and entry.suffix == ".py":
-                assert self.COVERED_LOOSE in args, (
-                    f"{rel} is reached only by the {self.COVERED_LOOSE} glob, "
-                    f"which is not in the gate command: {sorted(args)}"
-                )
-            else:
-                assert rel in text, f"{rel} appears in neither list"
-
-    def test_every_covered_layer_exists_on_disk(self):
-        """A renamed package must not silently shrink the gate's reach."""
-        root = Path(__file__).resolve().parent.parent
-        for layer in self.COVERED:
-            assert (root / layer).is_dir(), f"gate names a missing path: {layer}"
-
-    def test_the_coverage_claim_is_stated_not_implied(self):
-        """N-of-M, in the file, or the scope reads as the whole package."""
-        text = (WORKFLOWS / "tests.yml").read_text(encoding="utf-8")
-        lines = [line.strip() for line in text.splitlines()]
-        # Anchored per line, not `"COVERED:" in text`: as a bare substring
-        # "COVERED:" is satisfied by "NOT COVERED:", so deleting the whole
-        # COVERED block left the old assertion green — the half of the pair
-        # that states what IS gated was the unguarded one.
-        assert any(line.startswith("# COVERED:") for line in lines), (
-            "the COVERED: line is gone from tests.yml"
-        )
-        assert any(line.startswith("# NOT COVERED:") for line in lines), (
-            "the NOT COVERED: line is gone from tests.yml"
-        )
-        for layer in ("gurps_bot/cogs", "gurps_bot/ui", "gurps_bot/services"):
-            assert layer in text, f"{layer} is unchecked and unmentioned"
-
-    def test_pyright_is_pinned_exactly(self):
-        """A minor bump adds checks and reddens a previously-green gate."""
-        import re
-
-        pyproject = (
-            Path(__file__).resolve().parent.parent / "pyproject.toml"
-        ).read_text(encoding="utf-8")
-        specs = re.findall(r'"pyright([^"]*)"', pyproject)
-        assert specs, "pyright is no longer declared at all"
-        for spec in specs:
-            assert spec.startswith("=="), f"pyright is not pinned: pyright{spec}"

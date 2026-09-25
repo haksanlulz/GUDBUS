@@ -154,20 +154,36 @@ class TestTheEntryPointReads:
 class TestRendering:
     @pytest.mark.parametrize("topic", sorted(TOPICS))
     async def test_no_topic_field_exceeds_discords_limit(self, tree, topic):
-        """A field over 1024 chars is dropped by Discord, silently."""
-        descriptions = _tree_descriptions(tree)
-        _, _, names = TOPICS[topic]
-        lines = [f"`/{n}` — {descriptions[n]}" for n in names if n in descriptions]
+        """A field over 1024 chars is dropped by Discord, silently.
 
-        chunks, chunk, size = [], [], 0
-        for line in lines:
-            if size + len(line) + 1 > 1000 and chunk:
-                chunks.append("\n".join(chunk))
-                chunk, size = [], 0
-            chunk.append(line)
-            size += len(line) + 1
-        if chunk:
-            chunks.append("\n".join(chunk))
+        Renders through help_cmd itself. The previous version re-implemented
+        the splitting loop inside the test and checked its own copy, so
+        removing the split from cogs/help.py could not fail it.
+        """
+        from unittest.mock import AsyncMock, MagicMock
 
-        for c in chunks:
-            assert len(c) <= 1024, f"{topic}: a rendered field is {len(c)} chars"
+        from discord import app_commands
+
+        from gurps_bot.cogs.help import HelpCog
+
+        bot = MagicMock()
+        bot.tree = tree
+        interaction = MagicMock()
+        interaction.response.is_done.return_value = False
+        interaction.response.send_message = AsyncMock()
+        title, _, names = TOPICS[topic]
+        cog = HelpCog(bot)
+        await cog.help_cmd.callback(
+            cog, interaction, app_commands.Choice(name=title, value=topic)
+        )
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+
+        for f in embed.fields:
+            assert len(f.value) <= 1024, f"{topic}: field {f.name!r} is {len(f.value)} chars"
+        assert len(embed) <= 6000, f"{topic}: the whole embed is {len(embed)} chars"
+        # and splitting must not have dropped any command on the way
+        shown = "\n".join(f.value for f in embed.fields)
+        live = _tree_descriptions(tree)
+        for n in names:
+            if n in live:
+                assert f"`/{n}`" in shown, f"{topic}: /{n} is missing from the rendered help"

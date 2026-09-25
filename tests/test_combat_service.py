@@ -349,6 +349,45 @@ class TestPreviousTurn:
         assert combat.current_index == 1
         assert combat.round_number == 1
 
+    async def test_undo_reverses_a_next_that_skipped_the_dead(self, db_session):
+        """Next skipped the downed combatant and wrapped; Prev stepped back one
+        seat onto the corpse and left the round incremented."""
+        from gurps_bot.services.combat import add_status
+
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        x = await add_npc_combatant(db_session, combat, "X", 9.0, 10, 10)
+        await add_npc_combatant(db_session, combat, "A", 7.0, 10, 10)
+        await add_npc_combatant(db_session, combat, "B", 6.0, 10, 10)
+        await add_status(db_session, x.id, "Dead")
+        await db_session.commit()
+        combat = await get_combat(db_session, GUILD_ID, CHANNEL_ID)
+
+        advance_turn(combat)  # X is skipped at start? current is X by index; move on
+        while current_combatant(combat).name != "B":
+            advance_turn(combat)
+        round_at_b = combat.round_number
+        advance_turn(combat)  # wraps, skips X, lands on A
+        assert current_combatant(combat).name == "A"
+        assert combat.round_number == round_at_b + 1
+
+        previous_turn(combat)
+        assert current_combatant(combat).name == "B"
+        assert combat.round_number == round_at_b
+
+    async def test_undo_with_everyone_down_still_moves_one_seat(self, db_session):
+        from gurps_bot.services.combat import add_status
+
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        a = await add_npc_combatant(db_session, combat, "A", 7.0, 10, 10)
+        b = await add_npc_combatant(db_session, combat, "B", 6.0, 10, 10)
+        await add_status(db_session, a.id, "Dead")
+        await add_status(db_session, b.id, "Unconscious")
+        await db_session.commit()
+        combat = await get_combat(db_session, GUILD_ID, CHANNEL_ID)
+        combat.current_combatant_id = b.id
+        previous_turn(combat)
+        assert current_combatant(combat).name == "A"
+
 
 class TestModifyHP:
     async def test_damage(self, db_session):
@@ -533,6 +572,46 @@ class TestTurnIdentityAnchor:
         await db_session.commit()
 
         assert current_combatant(combat).name == "C"
+
+    async def test_removing_the_last_in_order_while_current_starts_the_next_round(
+        self, db_session,
+    ):
+        """It used to wrap to the top with the round unchanged, so the whole
+        next round was labelled round 1 and no "Round 2 begins" was said."""
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 7.0, 10, 10)
+        await add_npc_combatant(db_session, combat, "B", 6.0, 10, 10)
+        c = await add_npc_combatant(db_session, combat, "C", 5.0, 10, 10)
+        await db_session.commit()
+        advance_turn(combat)
+        advance_turn(combat)  # C current, round 1
+        assert combat.round_number == 1
+
+        said: list[str] = []
+        await remove_combatant(db_session, combat, c.id, turn_messages=said)
+        await db_session.commit()
+
+        assert current_combatant(combat).name == "A"
+        assert combat.round_number == 2
+        assert any("Round 2 begins" in m for m in said), said
+
+    async def test_removing_the_current_skips_a_downed_successor(self, db_session):
+        """Passing the turn on removal gets advance_turn's Dead/Unconscious skip."""
+        from gurps_bot.services.combat import add_status
+
+        combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)
+        await add_npc_combatant(db_session, combat, "A", 7.0, 10, 10)
+        b = await add_npc_combatant(db_session, combat, "B", 6.0, 10, 10)
+        c = await add_npc_combatant(db_session, combat, "C", 5.0, 10, 10)
+        await add_npc_combatant(db_session, combat, "D", 4.0, 10, 10)
+        await add_status(db_session, c.id, "Dead")
+        await db_session.commit()
+        combat = await get_combat(db_session, GUILD_ID, CHANNEL_ID)
+        advance_turn(combat)  # B current
+
+        await remove_combatant(db_session, combat, b.id)
+        await db_session.commit()
+        assert current_combatant(combat).name == "D"
 
     async def test_remove_noncurrent_keeps_current(self, db_session):
         combat = await start_combat(db_session, GUILD_ID, CHANNEL_ID, GM_ID)

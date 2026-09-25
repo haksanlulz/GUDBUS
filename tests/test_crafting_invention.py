@@ -4,11 +4,8 @@ Red-first per the project's test discipline. Every number here was read off
 B473-474 in the operator's own copy; the page cites live beside the constants in
 ``mechanics/crafting.py``.
 
-⚠️ **Sealed probe 1 is deliberately not consulted while writing this.** It is one
-of the two clean held-out checks in the family (ATTACK.md records the provenance
-gradient), and reading it during the build would convert it into a differential
-— strong as a regression case, worthless as an anti-fabrication rung on code
-Claude wrote. Re-verify against it after the engine is frozen.
+The TL+3 reference scenario at the bottom of this file was checked only after
+the engine was frozen, so it tests the engine rather than having shaped it.
 
 Two things the extraction could not be trusted for, and how they were resolved:
 
@@ -593,17 +590,14 @@ class TestPrototypeCriticalFailure:
         assert rebuilt == 250_000
 
 
-# --- sealed probe 1 -----------------------------------------------------------
+# --- the TL+3 reference scenario ---------------------------------------------
 
 
-class TestSealedProbeOne:
-    """The anchor scene, re-verified 2026-08-09 against the sealed probe.
+class TestTheTL3ReferenceScenario:
+    """The anchor scene, checked 2026-08-09 against an external worked scenario.
 
-    Provenance matters here and ATTACK.md records it: probe 1 is one of the two
-    CLEAN held-out checks. It was not opened while the engine was written, and
-    the engine was committed (`5c535e8`, `e69cb47`) before the seal was broken —
-    so this is an anti-fabrication rung rather than a differential. Seal
-    verified by sha256 against ATTACK.md's frontmatter before reading.
+    The engine was committed (`5c535e8`, `e69cb47`) before the scenario was
+    read, so this checks the engine rather than restating it.
 
     Scenario: a TL+3 superscience portable mansion, effective skill 16 (the
     LOWEST of Engineer 18 / Physics 16 / Mathematics 16 — B473 says roll against
@@ -612,12 +606,11 @@ class TestSealedProbeOne:
     base production cost $1,500,000.
 
     ⚑ The first run FAILED on the two targets, by exactly -10 each. One dominant
-    delta across both, which per Rule 23 indicts the definition rather than the
-    subject: the engine treated "above the inventor's TL" as a boolean worth -5,
+    delta across both, which points at the definition rather than the subject: the engine treated "above the inventor's TL" as a boolean worth -5,
     and TL+3 is three steps of it. Fixed to a graded `tl_gap`.
 
     ⬜ The money figures are STILL OPEN and are deliberately not asserted here.
-    See `TestSealedProbeOneMoneyIsUnresolved` below.
+    See `TestTheTL3ScenarioMoneyIsUnresolved` below.
     """
 
     SKILL = 16
@@ -651,7 +644,7 @@ class TestSealedProbeOne:
         assert self._prototype().total < 0
 
     def test_a_natural_three_still_succeeds_at_minus_eighteen(self):
-        """B347 corollary the probe calls out: the workflow must not
+        """B347 corollary the scenario calls out: the workflow must not
         short-circuit an 'impossible' roll away."""
         from gurps_bot.mechanics.checks import Outcome, check_against
 
@@ -697,10 +690,10 @@ class TestSealedProbeOne:
         assert crafting.copy_time(prototype_days=30) == 15
 
 
-class TestSealedProbeOneMoneyIsUnresolved:
-    """The one part of probe 1 the engine does NOT reproduce, recorded as such.
+class TestTheTL3ScenarioMoneyIsUnresolved:
+    """The one part of the scenario the engine does NOT reproduce, recorded as such.
 
-    Probe 1 gives, for the same TL+3 scenario:
+    The scenario gives, for the same TL+3 item:
 
         facilities  $1,750,000   = Complex base $250,000   x 7
         per attempt $7,500,000   = retail    $1,500,000    x 5
@@ -709,8 +702,8 @@ class TestSealedProbeOneMoneyIsUnresolved:
     ONE-step gap, and B473 says the New Inventions rules cover at most one TL in
     advance, so the book has no answer for TL+3 at all. **No single multiplier
     produces both 7 and 5**, so there is nothing to derive: fitting a scaling law
-    to two disagreeing points is exactly the fabrication the probe exists to
-    catch, and the engine would then be "verified" against a rule nobody printed.
+    to two disagreeing points is exactly the fabrication the book-first rule
+    exists to prevent, and the engine would then be "verified" against a rule nobody printed.
 
     So the engine keeps B474's x3 as the default and takes the multiplier as a
     GM parameter. These tests pin what IS known and assert the gap stays visible
@@ -718,9 +711,8 @@ class TestSealedProbeOneMoneyIsUnresolved:
 
     ⬜ Operator ruling owed — three readings and no way to choose between them
     from here: a house rule with an unstated derivation, a rule from Ultra-Tech
-    or another book that was applied but not cited, or one of the deliberate
-    planted errors (ATTACK.md records that probes carry them, and that probe 5's
-    materials figure survived two passes before being caught).
+    or another book that was applied but not cited, or an error in the
+    scenario itself.
     """
 
     RETAIL = 1_500_000
@@ -732,13 +724,13 @@ class TestSealedProbeOneMoneyIsUnresolved:
 
     def test_the_default_does_not_silently_scale_with_the_gap(self):
         """Three steps must not quietly become x9 or x27. The roll penalty is
-        linear because the probe measured it twice; the cost rule was not."""
+        linear because the scenario measured it twice; the cost rule was not."""
         one = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=1)
         three = crafting.invention_costs(Complexity.COMPLEX, self.RETAIL, tl_gap=3)
         assert three.facilities == one.facilities
         assert three.per_attempt == one.per_attempt
 
-    def test_no_single_multiplier_reproduces_the_probe(self):
+    def test_no_single_multiplier_reproduces_the_scenario(self):
         """The finding itself, as an assertion — so 'just pick one' fails here.
 
         If a future session sets a multiplier that satisfies one figure, this
@@ -753,7 +745,7 @@ class TestSealedProbeOneMoneyIsUnresolved:
                 costs.facilities == 1_750_000 and costs.per_attempt == 7_500_000
             )
             assert not matches_both, (
-                f"multiplier {multiplier} reproduces BOTH probe-1 money figures — "
+                f"multiplier {multiplier} reproduces BOTH scenario money figures — "
                 f"the arithmetic that made this test necessary was wrong, and the "
                 f"open ruling can be closed"
             )

@@ -1,11 +1,12 @@
-"""GAUNTLET §3: crafting rules are per-DOMAIN data, never one shared abstraction.
+"""Crafting rules are per-DOMAIN data, never one shared abstraction.
 
 The scan the arc has owed since 2026-08-01. It could not be written honestly
 until a second domain existed: a differential whose population is one subject
-cannot fail, and would have read green while proving nothing (Rule 25). Repair
+cannot fail, and would have read green while proving nothing. Repair
 is that second domain, so this file finally has something to disagree about.
 
-The invariant's own wording, from the sealed probes laid side by side: each
+The invariant's own wording, from the domains' worked scenarios laid side by
+side: each
 domain has its own facility ladder, its own reading of "multiple units", its own
 "assistant", its own skill-selection rule, and its own answer to what the roll
 even means. Every test below names one such rule and asserts the two
@@ -15,8 +16,8 @@ implemented domains give different answers to it.
 scan is real but not yet complete. Its population is 3 of 5, and the count is
 stated here rather than left for a reader to assume otherwise.
 
-⚑ Adding alchemy broke the two-domain shape exactly as ATTACK.md predicted it
-would. Two of these tests had been written as "invention does X, repair does
+⚑ Adding alchemy broke the two-domain shape, as a population of two
+predicts. Two of these tests had been written as "invention does X, repair does
 not", which reads as a rule and was really a coincidence of a population of
 two — alchemy has a facility ladder like invention's and a batch concept like
 neither. They are now three-way comparisons.
@@ -47,7 +48,7 @@ PLANNED_DOMAINS = ("invention", "repair", "alchemy", "enchantment", "crafting")
 
 
 class TestThePopulationIsHonest:
-    """FAIL CLOSED, and Rule 25's specific shape: a differential is only worth
+    """FAIL CLOSED, and in the differential's specific shape: it is only worth
     reading if its subjects can disagree."""
 
     def test_there_are_at_least_two_domains_to_compare(self):
@@ -60,7 +61,7 @@ class TestThePopulationIsHonest:
         missing = [d for d in PLANNED_DOMAINS if d not in DOMAIN_MODULES]
         assert missing, (
             "PLANNED_DOMAINS and DOMAIN_MODULES agree — if every domain really "
-            "has landed, delete this test and say so in GAUNTLET §3 rather than "
+            "has landed, delete this test and say so in this file's docstring rather than "
             "letting it keep asserting a gap that closed"
         )
         assert len(DOMAIN_MODULES) < len(PLANNED_DOMAINS)
@@ -92,7 +93,7 @@ class TestTheDomainsDisagree:
     def test_the_roll_means_different_things(self):
         """Invention: succeeded or not. Repair: how much.
 
-        This is the finding ATTACK.md calls the one no single probe contains,
+        No single domain shows this on its own; it only appears side by side,
         and it is why `hp_restored` returns an int while the invention outcomes
         return structures describing what happened.
         """
@@ -127,7 +128,7 @@ class TestTheDomainsDisagree:
 
         That was true, and it was not a rule — it was a coincidence of a
         population of two. Adding alchemy broke it on the first run, which is
-        the Rule 25 lesson arriving inside the scan written to enforce it.
+        the population-of-two lesson arriving inside the scan written to enforce it.
 
         The real statement is that the three domains read "multiple units"
         three ways, so no shared parameter can serve them:
@@ -162,7 +163,7 @@ class TestTheDomainsDisagree:
         assert alchemy.disaster_roll_penalty(3) == -3
 
     def test_an_assistant_means_opposite_things_in_two_domains(self):
-        """ATTACK.md counts five meanings across five domains. Two are here,
+        """There are five meanings across five domains. Two are here,
         and they point in opposite directions — which is why there is no shared
         helper and no shared parameter name.
         """
@@ -308,7 +309,7 @@ class TestTheSharedPiecesAreDeliberate:
         )
 
     def test_the_data_scan_sees_a_planted_violation(self):
-        """Verify the instrument before trusting its clean reading (Rule 22).
+        """Verify the instrument before trusting its clean reading.
 
         Runs the real checker over source that DOES borrow. An earlier draft of
         this test asserted that a string I had just written contained a
