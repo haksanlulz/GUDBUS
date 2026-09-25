@@ -43,6 +43,10 @@ async def get_wealth(
     return result.scalar_one_or_none()
 
 
+class WalletOverflow(ValueError):
+    """Folding a character's wallet would push the user-wide balance past float range."""
+
+
 async def fold_character_wallet(
     session: AsyncSession, discord_user_id: int, character_id: int
 ) -> None:
@@ -61,6 +65,13 @@ async def fold_character_wallet(
     default = await get_wealth(session, discord_user_id, None)
     if default is None:
         return
+    # the same guard adjust_balance has: two huge-but-finite balances can sum
+    # to inf, and a non-finite balance bricks the wallet (see _require_finite)
+    if not math.isfinite(default.balance + char_wallet.balance):
+        raise WalletOverflow(
+            "Deleting this character would overflow your user-wide wallet. "
+            "Lower one of the two balances with /wealth set first."
+        )
     await session.execute(
         update(Wealth)
         .where(Wealth.id == default.id)

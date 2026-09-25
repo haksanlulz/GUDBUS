@@ -28,6 +28,7 @@ from gurps_bot.services.characters import (
     set_active_character,
 )
 from gurps_bot.services.limits import StorageLimitExceeded
+from gurps_bot.services.wealth import WalletOverflow
 from gurps_bot.ui import embeds
 from gurps_bot.ui.formatters import (
     format_equipment_line,
@@ -367,7 +368,11 @@ class CharGroup(commands.GroupCog, group_name="char"):
 
         if view.confirmed:
             async with interaction.client.db() as session:
-                deleted = await delete_character(session, char.id)
+                try:
+                    deleted = await delete_character(session, char.id)
+                except WalletOverflow as e:
+                    await respond(interaction, str(e), ephemeral=True)
+                    return
                 if deleted:
                     await session.commit()
                     await interaction.followup.send(f"Deleted **{name}**.")
