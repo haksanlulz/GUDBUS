@@ -18,6 +18,7 @@ from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.combat_constants import Maneuver, StatusEffect
 from gurps_bot.mechanics.damage import roll_hit_location
 from gurps_bot.mechanics.defense import defense_penalty
+from gurps_bot.mechanics.dice import roll_3d6
 from gurps_bot.mechanics.injury import (
     injury_effects,
     is_major_wound,
@@ -26,6 +27,7 @@ from gurps_bot.mechanics.injury import (
     knockdown_statuses,
     resolve_knockdown,
 )
+from gurps_bot.mechanics.tables import CRITICAL_HIT, CRITICAL_MISS, UNARMED_CRITICAL_MISS
 from gurps_bot.mechanics.traits import pain_threshold_knockdown_modifier
 from gurps_bot.services.characters import (
     NoActiveCharacter,
@@ -96,9 +98,23 @@ def _collect_weapons(equipment_json: list, char_traits: list[Trait]) -> list[dic
         for w in t.weapon_json:
             w_copy = dict(w)
             w_copy["source"] = t.name
+            # trait weapons are body parts (Punch, Claws, Teeth): their critical
+            # misses read the Unarmed Critical Miss Table (B556-557)
+            w_copy["natural"] = True
             weapons.append(w_copy)
 
     return weapons
+
+
+def _add_critical_roll(embed: discord.Embed, outcome: Outcome, *, natural: bool) -> None:
+    """On a critical, roll 3d on the matching critical table (B556-557)."""
+    if outcome is Outcome.CRITICAL_SUCCESS:
+        table = CRITICAL_HIT
+    elif outcome is Outcome.CRITICAL_FAILURE:
+        table = UNARMED_CRITICAL_MISS if natural else CRITICAL_MISS
+    else:
+        return
+    embed.add_field(name=table.name, value=table.result(roll_3d6().total), inline=False)
 
 
 async def _fetch_weapon_names(session, interaction):
@@ -181,6 +197,7 @@ class CombatCog(commands.Cog):
 
         result = check(skill_level, modifier)
         embed = embeds.check_embed(result, label)
+        _add_critical_roll(embed, result.outcome, natural=bool(w.get("natural")))
         # escape for display (sheet strings can carry masked-link markdown); keep raw for the roll
         if damage_str and damage_str != "?":
             embed.add_field(name="Damage", value=_md_escape(damage_str), inline=True)
@@ -233,6 +250,7 @@ class CombatCog(commands.Cog):
 
         target = 0
         label = ""
+        natural_parry = False
 
         if defense_type == "dodge":
             dodge_arr = calc.get("dodge", [])
@@ -249,6 +267,7 @@ class CombatCog(commands.Cog):
                     w = weapons[idx]
                     target = _resolve_defense_value(w.get("parry", ""), w.get("level", 10))
                     label = f"{char_name} — Parry ({w.get('source', 'Unknown')})"
+                    natural_parry = bool(w.get("natural"))
                 else:
                     await respond(interaction, 
                         f"No weapon matching **{weapon}**.", ephemeral=True
@@ -260,9 +279,11 @@ class CombatCog(commands.Cog):
                     w = melee[0]
                     target = _resolve_defense_value(w.get("parry", ""), w.get("level", 10))
                     label = f"{char_name} — Parry ({w.get('source', 'Unknown')})"
+                    natural_parry = bool(w.get("natural"))
                 else:
                     target = 8
                     label = f"{char_name} — Parry (unarmed)"
+                    natural_parry = True
 
         elif defense_type == "block":
             weapons = _collect_weapons(equipment, traits)
@@ -281,6 +302,8 @@ class CombatCog(commands.Cog):
 
         result = check(target, modifier)
         embed = embeds.check_embed(result, label)
+        if defense_type == "parry" and result.outcome is Outcome.CRITICAL_FAILURE:
+            _add_critical_roll(embed, result.outcome, natural=natural_parry)
         await respond(interaction, embed=embed)
 
     @app_commands.checks.cooldown(2, 5.0)
@@ -707,6 +730,10 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
             embed = embeds.check_embed(result, label)
             if note:
                 embed.add_field(name="Note", value=note, inline=False)
+            if defense_type == "parry" and result.outcome is Outcome.CRITICAL_FAILURE:
+                # `weapon` is free text here, so armed vs unarmed is unknown;
+                # the field names the table it read.
+                _add_critical_roll(embed, result.outcome, natural=False)
             await respond(interaction, embed=embed, ephemeral=hidden)
 
     @app_commands.checks.cooldown(1, 5.0)

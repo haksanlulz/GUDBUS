@@ -26,7 +26,7 @@ from gurps_bot.mechanics.traits import (
     is_unfazeable,
     parse_injury_tolerance,
 )
-from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_effect
+from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_result
 from gurps_bot.services.campaign import CampaignRules, get_campaign_rules
 from gurps_bot.services.characters import (
     get_active_character,
@@ -315,13 +315,14 @@ class RollingCog(commands.Cog):
         effect = ""
         if not result.outcome.succeeded:
             # B360: on a failure, roll 3d, ADD the margin of failure, and read
-            # the Fright Check Table at that total (4-40+).
+            # the Fright Check Table at that total (4-40+). The bot gives a
+            # short label for that row and the page, not the book's text.
             mof = abs(result.margin)
             fright_roll = roll_3d6()
             total = fright_roll.total + mof
             effect = (
                 f"Fright roll 3d ({fright_roll.total}) + margin {mof} = **{total}**\n"
-                f"{fright_table_effect(total)}"
+                f"{fright_table_result(total)}"
             )
 
         embed = embeds.fright_check_embed(result, effect, label=label)

@@ -1,7 +1,8 @@
 [project]
 name = "gudbus"
 version = "1.1.0"
-description = "Discord bot for GURPS 4e: character sheets, dice, rules calculators, and turn-based combat tracking"
+description = "Unofficial Discord bot for GURPS 4e: character sheets, dice, rules calculators, and turn-based combat tracking. Not affiliated with or endorsed by Steve Jackson Games."
+license = {text = "MIT"}
 requires-python = ">=3.10"
 dependencies = [
     "discord.py>=2.3",

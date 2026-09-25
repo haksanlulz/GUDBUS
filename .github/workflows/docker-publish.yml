@@ -102,6 +102,11 @@ jobs:
           images: |
             ghcr.io/${{ github.repository }}
             name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gudbus,enable=${{ steps.dockerhub.outputs.enabled == 'true' }}
+          # The image carries the MIT bot plus the MPL-2.0 GCS library data
+          # vendored at build time; the repo-derived default says MIT alone.
+          labels: |
+            org.opencontainers.image.licenses=MIT AND MPL-2.0
+            org.opencontainers.image.description=Unofficial GURPS 4e Discord bot. Not affiliated with or endorsed by Steve Jackson Games.
           tags: |
             type=ref,event=branch
             type=semver,pattern={{version}}

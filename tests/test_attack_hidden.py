@@ -8,12 +8,14 @@ test_character_context pattern) rather than a mocked session.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gurps_bot.db.models import ActiveCharacter, Base, Character
+from gurps_bot.db.models import ActiveCharacter, Base, Character, Trait
+from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
+from gurps_bot.mechanics.dice import DiceSpec, RollResult
 
 
 # --------------------------------------------------------------------------- #
@@ -177,3 +179,69 @@ class TestAttackEscapesSheetStrings:
     async def test_reach_field_is_escaped(self, hostile_sheet_hero, session_factory):
         fields = await self._fields(session_factory)
         assert "[x](http://evil)" not in fields["Reach"]
+
+
+# --------------------------------------------------------------------------- #
+# /attack — a critical rolls the matching critical table (B556-557)
+# --------------------------------------------------------------------------- #
+def _check(rolled: int, target: int = 12) -> CheckResult:
+    rr = RollResult(spec=DiceSpec(3, 6, 0), dice=(rolled,), total=rolled)
+    return CheckResult(
+        roll_result=rr, target=target, margin=target - rolled,
+        outcome=_determine_outcome(rolled, target),
+    )
+
+
+def _3d(total: int) -> RollResult:
+    return RollResult(spec=DiceSpec(3, 6, 0), dice=(total,), total=total)
+
+
+@pytest_asyncio.fixture
+async def brawler(hero, session):
+    """The hero also has a trait weapon (Punch) — a natural weapon."""
+    session.add(Trait(
+        character_id=hero.id, name="Punch", has_weapon=True,
+        weapon_json=[{"damage": "1d-2 cr", "level": 12, "usage": "punch"}],
+    ))
+    await session.commit()
+    return hero
+
+
+class TestAttackCriticalTables:
+    async def _fields(self, session_factory, weapon, rolled, table_roll):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(rolled)),
+            patch("gurps_bot.cogs.combat.roll_3d6", return_value=_3d(table_roll)),
+        ):
+            await cog.attack.callback(cog, interaction, weapon=weapon)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        return {f.name: f.value for f in embed.fields}
+
+    async def test_critical_success_rolls_critical_hit(self, hero, session_factory):
+        fields = await self._fields(session_factory, "Broadsword", 3, 5)
+        assert fields["Critical Hit"] == "**Double damage** (roll 5, Critical Hit, B556)"
+
+    async def test_critical_failure_rolls_critical_miss(self, hero, session_factory):
+        fields = await self._fields(session_factory, "Broadsword", 18, 9)
+        assert fields["Critical Miss"].startswith("**Drop weapon**")
+
+    async def test_natural_weapon_rolls_unarmed_critical_miss(self, brawler, session_factory):
+        fields = await self._fields(session_factory, "Punch", 18, 12)
+        assert "Critical Miss" not in fields
+        assert fields["Unarmed Critical Miss"].startswith("**Trip**")
+
+    async def test_ordinary_roll_rolls_no_table(self, hero, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(10)),
+            patch("gurps_bot.cogs.combat.roll_3d6") as mock_3d,
+        ):
+            await cog.attack.callback(cog, interaction, weapon="Broadsword")
+        mock_3d.assert_not_called()
