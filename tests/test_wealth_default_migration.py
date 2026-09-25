@@ -17,7 +17,13 @@ PREVIOUS_HEAD = "e2a7c4d18b93"
 
 def _db_with_duplicates(tmp_path):
     db = tmp_path / "gurps_bot.db"
-    _build_pre_migration_db(db, drop_tables=[], drop_columns={}, drop_indexes=["uq_wealth_default"])
+    _build_pre_migration_db(
+        db,
+        drop_tables=[],
+        # state_json arrived with b6c2d9e4f1a7, later than this stamp
+        drop_columns={"crafting_projects": "state_json"},
+        drop_indexes=["uq_wealth_default"],
+    )
     con = sqlite3.connect(db)
     con.execute("create table alembic_version (version_num varchar(32) not null primary key)")
     con.execute(f"insert into alembic_version values ('{PREVIOUS_HEAD}')")
@@ -52,6 +58,6 @@ def test_duplicates_fold_into_one_wallet_and_the_index_lands(tmp_path):
             "select sql from sqlite_master where name='uq_wealth_default'"
         ).fetchone()
         assert index_sql and "character_id IS NULL" in index_sql[0]
-        assert con.execute("select version_num from alembic_version").fetchone()[0] == "a3d9e5f71c08"
+        assert con.execute("select version_num from alembic_version").fetchone()[0] == bootstrap.script_head()
     finally:
         con.close()
