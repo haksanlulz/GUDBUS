@@ -20,6 +20,7 @@ here writes to the database, which is why this cog opens no session.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import discord
@@ -505,6 +506,358 @@ class StartProjectModal(discord.ui.Modal, title="Start a crafting project"):
         )
 
 
+@dataclass(frozen=True)
+class MakeNumbers:
+    """The figures only the player knows for `/craft make`.
+
+    One object rather than five loose arguments, so the direct command and the
+    guided flow hand `_make_report` the same thing and cannot disagree about
+    which figure is missing.
+    """
+
+    list_price: float | None = None
+    weight: float | None = None
+    cost_per_lb: float | None = None
+    monthly_pay: float | None = None
+    workers: int = 1
+
+    #: field -> the label the checklist and the modal both use
+    LABELS = (
+        ("list_price", "List price ($)"),
+        ("weight", "Weight (lbs)"),
+        ("cost_per_lb", "Material cost per lb ($)"),
+        ("monthly_pay", "Craftsman's monthly pay ($)"),
+    )
+
+    @property
+    def missing(self) -> list[str]:
+        return [label for field, label in self.LABELS if getattr(self, field) is None]
+
+    @property
+    def complete(self) -> bool:
+        return not self.missing
+
+
+def _make_report(
+    numbers: MakeNumbers,
+    klass: crafting_mundane.ItemClass,
+    kind: crafting_mundane.LaborKind,
+    multiplier: crafting_mundane.MaterialMultiplier,
+) -> discord.Embed:
+    """The whole `/craft make` answer, from complete numbers.
+
+    Shared by the typed command and the guided flow — one renderer, so the two
+    surfaces cannot drift. Raises the engine's ValueError for a bad figure;
+    the caller decides how to say it.
+    """
+    if not numbers.complete:
+        raise ValueError(f"missing: {', '.join(numbers.missing)}")
+    list_price = float(numbers.list_price or 0.0)
+    weight = float(numbers.weight or 0.0)
+    cost_per_lb = float(numbers.cost_per_lb or 0.0)
+    monthly_pay = float(numbers.monthly_pay or 0.0)
+    workers = numbers.workers
+
+    material_cost = crafting_mundane.materials_cost(weight, cost_per_lb, multiplier)
+    labor_cost = crafting_mundane.labor_cost(list_price, material_cost)
+    rate = crafting_mundane.hourly_labor_rate(monthly_pay, kind)
+    active = crafting_mundane.active_hours(max(labor_cost, 0), rate)
+    elapsed = crafting_mundane.elapsed_hours(active, workers)
+
+    embed = discord.Embed(title="Making it by hand", colour=_INVENTION)
+
+    if labor_cost < 0:
+        # The materials cost more than the item sells for. Said plainly
+        # rather than clamped silently, because it usually means the wrong
+        # material was picked off the table.
+        embed.add_field(
+            name="⚠️ The materials cost more than the item",
+            value=(
+                f"${material_cost:,.2f} of materials against a ${list_price:,.2f} "
+                f"list price. Labour cannot be negative, so either the material "
+                f"or the weight is wrong for this item."
+            ),
+            inline=False,
+        )
+
+    embed.add_field(
+        name="Materials",
+        value=f"**${material_cost:,.2f}** — {weight:g} lbs at ${cost_per_lb:,.2f}/lb"
+        + (f" x{multiplier.value}" if multiplier.value != 1 else ""),
+        inline=False,
+    )
+    embed.add_field(
+        name="Labour",
+        value=f"**${max(labor_cost, 0):,.2f}** — the list price minus the materials",
+        inline=False,
+    )
+    embed.add_field(
+        name="Time",
+        value=(
+            f"**{active:,.1f} man-hours** at ${rate:,.2f}/hour"
+            + (
+                f", so **{elapsed:,.1f} hours** with {min(workers, crafting_mundane.MAX_WORKERS)} "
+                f"working together"
+                if workers > 1
+                else ""
+            )
+        ),
+        inline=False,
+    )
+    if workers > crafting_mundane.MAX_WORKERS:
+        embed.add_field(
+            name="Six is the cap",
+            value=(
+                f"{workers} were named; past six, extra hands do not make it "
+                f"faster."
+            ),
+            inline=False,
+        )
+
+    # Quality is a return value, so the command shows what the roll will
+    # MEAN rather than asking which quality is wanted.
+    ladder = "\n".join(
+        f"`{label:>16}`  {crafting_mundane.craft_quality(margin, klass).quality.value}"
+        for label, margin in (
+            ("failure by 4+", -4),
+            ("failure by 1-3", -1),
+            ("success by 0-11", 0),
+            ("success by 12-17", 12),
+            ("success by 18+", 18),
+        )
+    )
+    embed.add_field(
+        name=f"Then one roll, on the highest skill present — {klass.value}",
+        value=ladder,
+        inline=False,
+    )
+    embed.add_field(
+        name="What the roll is not",
+        value=(
+            "You do not choose the quality; the margin does. Junk loses at "
+            "least half the raw materials, and a flawed piece still sells "
+            "for up to half price."
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="Low-Tech Companion 3 ch. 5")
+    return embed
+
+
+class MakeFlowView(discord.ui.View):
+    """`/craft make` assembled from menus and one modal, not eight parameters.
+
+    Three menus (which ladder the piece reads, what kind of labour, whether the
+    raw materials carry a multiplier) and a button for the figures only the
+    player knows. The report is rendered by `_make_report`, the same function
+    the typed command uses.
+    """
+
+    def __init__(
+        self,
+        *,
+        invoker_id: int,
+        numbers: MakeNumbers,
+        item_class: crafting_mundane.ItemClass = crafting_mundane.ItemClass.GENERAL,
+        labor: crafting_mundane.LaborKind = crafting_mundane.LaborKind.ROUTINE,
+        materials: crafting_mundane.MaterialMultiplier = crafting_mundane.MaterialMultiplier.NONE,
+    ) -> None:
+        super().__init__(timeout=_VIEW_TIMEOUT)
+        self.invoker_id = invoker_id
+        self.numbers = numbers
+        self.item_class = item_class
+        self.labor = labor
+        self.materials = materials
+        #: set by /craft make after sending, so the timeout can edit it
+        self.message: discord.Message | None = None
+        # the menus open showing what was typed, not their defaults
+        self._mark_default(self.class_select, item_class.name)
+        self._mark_default(self.labor_select, labor.name)
+        self._mark_default(self.materials_select, materials.name)
+
+    @staticmethod
+    def _mark_default(select: discord.ui.Select, value: str) -> None:
+        for option in select.options:
+            option.default = option.value == value
+
+    # The flow belongs to whoever opened it — same rule as the invention flow.
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id != self.invoker_id:
+            await interaction.response.send_message(
+                "That crafting flow belongs to someone else — run `/craft make` "
+                "to start your own.",
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
+                item.disabled = True
+        if self.message is not None:
+            try:
+                await self.message.edit(view=self)
+            except discord.HTTPException:
+                pass  # deleted, or no longer editable; nothing left to disable
+
+    def summary_embed(self) -> discord.Embed:
+        if self.numbers.complete:
+            return _make_report(self.numbers, self.item_class, self.labor, self.materials)
+        embed = discord.Embed(
+            title="Making it by hand",
+            description=(
+                "Pick the menus, then press **Numbers…** for the figures only "
+                "you know. The costing appears as soon as all four are in."
+            ),
+            colour=_INVENTION,
+        )
+        have = [
+            f"{label}: **{getattr(self.numbers, field):g}**"
+            for field, label in MakeNumbers.LABELS
+            if getattr(self.numbers, field) is not None
+        ]
+        embed.add_field(
+            name="Still needed",
+            value="\n".join(f"• {label}" for label in self.numbers.missing),
+            inline=False,
+        )
+        if have:
+            embed.add_field(name="Already given", value="\n".join(have), inline=False)
+        embed.add_field(
+            name="Reading",
+            value=(
+                f"{self.item_class.value} · {self.labor.value} · "
+                + (
+                    f"materials x{self.materials.value}"
+                    if self.materials.value != 1
+                    else "no materials multiplier"
+                )
+                + (f" · {self.numbers.workers} working" if self.numbers.workers > 1 else "")
+            ),
+            inline=False,
+        )
+        embed.set_footer(text="Low-Tech Companion 3 ch. 5")
+        return embed
+
+    async def _redraw(self, interaction: discord.Interaction) -> None:
+        await interaction.response.edit_message(embed=self.summary_embed(), view=self)
+
+    @discord.ui.select(
+        placeholder="Which quality ladder does it read?",
+        options=[
+            discord.SelectOption(label=c.value, value=c.name)
+            for c in crafting_mundane.ItemClass
+        ],
+    )
+    async def class_select(
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
+    ) -> None:
+        self.item_class = crafting_mundane.ItemClass[select.values[0]]
+        self._mark_default(select, self.item_class.name)
+        await self._redraw(interaction)
+
+    @discord.ui.select(
+        placeholder="What kind of work is it?",
+        options=[
+            discord.SelectOption(label=k.value, value=k.name)
+            for k in crafting_mundane.LaborKind
+        ],
+    )
+    async def labor_select(
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
+    ) -> None:
+        self.labor = crafting_mundane.LaborKind[select.values[0]]
+        self._mark_default(select, self.labor.name)
+        await self._redraw(interaction)
+
+    @discord.ui.select(
+        placeholder="Do the raw materials carry a multiplier?",
+        options=[
+            discord.SelectOption(
+                label=m.name.replace("_", " ").capitalize(),
+                value=m.name,
+                description=(
+                    f"x{m.value} raw materials" if m.value != 1 else "Most items"
+                ),
+            )
+            for m in crafting_mundane.MaterialMultiplier
+        ],
+    )
+    async def materials_select(
+        self, interaction: discord.Interaction[GURPSBot], select: discord.ui.Select
+    ) -> None:
+        self.materials = crafting_mundane.MaterialMultiplier[select.values[0]]
+        self._mark_default(select, self.materials.name)
+        await self._redraw(interaction)
+
+    @discord.ui.button(label="Numbers…", style=discord.ButtonStyle.primary)
+    async def numbers_btn(
+        self, interaction: discord.Interaction[GURPSBot], button: discord.ui.Button
+    ) -> None:
+        await interaction.response.send_modal(MakeNumbersModal(self))
+
+
+class MakeNumbersModal(discord.ui.Modal, title="The figures only you know"):
+    """The four figures LTC3 needs, plus how many are working.
+
+    A modal because these are free numbers with no natural menu; opened
+    prefilled with whatever the flow already holds, so a correction is an edit
+    rather than a retype.
+    """
+
+    list_price = discord.ui.TextInput(label="List price ($)", placeholder="90", max_length=16)
+    weight = discord.ui.TextInput(label="Weight (lbs)", placeholder="22.5", max_length=12)
+    cost_per_lb = discord.ui.TextInput(
+        label="Material cost per lb ($)", placeholder="2.70", max_length=12
+    )
+    monthly_pay = discord.ui.TextInput(
+        label="Craftsman's monthly pay ($)", placeholder="790", max_length=12
+    )
+    workers = discord.ui.TextInput(
+        label="Working together (1-6)", placeholder="1", required=False, default="1", max_length=2
+    )
+
+    def __init__(self, view: MakeFlowView) -> None:
+        super().__init__()
+        self.flow = view
+        n = view.numbers
+        for field, _label in MakeNumbers.LABELS:
+            value = getattr(n, field)
+            if value is not None:
+                getattr(self, field).default = f"{value:g}"
+        self.workers.default = str(n.workers)
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        try:
+            numbers = MakeNumbers(
+                list_price=float(self.list_price.value),
+                weight=float(self.weight.value),
+                cost_per_lb=float(self.cost_per_lb.value),
+                monthly_pay=float(self.monthly_pay.value),
+                workers=int(self.workers.value or "1"),
+            )
+        except ValueError:
+            await interaction.response.send_message(
+                "Those need to be numbers — dollars and pounds as plain figures, "
+                "workers as a whole number.",
+                ephemeral=True,
+            )
+            return
+
+        flow = self.flow
+        try:
+            # the engine's own bounds do the validating; the flow keeps its old
+            # figures if these are refused
+            _make_report(numbers, flow.item_class, flow.labor, flow.materials)
+        except ValueError as exc:
+            await interaction.response.send_message(str(exc), ephemeral=True)
+            return
+
+        flow.numbers = numbers
+        await flow._redraw(interaction)
+
+
 class CraftingCog(commands.Cog):
     "GURPS Invention (Concept, Prototype, Testing, Production)."
 
@@ -934,7 +1287,7 @@ class CraftingCog(commands.Cog):
         name="make", description="Making a mundane item: cost, time, and what the roll means"
     )
     @app_commands.describe(
-        list_price="What the finished item sells for",
+        list_price="What the finished item sells for (leave the numbers blank to be walked through them)",
         weight="What it weighs, in pounds",
         cost_per_lb="Your material's cost per pound, from the raw materials table",
         monthly_pay="The craftsman's monthly pay for this trade",
@@ -960,10 +1313,10 @@ class CraftingCog(commands.Cog):
     async def make(
         self,
         interaction: discord.Interaction[GURPSBot],
-        list_price: float,
-        weight: float,
-        cost_per_lb: float,
-        monthly_pay: float,
+        list_price: float | None = None,
+        weight: float | None = None,
+        cost_per_lb: float | None = None,
+        monthly_pay: float | None = None,
         item_class: str = crafting_mundane.ItemClass.GENERAL.name,
         labor: str = crafting_mundane.LaborKind.ROUTINE.name,
         materials: str = crafting_mundane.MaterialMultiplier.NONE.name,
@@ -977,96 +1330,37 @@ class CraftingCog(commands.Cog):
             await respond(interaction, "Unknown option.", ephemeral=True)
             return
 
-        try:
-            material_cost = crafting_mundane.materials_cost(
-                weight, cost_per_lb, multiplier
-            )
-            labor_cost = crafting_mundane.labor_cost(list_price, material_cost)
-            rate = crafting_mundane.hourly_labor_rate(monthly_pay, kind)
-            active = crafting_mundane.active_hours(max(labor_cost, 0), rate)
-            elapsed = crafting_mundane.elapsed_hours(active, workers)
-        except ValueError as exc:
-            await respond(interaction, str(exc), ephemeral=True)
+        numbers = MakeNumbers(
+            list_price=list_price,
+            weight=weight,
+            cost_per_lb=cost_per_lb,
+            monthly_pay=monthly_pay,
+            workers=workers,
+        )
+        if numbers.complete:
+            # every figure typed: answer straight away, as this command always has
+            try:
+                embed = _make_report(numbers, klass, kind, multiplier)
+            except ValueError as exc:
+                await respond(interaction, str(exc), ephemeral=True)
+                return
+            await respond(interaction, embed=embed)
             return
 
-        embed = discord.Embed(title="Making it by hand", colour=_INVENTION)
-
-        if labor_cost < 0:
-            # The materials cost more than the item sells for. Said plainly
-            # rather than clamped silently, because it usually means the wrong
-            # material was picked off the table.
-            embed.add_field(
-                name="⚠️ The materials cost more than the item",
-                value=(
-                    f"${material_cost:,.2f} of materials against a ${list_price:,.2f} "
-                    f"list price. Labour cannot be negative, so either the material "
-                    f"or the weight is wrong for this item."
-                ),
-                inline=False,
-            )
-
-        embed.add_field(
-            name="Materials",
-            value=f"**${material_cost:,.2f}** — {weight:g} lbs at ${cost_per_lb:,.2f}/lb"
-            + (f" x{multiplier.value}" if multiplier.value != 1 else ""),
-            inline=False,
+        # Anything missing: the guided flow. Whatever WAS typed is kept, so a
+        # player who knows the weight and nothing else is not asked for it twice.
+        view = MakeFlowView(
+            invoker_id=interaction.user.id,
+            numbers=numbers,
+            item_class=klass,
+            labor=kind,
+            materials=multiplier,
         )
-        embed.add_field(
-            name="Labour",
-            value=f"**${max(labor_cost, 0):,.2f}** — the list price minus the materials",
-            inline=False,
-        )
-        embed.add_field(
-            name="Time",
-            value=(
-                f"**{active:,.1f} man-hours** at ${rate:,.2f}/hour"
-                + (
-                    f", so **{elapsed:,.1f} hours** with {min(workers, crafting_mundane.MAX_WORKERS)} "
-                    f"working together"
-                    if workers > 1
-                    else ""
-                )
-            ),
-            inline=False,
-        )
-        if workers > crafting_mundane.MAX_WORKERS:
-            embed.add_field(
-                name="Six is the cap",
-                value=(
-                    f"{workers} were named; past six, extra hands do not make it "
-                    f"faster."
-                ),
-                inline=False,
-            )
-
-        # Quality is a return value, so the command shows what the roll will
-        # MEAN rather than asking which quality is wanted.
-        ladder = "\n".join(
-            f"`{label:>16}`  {crafting_mundane.craft_quality(margin, klass).quality.value}"
-            for label, margin in (
-                ("failure by 4+", -4),
-                ("failure by 1-3", -1),
-                ("success by 0-11", 0),
-                ("success by 12-17", 12),
-                ("success by 18+", 18),
-            )
-        )
-        embed.add_field(
-            name=f"Then one roll, on the highest skill present — {klass.value}",
-            value=ladder,
-            inline=False,
-        )
-        embed.add_field(
-            name="What the roll is not",
-            value=(
-                "You do not choose the quality; the margin does. Junk loses at "
-                "least half the raw materials, and a flawed piece still sells "
-                "for up to half price."
-            ),
-            inline=False,
-        )
-        embed.set_footer(text="Low-Tech Companion 3 ch. 5")
-        await respond(interaction, embed=embed)
+        await respond(interaction, embed=view.summary_embed(), view=view)
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException:
+            pass  # the flow works without it; only the timeout cleanup is lost
 
     @craft.command(name="brew", description="Brewing a batch of elixirs (GURPS Magic ch. 28)")
     @app_commands.describe(
