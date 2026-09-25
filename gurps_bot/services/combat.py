@@ -103,6 +103,31 @@ async def end_combat(
     return True
 
 
+async def _touch_via_combatant(session: AsyncSession, combatant_id: int) -> None:
+    """Mark the combatant's combat as active now.
+
+    cleanup_stale_combats keys on Combat.updated_at, and the row's own onupdate
+    only fires when a Combat column changes. Every mutation below changes a
+    Combatant instead, so without this a game that kept applying HP, status or
+    defends for a day was swept mid-fight; only Next/Prev turn ever wrote it.
+    """
+    await session.execute(
+        update(Combat)
+        .where(
+            Combat.id
+            == select(Combatant.combat_id)
+            .where(Combatant.id == combatant_id)
+            .scalar_subquery()
+        )
+        .values(updated_at=datetime.now(timezone.utc))
+    )
+
+
+def _touch(combat: Combat) -> None:
+    """Same, for callers that hold the Combat; flushed with the caller's changes."""
+    combat.updated_at = datetime.now(timezone.utc)
+
+
 def _next_slot(combat: Combat) -> int:
     """Next slot from the in-memory list — racy; prefer _allocate_slot_and_add."""
     if not combat.combatants:
@@ -117,6 +142,7 @@ async def _allocate_slot_and_add(
 ) -> Combatant:
     """Insert with the slot allocated SQL-side — concurrent adds can't collide on MAX(slot)+1."""
     # slot comes from the SQL subquery, id from autoincrement — omit both
+    _touch(combat)
     values = {
         "combat_id": combatant.combat_id,
         "character_id": combatant.character_id,
@@ -258,6 +284,7 @@ async def remove_combatant(
     session: AsyncSession, combat: Combat, combatant_id: int,
 ) -> bool:
     """Remove a combatant; removing the current actor passes the turn to the next in order."""
+    _touch(combat)
     ordered = ordered_combatants(combat)
     found = next(((i, c) for i, c in enumerate(ordered) if c.id == combatant_id), None)
     if found is None:
@@ -424,6 +451,7 @@ async def modify_hp(
 ) -> tuple[Combatant, str]:
     """Apply an HP delta atomically; returns (combatant, warning)."""
     # atomic clamp-and-add — read-modify-write loses one of two parallel hits
+    await _touch_via_combatant(session, combatant_id)
     update_stmt = (
         update(Combatant)
         .where(Combatant.id == combatant_id)
@@ -456,6 +484,7 @@ async def modify_fp(
     session: AsyncSession, combatant_id: int, delta: int,
 ) -> Combatant:
     """Apply an FP delta atomically — same race shape as modify_hp."""
+    await _touch_via_combatant(session, combatant_id)
     update_stmt = (
         update(Combatant)
         .where(Combatant.id == combatant_id)
@@ -470,6 +499,7 @@ async def modify_fp(
 async def set_maneuver(
     session: AsyncSession, combatant_id: int, maneuver: str,
 ) -> Combatant:
+    await _touch_via_combatant(session, combatant_id)
     stmt = select(Combatant).where(Combatant.id == combatant_id)
     result = await session.execute(stmt)
     c = result.scalar_one()
@@ -495,6 +525,7 @@ async def _cas_status_effects(
     equality on SQLite (the only dialect this bot ships with); on PostgreSQL
     the column would need to be JSONB for `=` to exist.
     """
+    await _touch_via_combatant(session, combatant_id)
     for _ in range(attempts):
         stmt = select(Combatant).where(Combatant.id == combatant_id)
         c = (await session.execute(stmt)).scalar_one()
@@ -590,6 +621,7 @@ async def record_defense(
     update is not portable; the row is re-read under the same session, and the
     turn total keeps the atomic increment that the concurrency tests pin.
     """
+    await _touch_via_combatant(session, combatant_id)
     if defense_type == "parry":
         column = Combatant.parries_this_turn
         update_stmt = (

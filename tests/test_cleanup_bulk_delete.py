@@ -206,3 +206,51 @@ class TestItStrandsNothing:
             survivor = await get_combat(s, 2, CHANNEL)
             assert survivor is not None
             assert len(survivor.combatants) == 4
+
+
+class TestActivityKeepsACombatAlive:
+    """The sweep keys on Combat.updated_at, and only Next/Prev turn wrote it.
+    HP, FP, status, maneuver, defend, add and remove all changed combatants
+    without touching the combat row, so a slow game that kept applying damage
+    for a day was deleted mid-fight."""
+
+    import pytest as _pytest
+
+    @_pytest.mark.parametrize("op", [
+        "hp", "fp", "status_add", "status_remove", "maneuver", "defend",
+        "add_npc", "remove",
+    ])
+    async def test_each_mutation_counts_as_activity(self, session_factory, op):
+        from gurps_bot.services import combat as svc
+
+        guild = 9_100
+        await _combat(session_factory, guild)
+        await _age(session_factory, [guild])
+        async with session_factory() as s:
+            combat = await get_combat(s, guild, CHANNEL)
+            cid = combat.combatants[0].id
+            if op == "hp":
+                await svc.modify_hp(s, cid, -3)
+            elif op == "fp":
+                await svc.modify_fp(s, cid, -1)
+            elif op == "status_add":
+                await svc.add_status(s, cid, "Stunned")
+            elif op == "status_remove":
+                await svc.add_status(s, cid, "Stunned")
+                await s.commit()
+                await _age(session_factory, [guild])
+                await svc.remove_status(s, cid, "Stunned")
+            elif op == "maneuver":
+                await svc.set_maneuver(s, cid, "Attack")
+            elif op == "defend":
+                await svc.record_defense(s, cid, "parry")
+            elif op == "add_npc":
+                await add_npc_combatant(s, combat, name="New", basic_speed=5.0, hp=10, fp=10, ht=10)
+            elif op == "remove":
+                await svc.remove_combatant(s, combat, cid)
+            await s.commit()
+
+        async with session_factory() as s:
+            removed = await cleanup_stale_combats(s, max_age_hours=24)
+            await s.commit()
+        assert removed == 0, f"a combat just touched by {op} was swept"
