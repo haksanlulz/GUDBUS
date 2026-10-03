@@ -1,0 +1,190 @@
+"""Channel-scoped countdown timers (generic math — no GURPS rules content). Callers own the transaction — nothing here commits."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, cast
+
+log = logging.getLogger(__name__)
+
+from sqlalchemy import CursorResult, case, delete, func, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from gurps_bot.db.timers import UNITS, Timer
+from gurps_bot.services.limits import MAX_TIMERS_PER_CHANNEL, enforce_row_cap
+
+
+async def add_timer(
+    session: AsyncSession,
+    guild_id: int,
+    channel_id: int,
+    label: str,
+    total: int,
+    unit: str,
+    target: str | None = None,
+    note: str = "",
+    remaining: int | None = None,
+) -> Timer:
+    """Create a timer (flushed, not committed); total >= 1 keeps the remaining/total display division safe."""
+    if unit not in UNITS:
+        raise ValueError("Unknown unit")
+    if total < 1:
+        raise ValueError("total must be >= 1")
+    await enforce_row_cap(
+        session, Timer, MAX_TIMERS_PER_CHANNEL, "timers in this channel",
+        guild_id=guild_id, channel_id=channel_id,
+    )
+
+    if remaining is None:
+        remaining_value = total
+    else:
+        remaining_value = max(0, min(remaining, total))
+
+    log.info(
+        "Adding timer '%s' (total=%d %s, target=%s) in guild=%d channel=%d",
+        label.strip(), total, unit, target, guild_id, channel_id,
+    )
+    timer = Timer(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        label=label.strip(),
+        # strip target (empty -> None) so a padded target still matches what a
+        # later tick/list/clear passes — match sites strip + casefold too
+        target=target.strip() if target and target.strip() else None,
+        total=total,
+        remaining=remaining_value,
+        unit=unit,
+        note=note,
+    )
+    session.add(timer)
+    await session.flush()
+    return timer
+
+
+async def tick_timers(
+    session: AsyncSession,
+    guild_id: int,
+    channel_id: int,
+    unit: str,
+    amount: int = 1,
+    target: str | None = None,
+) -> list[Timer]:
+    """Tick matching live timers (units never convert); returns the newly expired — rows are kept, not auto-deleted."""
+    if unit not in UNITS:
+        raise ValueError("Unknown unit")
+    if amount < 1:
+        raise ValueError("amount must be a positive integer")
+
+    # One UPDATE, computed from the row's current value: a read-then-write
+    # tick read the old value, waited on the lock, and wrote its stale result,
+    # so two overlapping ticks decremented once and the expiry came a round late.
+    conditions = [
+        Timer.guild_id == guild_id,
+        Timer.channel_id == channel_id,
+        Timer.unit == unit,
+        Timer.remaining > 0,
+    ]
+    if target is not None:
+        conditions.append(func.lower(Timer.target) == target.strip().lower())
+    after = Timer.remaining - amount
+    ticked = await session.execute(
+        update(Timer)
+        .where(*conditions)
+        .values(remaining=case((after < 0, 0), else_=after))
+        .returning(Timer.id, Timer.remaining)
+        # timers this session already holds see the new values too
+        .execution_options(synchronize_session="fetch")
+    )
+    expired_ids = [row.id for row in ticked if row.remaining <= 0]
+    if not expired_ids:
+        return []
+    result = await session.execute(
+        select(Timer)
+        .where(Timer.id.in_(expired_ids))
+        .order_by(Timer.id.asc())
+        .execution_options(populate_existing=True)
+    )
+    return list(result.scalars().all())
+
+
+async def list_timers(
+    session: AsyncSession,
+    guild_id: int,
+    channel_id: int,
+    target: str | None = None,
+    include_expired: bool = True,
+) -> list[Timer]:
+    """A channel's timers: running ones soonest-to-expire first, then expired.
+
+    Expired timers sit at remaining 0, so a plain ascending sort put them all
+    first; the list shows ten, and ten expired timers hid every live one.
+    """
+    stmt = (
+        select(Timer)
+        .where(Timer.guild_id == guild_id, Timer.channel_id == channel_id)
+        .order_by((Timer.remaining <= 0).asc(), Timer.remaining.asc(), Timer.id.asc())
+    )
+    if target is not None:
+        stmt = stmt.where(func.lower(Timer.target) == target.strip().lower())
+    if not include_expired:
+        stmt = stmt.where(Timer.remaining > 0)
+
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def remove_timer(
+    session: AsyncSession,
+    guild_id: int,
+    channel_id: int,
+    timer_id: int,
+) -> bool:
+    """Delete one timer by id, scoped to the channel — a foreign channel's id deletes nothing."""
+    stmt = select(Timer).where(
+        Timer.id == timer_id,
+        Timer.guild_id == guild_id,
+        Timer.channel_id == channel_id,
+    )
+    result = await session.execute(stmt)
+    timer = result.scalar_one_or_none()
+    if timer is None:
+        return False
+    log.info(
+        "Removing timer id=%d ('%s') in guild=%d channel=%d",
+        timer.id, timer.label, guild_id, channel_id,
+    )
+    await session.delete(timer)
+    return True
+
+
+async def clear_timers(
+    session: AsyncSession,
+    guild_id: int,
+    channel_id: int,
+    target: str | None = None,
+    expired_only: bool = False,
+) -> int:
+    """Bulk-delete a channel's timers; returns rows deleted."""
+    stmt = delete(Timer).where(
+        Timer.guild_id == guild_id,
+        Timer.channel_id == channel_id,
+    )
+    if target is not None:
+        stmt = stmt.where(func.lower(Timer.target) == target.strip().lower())
+    if expired_only:
+        stmt = stmt.where(Timer.remaining <= 0)
+
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(
+        stmt.execution_options(synchronize_session=False)
+    ))
+    return result.rowcount
+
+
+async def purge_guild_timers(session: AsyncSession, guild_id: int) -> None:
+    """Bulk-delete ALL of a guild's timers, every channel (guild teardown).
+
+    Unlike clear_timers (one channel, optional filters), this is the
+    guild-leave purge: no channel scoping, no filters. Caller commits.
+    """
+    await session.execute(delete(Timer).where(Timer.guild_id == guild_id))

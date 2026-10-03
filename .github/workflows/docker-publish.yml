@@ -1,0 +1,156 @@
+name: Publish Docker image
+
+# Builds the bot image and publishes it to GitHub Container Registry
+# (ghcr.io/haksanlulz/gudbus), and to Docker Hub when its credentials are set.
+# Runs on pushes to trunk and the release branch, on version tags, and on demand.
+#
+# Two channels, so "what is in flight" and "what is deployed" are different
+# things you can pull by name:
+#
+#   dev  (trunk)   -> :nightly, :dev, :sha-<commit>
+#   main (release) -> :latest,  :main, :sha-<commit>
+#
+# Both channels publish a sha- tag, and deploy/nas-update.sh deploys by sha, so
+# a nightly can be put on the box deliberately. It says which channel the tag
+# came from rather than refusing, because trying a build before releasing it is
+# the point of having a nightly at all.
+#
+# GHCR needs no setup (uses the built-in GITHUB_TOKEN). To also publish to
+# Docker Hub, add two repository secrets:
+#   DOCKERHUB_USERNAME — your Docker Hub account/org name
+#   DOCKERHUB_TOKEN    — a Docker Hub access token (Account Settings -> Security)
+# The image is pushed as docker.io/<DOCKERHUB_USERNAME>/gudbus. Without those
+# secrets the Docker Hub steps are skipped and GHCR publishing still runs.
+on:
+  push:
+    branches: [main, dev]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default-deny; the one job re-grants exactly what it needs.
+permissions: {}
+
+jobs:
+  # Gate: publish only what passes. This job runs the same matrix Tests runs,
+  # by calling that workflow rather than duplicating it. Without it the two
+  # workflows fire independently on the same push and a commit with a failing
+  # matrix still publishes a pullable image — which happened, and the tag was
+  # nearly deployed because an image existing looks like success.
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  build-and-push:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Actions pinned to commit SHAs (tag comment for readability) so a hijacked
+      # tag can't inject into a job that holds registry push credentials.
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Required to build linux/arm64 on an amd64 runner. Without it the arm64
+      # leg fails outright rather than falling back, which is the good failure:
+      # DEPLOY.md offers Oracle A1 and Raspberry Pi as hosts, and for months
+      # the published index carried linux/amd64 alone, so following that advice
+      # got you an image your machine could not run.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      # Secrets can't be read in `if:` conditions directly, so surface a boolean
+      # output the later Docker Hub steps can gate on.
+      - name: Detect Docker Hub credentials
+        id: dockerhub
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        run: |
+          if [ -n "$DOCKERHUB_USERNAME" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::DOCKERHUB_USERNAME not set — publishing to GHCR only."
+          fi
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.dockerhub.outputs.enabled == 'true'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          # Publish to GHCR always; add Docker Hub only when credentials exist.
+          images: |
+            ghcr.io/${{ github.repository }}
+            name=docker.io/${{ secrets.DOCKERHUB_USERNAME }}/gudbus,enable=${{ steps.dockerhub.outputs.enabled == 'true' }}
+          # The image carries the MIT bot plus the MPL-2.0 GCS library data
+          # vendored at build time; the repo-derived default says MIT alone.
+          labels: |
+            org.opencontainers.image.licenses=MIT AND MPL-2.0
+            org.opencontainers.image.description=Unofficial GURPS 4e Discord bot. Not affiliated with or endorsed by Steve Jackson Games.
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            # `latest` follows the release branch only. is_default_branch is
+            # what keeps a trunk push from moving the tag anyone pulling
+            # unqualified gets; `nightly` is trunk's equivalent pointer, so
+            # following trunk is possible but never accidental.
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=nightly,enable=${{ github.ref == 'refs/heads/dev' }}
+
+      - name: Build and push
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        # The action uploads a .dockerbuild build record as a workflow artifact by
+        # default, and on a public repo that artifact is anonymously downloadable and
+        # kept for 90 days. It carries build metadata nobody needs after the run, and
+        # it accumulates one per push. The image itself is the artifact worth keeping.
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
+          DOCKER_BUILD_SUMMARY: false
+        with:
+          context: .
+          push: true
+          # Releases carry every architecture DEPLOY.md tells people to deploy
+          # on; trunk carries only the one that gets pulled.
+          #
+          # arm64 is emulated on an amd64 runner, so it roughly doubles the
+          # build. Nothing pulls an arm64 nightly: the ARM advice is aimed at
+          # strangers deploying a release on an Oracle A1 or a Pi, and they
+          # take :latest. The NAS dev instance tracks :nightly on x86.
+          #
+          # If the ARM legs ever need to be dropped from releases too, drop the
+          # advice in DEPLOY.md in the same commit — tests/test_ci_workflows.py
+          # asserts the two against each other precisely so publishing amd64
+          # under a multi-arch claim cannot happen again.
+          platforms: >-
+            ${{ (github.ref == 'refs/heads/main'
+                 || startsWith(github.ref, 'refs/tags/v'))
+                && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          # Supply-chain attestations: SBOM + max-mode build provenance.
+          sbom: true
+          provenance: mode=max

@@ -1,0 +1,80 @@
+name: Tests
+
+# Runs the pytest suite on every PR and on pushes to trunk and to the release
+# branch, across the min and a current supported Python. No GCS data is
+# vendored here (that would clone a third-party repo on every run), so the ~18
+# vendored-data tests skip; deploy.sh exercises them at deploy time.
+on:
+  pull_request:
+  # dev is trunk, main is the release branch. Both run the suite: a split where
+  # trunk is untested hides breakage rather than isolating it.
+  push:
+    branches: [main, dev]
+  workflow_dispatch:
+  # Callable so docker-publish.yml can gate on it. Publishing used to be
+  # completely independent of this workflow, which meant a commit with a red
+  # matrix still produced a pullable image — and the deploy runsheet reads the
+  # tag, not the test result.
+  workflow_call:
+
+concurrency:
+  # Namespaced by workflow, not just ref. docker-publish.yml calls this as a
+  # gating job, so on a push to main it runs twice — once standalone, once
+  # called. With a shared group the two collide and one cancels the other,
+  # which left the commit showing a CANCELLED "Tests" check even though the
+  # matrix had passed inside the publish run. An ambiguous check is worse than
+  # a duplicated one, and the duplicate costs about 45 seconds.
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv + Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run tests
+        run: uv run python -m pytest -q
+
+  # A separate job rather than a matrix step: the typecheck answers one question
+  # regardless of interpreter, and a type error should read as its own red
+  # check, not as a failed test leg. Being in this workflow is what puts it
+  # behind the publish gate too. Scope (the whole gurps_bot package) and the
+  # 3.10 floor live in [tool.pyright] in pyproject.toml, so a local
+  # `uv run pyright` and this job answer the same question. The package was
+  # first gated a layer at a time on dev; it reached zero errors throughout
+  # on main, which is what let the scope widen to all of it.
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Install uv + Python 3.10
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          # The floor, not the ceiling: pyright resolves the stdlib against the
+          # interpreter it runs under, so a 3.10-only type error is the one this
+          # would otherwise miss. Once, not per matrix leg.
+          python-version: "3.10"
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Run pyright
+        run: uv run pyright

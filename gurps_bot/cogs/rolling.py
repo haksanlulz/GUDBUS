@@ -1,0 +1,371 @@
+"""Dice rolling and skill/attribute check cog."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+import discord
+
+if TYPE_CHECKING:
+    from gurps_bot.bot import GURPSBot
+from discord import app_commands
+from discord.ext import commands
+
+from gurps_bot.mechanics.checks import check, contest
+from gurps_bot.mechanics.damage import (
+    DAMAGE_TYPE_DISPLAY,
+    HIT_LOCATION_NAMES,
+    roll_damage,
+)
+from gurps_bot.mechanics.dice import parse_dice, roll, roll_3d6
+from gurps_bot.mechanics.traits import (
+    FEARFULNESS_WILL_FLOOR,
+    INJURY_TOLERANCE_LABELS,
+    fright_will_modifier,
+    is_unfazeable,
+    parse_injury_tolerance,
+)
+from gurps_bot.mechanics.tables import FRIGHT_WILL_CAP, fright_table_result
+from gurps_bot.services.campaign import CampaignRules, get_campaign_rules
+from gurps_bot.services.characters import (
+    get_active_character,
+    get_character_attrs,
+    get_character_skills,
+    get_character_traits,
+)
+from gurps_bot.ui import embeds
+from gurps_bot.ui.formatters import format_modifier_suffix
+from gurps_bot.ui.respond import defer, respond
+from gurps_bot.utils._cache_instances import skill_cache as _skill_cache
+from gurps_bot.utils.fuzzy import fuzzy_match
+
+log = logging.getLogger(__name__)
+
+ROLLABLE_ATTRS = {"st", "dx", "iq", "ht", "will", "per", "hp", "fp", "vision", "hearing", "taste_smell", "touch", "fright_check"}
+ATTR_DISPLAY = {
+    "st": "ST", "dx": "DX", "iq": "IQ", "ht": "HT",
+    "will": "Will", "per": "Per", "hp": "HP", "fp": "FP",
+    "vision": "Vision", "hearing": "Hearing",
+    "taste_smell": "Taste/Smell", "touch": "Touch",
+    "fright_check": "Fright Check",
+}
+
+DAMAGE_TYPE_CHOICES = [
+    app_commands.Choice(name=display, value=key)
+    for key, display in DAMAGE_TYPE_DISPLAY.items()
+]
+
+LOCATION_CHOICES = [
+    app_commands.Choice(name=loc, value=loc.lower())
+    for loc in HIT_LOCATION_NAMES
+]
+
+# B380 sidebar; labels owned by mechanics/traits so this can't drift from the enum
+INJURY_TOLERANCE_CHOICES = [
+    app_commands.Choice(name=label, value=variant.value)
+    for variant, label in INJURY_TOLERANCE_LABELS.items()
+]
+
+async def _skill_attr_autocomplete(
+    interaction: discord.Interaction[GURPSBot],
+    current: str,
+) -> list[app_commands.Choice[str]]:
+    if not interaction.guild_id:
+        return []
+
+    cache_key = (interaction.user.id, interaction.guild_id)
+    candidates = _skill_cache.get(cache_key)
+
+    if candidates is None:
+        async with interaction.client.db() as session:
+            char = await get_active_character(session, interaction.user.id, interaction.guild_id)
+            if not char:
+                return []
+
+            candidates = []
+            attrs = await get_character_attrs(session, char.id)
+            for attr_id in ROLLABLE_ATTRS:
+                if attr_id in attrs:
+                    candidates.append(ATTR_DISPLAY.get(attr_id, attr_id))
+
+            skills = await get_character_skills(session, char.id)
+            for s in skills:
+                candidates.append(s.display_name)
+
+        _skill_cache.set(cache_key, candidates)
+
+    # discord caps Choice name/value at 100 chars — same rule as
+    # _autocomplete.make_autocomplete (one over-long imported skill name
+    # would 400 the whole payload)
+    if not current:
+        return [
+            app_commands.Choice(name=c[:100], value=c[:100]) for c in candidates[:25]
+        ]
+
+    matches = fuzzy_match(current, candidates, limit=25, score_cutoff=40)
+    return [app_commands.Choice(name=m[:100], value=m[:100]) for m, _ in matches]
+
+
+async def _resolve_target(
+    interaction: discord.Interaction[GURPSBot],
+    target_str: str,
+    *,
+    use_followup: bool = False,
+) -> tuple[int, str] | None:
+    """Try raw int, then attribute, then fuzzy skill; sends the error itself and returns None on failure."""
+    async def _send_error(msg: str) -> None:
+        # respond() routes on is_done() and keeps an error private after a
+        # public defer; a direct followup would have posted it to the channel
+        await respond(interaction, msg, ephemeral=True)
+
+    try:
+        value = int(target_str)
+        return value, f"Target {value}"
+    except ValueError:
+        pass
+
+    if not interaction.guild_id:
+        await _send_error("Character lookup requires a server. Use a raw number in DMs.")
+        return None
+
+    async with interaction.client.db() as session:
+        char = await get_active_character(session, interaction.user.id, interaction.guild_id)
+        if not char:
+            await _send_error("No active character. Use `/char import` first.")
+            return None
+
+        target_lower = target_str.lower()
+        attr_map = {v.lower(): k for k, v in ATTR_DISPLAY.items()}
+        if target_lower in attr_map:
+            attr_id = attr_map[target_lower]
+            attrs = await get_character_attrs(session, char.id)
+            if attr_id not in attrs:
+                await _send_error(f"Attribute **{target_str}** not found.")
+                return None
+            return int(attrs[attr_id]), f"{char.name} — {ATTR_DISPLAY[attr_id]}"
+
+        skills = await get_character_skills(session, char.id)
+        skill_names = [s.display_name for s in skills]
+        matches = fuzzy_match(target_str, skill_names, limit=1, score_cutoff=50)
+        if not matches:
+            await _send_error(f"No skill or attribute matching **{target_str}**.")
+            return None
+
+        matched_name = matches[0][0]
+        skill = next(s for s in skills if s.display_name == matched_name)
+        return skill.level, f"{char.name} — {skill.display_name}"
+
+
+class RollingCog(commands.Cog):
+    "Dice Rolling and GURPS Checks."
+
+    def __init__(self, bot: GURPSBot) -> None:
+        self.bot = bot
+
+    @app_commands.command(name="roll", description="Roll dice (e.g. 3d6, 2d+1, 4d6+3)")
+    @app_commands.describe(
+        dice="Dice expression (e.g. 3d6, 2d+1, 1d-2)",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+    )
+    @app_commands.checks.cooldown(2, 5.0)
+    async def roll_dice(
+        self, interaction: discord.Interaction[GURPSBot], dice: str, hidden: bool = False,
+    ) -> None:
+        try:
+            spec = parse_dice(dice)
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid dice: {e}", ephemeral=True)
+            return
+
+        result = roll(spec)
+        embed = embeds.roll_embed(result)
+        await interaction.response.send_message(embed=embed, ephemeral=hidden)
+
+    @app_commands.command(name="check", description="Roll 3d6 vs a skill or attribute")
+    @app_commands.describe(
+        target="Skill or attribute name (or raw number)",
+        modifier="Bonus (+) or penalty (-) to the roll",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+    )
+    @app_commands.autocomplete(target=_skill_attr_autocomplete)
+    @app_commands.checks.cooldown(2, 5.0)
+    async def check_roll(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        target: str,
+        modifier: int = 0,
+        hidden: bool = False,
+    ) -> None:
+        resolved = await _resolve_target(interaction, target)
+        if resolved is None:
+            return  # error already sent
+
+        target_value, label = resolved
+        label += f" Check{format_modifier_suffix(modifier)}"
+        result = check(target_value, modifier)
+        embed = embeds.check_embed(result, label)
+        await interaction.response.send_message(embed=embed, ephemeral=hidden)
+
+    @app_commands.command(name="contest", description="Quick Contest between two targets")
+    @app_commands.describe(
+        target_a="First side's target number or skill name",
+        target_b="Second side's target number or skill name",
+        label_a="Label for first side",
+        label_b="Label for second side",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+    )
+    @app_commands.autocomplete(target_a=_skill_attr_autocomplete, target_b=_skill_attr_autocomplete)
+    @app_commands.checks.cooldown(2, 5.0)
+    async def contest_roll(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        target_a: str,
+        target_b: str,
+        label_a: str = "Side A",
+        label_b: str = "Side B",
+        hidden: bool = False,
+    ) -> None:
+        await defer(interaction, ephemeral=hidden)
+
+        resolved_a = await _resolve_target(interaction, target_a, use_followup=True)
+        if resolved_a is None:
+            return
+        val_a, resolved_label_a = resolved_a
+        if label_a == "Side A":
+            label_a = resolved_label_a
+
+        resolved_b = await _resolve_target(interaction, target_b, use_followup=True)
+        if resolved_b is None:
+            return
+        val_b, resolved_label_b = resolved_b
+        if label_b == "Side B":
+            label_b = resolved_label_b
+
+        result_a, result_b, winner = contest(val_a, val_b)
+        embed = embeds.contest_embed(result_a, result_b, winner, label_a, label_b)
+        await respond(interaction, embed=embed, ephemeral=hidden)
+
+    @app_commands.checks.cooldown(2, 5.0)
+    @app_commands.command(name="fright-check", description="Roll a Fright Check")
+    @app_commands.describe(
+        modifier="Bonus or penalty to the Fright Check",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+    )
+    async def fright_check(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        modifier: int = 0,
+        hidden: bool = False,
+    ) -> None:
+        trait_names: list[str] = []
+        rules = CampaignRules()  # RAW defaults outside a guild
+        if interaction.guild_id:
+            async with interaction.client.db() as session:
+                rules = await get_campaign_rules(session, interaction.guild_id)
+                char = await get_active_character(session, interaction.user.id, interaction.guild_id)
+                if char:
+                    attrs = await get_character_attrs(session, char.id)
+                    will_value = int(attrs.get("will", attrs.get("iq", 10)))
+                    trait_names = [t.name for t in await get_character_traits(session, char.id)]
+                    label = f"{char.name} — Fright Check"
+                else:
+                    will_value = 10
+                    label = "Fright Check (Will 10)"
+        else:
+            will_value = 10
+            label = "Fright Check (Will 10)"
+
+        # B95 Unfazeable: "You are exempt from Fright Checks." No roll happens —
+        # rolling and reporting a success would be a different rule.
+        if is_unfazeable(trait_names):
+            await interaction.response.send_message(
+                embed=embeds.fright_exempt_embed(label.split(" — ")[0]),
+                ephemeral=hidden,
+            )
+            return
+
+        label += format_modifier_suffix(modifier)
+
+        # Fearlessness adds its level to Will on a Fright Check; Fearfulness
+        # subtracts. Both land BEFORE the Rule of 14, which is why a Will-13+
+        # character gets nothing out of Fearlessness under RAW.
+        trait_mod = fright_will_modifier(trait_names)
+        if trait_mod:
+            name = "Fearlessness" if trait_mod > 0 else "Fearfulness"
+            label += f" · {name} {trait_mod:+d}"
+
+        # Rule of 14 (B360): modified Will above 13 counts as 13 for a Fright
+        # Check, so a roll of 14+ always fails. Fold the modifiers in first —
+        # the cap applies to the FINAL modified Will, not the base attribute.
+        # Tables routinely soften or drop Rule-of-X caps, so it is switchable
+        # per campaign; RAW is the default and the bot always says which mode
+        # it used, because the same roll means different things either way.
+        effective = will_value + modifier + trait_mod
+        # Fearfulness "may not reduce your Will roll below 3"
+        effective = max(FEARFULNESS_WILL_FLOOR, effective)
+        if rules.rule_of_14:
+            if effective > FRIGHT_WILL_CAP:
+                effective = FRIGHT_WILL_CAP
+                label += " · Rule of 14"
+        elif effective > FRIGHT_WILL_CAP:
+            label += " · Rule of 14 OFF (house rule)"
+
+        result = check(effective, 0)
+        effect = ""
+        if not result.outcome.succeeded:
+            # B360: on a failure, roll 3d, ADD the margin of failure, and read
+            # the Fright Check Table at that total (4-40+). The bot names the
+            # row and the page; the row itself is read in the book.
+            mof = abs(result.margin)
+            fright_roll = roll_3d6()
+            total = fright_roll.total + mof
+            effect = (
+                f"Fright roll 3d ({fright_roll.total}) + margin {mof} = **{total}**\n"
+                f"{fright_table_result(total)}"
+            )
+
+        embed = embeds.fright_check_embed(result, effect, label=label)
+        await interaction.response.send_message(embed=embed, ephemeral=hidden)
+
+    @app_commands.command(name="damage", description="Roll damage dice with a damage type")
+    @app_commands.describe(
+        dice="Damage dice (e.g. 2d+1)",
+        damage_type="Damage type (cr, cut, imp, pi, burn, etc.)",
+        dr="Damage resistance to subtract",
+        location="Hit location for wounding modifier",
+        injury_tolerance="Target's Injury Tolerance, if any (B380): machines, undead, swarms",
+        hidden="Roll in secret — only you see the result (GM blind roll)",
+    )
+    @app_commands.choices(
+        damage_type=DAMAGE_TYPE_CHOICES,
+        location=LOCATION_CHOICES,
+        injury_tolerance=INJURY_TOLERANCE_CHOICES,
+    )
+    @app_commands.checks.cooldown(2, 5.0)
+    async def damage_roll(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        dice: str,
+        damage_type: str = "cr",
+        dr: app_commands.Range[int, 0, 100000] = 0,
+        location: str | None = None,
+        injury_tolerance: str | None = None,
+        hidden: bool = False,
+    ) -> None:
+        tolerance = parse_injury_tolerance(injury_tolerance)
+        try:
+            result = roll_damage(
+                dice, damage_type, dr=dr, location=location,
+                injury_tolerance=tolerance,
+            )
+        except ValueError as e:
+            await interaction.response.send_message(f"Invalid dice: {e}", ephemeral=True)
+            return
+
+        embed = embeds.damage_embed(result)
+        await interaction.response.send_message(embed=embed, ephemeral=hidden)
+
+
+async def setup(bot: GURPSBot) -> None:
+    await bot.add_cog(RollingCog(bot))

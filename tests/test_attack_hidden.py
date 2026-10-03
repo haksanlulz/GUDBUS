@@ -1,0 +1,311 @@
+"""GM blind rolls slice 1b: /attack honors hidden:, and a hidden attack's
+damage-button (RollDamageView) also responds ephemeral so the whole exchange
+stays secret to the roller.
+
+/attack is DB-backed, so it uses a real in-memory SQLite session (the
+test_character_context pattern) rather than a mocked session.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+from gurps_bot.db.models import ActiveCharacter, Base, Character, Trait
+from gurps_bot.mechanics.checks import CheckResult, _determine_outcome
+from gurps_bot.mechanics.dice import DiceSpec, RollResult
+
+
+# --------------------------------------------------------------------------- #
+# RollDamageView — pure, no DB
+# --------------------------------------------------------------------------- #
+class TestRollDamageViewHidden:
+    def _interaction(self):
+        interaction = MagicMock()
+        interaction.response.send_message = AsyncMock()
+        interaction.response.defer = AsyncMock()
+        return interaction
+
+    async def test_hidden_button_is_ephemeral(self):
+        from gurps_bot.ui.views import RollDamageView
+
+        view = RollDamageView("2d cut", hidden=True)
+        interaction = self._interaction()
+        await RollDamageView.roll_damage_btn(view, interaction, MagicMock())
+        assert interaction.response.send_message.await_args.kwargs["ephemeral"] is True
+
+    async def test_default_button_is_public(self):
+        from gurps_bot.ui.views import RollDamageView
+
+        view = RollDamageView("2d cut")
+        interaction = self._interaction()
+        await RollDamageView.roll_damage_btn(view, interaction, MagicMock())
+        assert interaction.response.send_message.await_args.kwargs.get("ephemeral") in (None, False)
+
+
+# --------------------------------------------------------------------------- #
+# /attack — DB-backed
+# --------------------------------------------------------------------------- #
+@pytest_asyncio.fixture
+async def engine():
+    eng = create_async_engine("sqlite+aiosqlite://")
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield eng
+    await eng.dispose()
+
+
+@pytest_asyncio.fixture
+async def session_factory(engine):
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def session(session_factory):
+    async with session_factory() as s:
+        yield s
+
+
+@pytest_asyncio.fixture
+async def hero(session):
+    """An active character with one equipped weapon (Broadsword, 2d cut)."""
+    char = Character(
+        discord_user_id=42, name="Hero", total_points=100,
+        profile_json={}, calc_json={},
+        equipment_json=[{
+            "equipped": True,
+            "description": "Broadsword",
+            "weapons": [{"damage": "2d cut", "level": 12, "usage": "swung"}],
+        }],
+        settings_json={}, raw_gcs_json={},
+    )
+    session.add(char)
+    await session.flush()
+    session.add(ActiveCharacter(discord_user_id=42, guild_id=100, character_id=char.id))
+    await session.commit()
+    return char
+
+
+def _attack_interaction(session_factory, *, guild_id=100, user_id=42):
+    interaction = MagicMock()
+    interaction.guild_id = guild_id
+    interaction.user.id = user_id
+    interaction.response.send_message = AsyncMock()
+    interaction.response.defer = AsyncMock()
+    # Unset, is_done() returns a truthy MagicMock, which sends every reply down
+    # the followup branch and asserts nothing about the path /attack actually
+    # takes. /attack opens its own session and does not defer, so False is the
+    # faithful value.
+    interaction.response.is_done.return_value = False
+    interaction.followup.send = AsyncMock()
+    interaction.original_response = AsyncMock(return_value=MagicMock())
+    interaction.client.db = session_factory
+    return interaction
+
+
+class TestAttackHidden:
+    async def test_attack_hidden_is_ephemeral(self, hero, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        await cog.attack.callback(cog, interaction, weapon="Broadsword", modifier=0, hidden=True)
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert kwargs["ephemeral"] is True
+        # the damage button must inherit the secrecy
+        assert kwargs["view"].hidden is True
+
+    async def test_attack_default_is_public(self, hero, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        await cog.attack.callback(cog, interaction, weapon="Broadsword")
+
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert kwargs.get("ephemeral") in (None, False)
+        assert kwargs["view"].hidden is False
+
+
+# --------------------------------------------------------------------------- #
+# /attack — sheet strings reach a public embed, so they are escaped
+# --------------------------------------------------------------------------- #
+@pytest_asyncio.fixture
+async def hostile_sheet_hero(session):
+    """Active character whose weapon carries markdown + masked-link payloads.
+
+    An imported .gcs is untrusted input; damage and reach land in embed fields.
+    """
+    char = Character(
+        discord_user_id=42, name="Hero", total_points=100,
+        profile_json={}, calc_json={},
+        equipment_json=[{
+            "equipped": True,
+            "description": "Cursed Blade",
+            "weapons": [{
+                "damage": "2d [click](http://evil) **cut**",
+                "level": 12,
+                "usage": "swung",
+                "reach": "1,2 [x](http://evil)",
+            }],
+        }],
+        settings_json={}, raw_gcs_json={},
+    )
+    session.add(char)
+    await session.flush()
+    session.add(ActiveCharacter(discord_user_id=42, guild_id=100, character_id=char.id))
+    await session.commit()
+    return char
+
+
+class TestAttackEscapesSheetStrings:
+    async def _fields(self, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        await cog.attack.callback(cog, interaction, weapon="Cursed Blade")
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        return {f.name: f.value for f in embed.fields}
+
+    async def test_damage_field_is_escaped(self, hostile_sheet_hero, session_factory):
+        fields = await self._fields(session_factory)
+        assert "[click](http://evil)" not in fields["Damage"]
+        assert "\\[click\\]" in fields["Damage"]
+
+    async def test_reach_field_is_escaped(self, hostile_sheet_hero, session_factory):
+        fields = await self._fields(session_factory)
+        assert "[x](http://evil)" not in fields["Reach"]
+
+
+# --------------------------------------------------------------------------- #
+# /attack — a critical rolls the matching critical table (B556-557)
+# --------------------------------------------------------------------------- #
+def _check(rolled: int, target: int = 12) -> CheckResult:
+    rr = RollResult(spec=DiceSpec(3, 6, 0), dice=(rolled,), total=rolled)
+    return CheckResult(
+        roll_result=rr, target=target, margin=target - rolled,
+        outcome=_determine_outcome(rolled, target),
+    )
+
+
+def _3d(total: int) -> RollResult:
+    return RollResult(spec=DiceSpec(3, 6, 0), dice=(total,), total=total)
+
+
+@pytest_asyncio.fixture
+async def brawler(hero, session):
+    """The hero also has a trait weapon (Punch) — a natural weapon."""
+    session.add(Trait(
+        character_id=hero.id, name="Punch", has_weapon=True,
+        weapon_json=[{"damage": "1d-2 cr", "level": 12, "usage": "punch"}],
+    ))
+    await session.commit()
+    return hero
+
+
+class TestAttackCriticalTables:
+    async def _fields(self, session_factory, weapon, rolled, table_roll):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(rolled)),
+            patch("gurps_bot.cogs.combat.roll_3d6", return_value=_3d(table_roll)),
+        ):
+            await cog.attack.callback(cog, interaction, weapon=weapon)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        return {f.name: f.value for f in embed.fields}
+
+    async def test_critical_success_rolls_critical_hit(self, hero, session_factory):
+        fields = await self._fields(session_factory, "Broadsword", 3, 5)
+        assert fields["Critical Hit"] == (
+            "Row **5** of the Critical Hit Table (B556); for a face, skull or eye "
+            "hit, read that row of the Critical Head Blow Table (B556)"
+        )
+
+    async def test_critical_failure_rolls_critical_miss(self, hero, session_factory):
+        fields = await self._fields(session_factory, "Broadsword", 18, 9)
+        assert fields["Critical Miss"] == "Row **9** of the Critical Miss Table (B556)"
+        assert "Unarmed Critical Miss" not in fields
+
+    async def test_natural_weapon_rolls_unarmed_critical_miss(self, brawler, session_factory):
+        fields = await self._fields(session_factory, "Punch", 18, 12)
+        assert "Critical Miss" not in fields
+        assert fields["Unarmed Critical Miss"] == (
+            "Row **12** of the Unarmed Critical Miss Table (B556-557)"
+        )
+
+    async def test_hidden_critical_stays_ephemeral(self, hero, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(3)),
+            patch("gurps_bot.cogs.combat.roll_3d6", return_value=_3d(7)),
+        ):
+            await cog.attack.callback(cog, interaction, weapon="Broadsword", hidden=True)
+        kwargs = interaction.response.send_message.await_args.kwargs
+        assert kwargs["ephemeral"] is True
+        assert any(f.name == "Critical Hit" for f in kwargs["embed"].fields)
+        interaction.followup.send.assert_not_called()
+
+    async def test_ordinary_roll_rolls_no_table(self, hero, session_factory):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(10)),
+            patch("gurps_bot.cogs.combat.roll_3d6") as mock_3d,
+        ):
+            await cog.attack.callback(cog, interaction, weapon="Broadsword")
+        mock_3d.assert_not_called()
+
+
+# --------------------------------------------------------------------------- #
+# /defend — a critically failed parry rolls a critical miss table (B556-557)
+# --------------------------------------------------------------------------- #
+class TestDefendCriticalTables:
+    async def _fields(self, session_factory, rolled, table_roll, **kwargs):
+        from gurps_bot.cogs.combat import CombatCog
+
+        cog = CombatCog(bot=MagicMock())
+        interaction = _attack_interaction(session_factory)
+        with (
+            patch("gurps_bot.cogs.combat.check", return_value=_check(rolled)),
+            patch("gurps_bot.cogs.combat.roll_3d6", return_value=_3d(table_roll)) as mock_3d,
+        ):
+            await cog.defend.callback(cog, interaction, **kwargs)
+        embed = interaction.response.send_message.await_args.kwargs["embed"]
+        return {f.name: f.value for f in embed.fields}, mock_3d
+
+    async def test_weapon_parry_fumble_reads_critical_miss(self, hero, session_factory):
+        fields, _ = await self._fields(
+            session_factory, 18, 8, defense_type="parry", weapon="Broadsword",
+        )
+        assert fields["Critical Miss"] == "Row **8** of the Critical Miss Table (B556)"
+
+    async def test_natural_weapon_parry_fumble_reads_unarmed(self, brawler, session_factory):
+        fields, _ = await self._fields(
+            session_factory, 18, 8, defense_type="parry", weapon="Punch",
+        )
+        assert "Critical Miss" not in fields
+        assert fields["Unarmed Critical Miss"].startswith("Row **8** of the Unarmed")
+
+    async def test_critical_success_parry_rolls_no_table(self, hero, session_factory):
+        fields, mock_3d = await self._fields(
+            session_factory, 3, 8, defense_type="parry", weapon="Broadsword",
+        )
+        mock_3d.assert_not_called()
+        assert not any("Critical" in name for name in fields)
+
+    async def test_dodge_fumble_rolls_no_table(self, hero, session_factory):
+        fields, mock_3d = await self._fields(session_factory, 18, 8, defense_type="dodge")
+        mock_3d.assert_not_called()
+        assert not any("Critical" in name for name in fields)

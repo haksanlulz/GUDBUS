@@ -1,0 +1,768 @@
+"""Combat tracker queries. Callers own the transaction — nothing here commits."""
+
+from __future__ import annotations
+
+import logging
+import math
+import random
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timedelta, timezone
+from typing import Any, cast
+
+log = logging.getLogger(__name__)
+
+from sqlalchemy import CursorResult, delete, func, insert, select, update
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from gurps_bot.db.models import Attribute, Combat, Combatant, Trait
+from gurps_bot.mechanics.checks import check
+from gurps_bot.mechanics.combat_constants import StatusEffect
+
+
+def ordered_combatants(combat: Combat) -> list[Combatant]:
+    """Return combatants in initiative order (highest speed first)."""
+    return sorted(
+        combat.combatants,
+        key=lambda c: (-c.basic_speed, -c.dx, c.tiebreaker),
+    )
+
+
+def _position_of(ordered: list[Combatant], combatant_id: int | None) -> int | None:
+    if combatant_id is None:
+        return None
+    for i, c in enumerate(ordered):
+        if c.id == combatant_id:
+            return i
+    return None
+
+
+def current_combatant(combat: Combat) -> Combatant | None:
+    """Whose turn it is — anchored by current_combatant_id; index fallback for pre-anchor combats."""
+    ordered = ordered_combatants(combat)
+    if not ordered:
+        return None
+    pos = _position_of(ordered, combat.current_combatant_id)
+    if pos is None:
+        pos = combat.current_index % len(ordered)
+    return ordered[pos]
+
+
+def _sync_index_to_anchor(combat: Combat) -> None:
+    """Recompute current_index from the anchor; no-op when unanchored or the anchor is gone."""
+    if combat.current_combatant_id is None:
+        return
+    pos = _position_of(ordered_combatants(combat), combat.current_combatant_id)
+    if pos is not None:
+        combat.current_index = pos
+
+
+async def get_combat(
+    session: AsyncSession, guild_id: int, channel_id: int,
+) -> Combat | None:
+    """Fetch the active combat for a channel, with combatants eagerly loaded."""
+    stmt = (
+        select(Combat)
+        .options(selectinload(Combat.combatants))
+        .where(Combat.guild_id == guild_id, Combat.channel_id == channel_id)
+    )
+    result = await session.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+async def start_combat(
+    session: AsyncSession, guild_id: int, channel_id: int, started_by: int,
+) -> Combat:
+    """Create a combat; ValueError if one is already live in this channel."""
+    existing = await get_combat(session, guild_id, channel_id)
+    if existing:
+        raise ValueError("A combat is already active in this channel.")
+
+    log.info("Starting combat in guild=%d channel=%d by user=%d", guild_id, channel_id, started_by)
+    combat = Combat(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        started_by=started_by,
+    )
+    session.add(combat)
+    await session.flush()
+    # load the (empty) combatants list now — lazy-load raises under async
+    await session.refresh(combat, ["combatants"])
+    return combat
+
+
+async def end_combat(
+    session: AsyncSession, guild_id: int, channel_id: int,
+) -> bool:
+    combat = await get_combat(session, guild_id, channel_id)
+    if not combat:
+        return False
+    log.info("Ending combat id=%d in guild=%d channel=%d", combat.id, guild_id, channel_id)
+    await session.delete(combat)
+    return True
+
+
+async def discard_combat(session: AsyncSession, combat_id: int) -> bool:
+    """Delete one combat by id; True if it existed.
+
+    For /combat start when Discord refuses the reply: the combat is committed
+    before the reply so the write lock is not held across the network, which
+    means a failed reply can no longer roll it back. Keyed on the id rather
+    than the channel so a combat started by someone else in the gap is left
+    alone. Caller commits.
+    """
+    stmt = (
+        select(Combat)
+        .options(selectinload(Combat.combatants))
+        .where(Combat.id == combat_id)
+    )
+    combat = (await session.execute(stmt)).scalar_one_or_none()
+    if combat is None:
+        return False
+    log.info("Discarding combat id=%d (reply failed at start)", combat_id)
+    await session.delete(combat)
+    return True
+
+
+async def _touch_via_combatant(session: AsyncSession, combatant_id: int) -> None:
+    """Mark the combatant's combat as active now.
+
+    cleanup_stale_combats keys on Combat.updated_at, and the row's own onupdate
+    only fires when a Combat column changes. Every mutation below changes a
+    Combatant instead, so without this a game that kept applying HP, status or
+    defends for a day was swept mid-fight; only Next/Prev turn ever wrote it.
+    """
+    await session.execute(
+        update(Combat)
+        .where(
+            Combat.id
+            == select(Combatant.combat_id)
+            .where(Combatant.id == combatant_id)
+            .scalar_subquery()
+        )
+        .values(updated_at=datetime.now(timezone.utc))
+    )
+
+
+def _touch(combat: Combat) -> None:
+    """Same, for callers that hold the Combat; flushed with the caller's changes."""
+    combat.updated_at = datetime.now(timezone.utc)
+
+
+def _next_slot(combat: Combat) -> int:
+    """Next slot from the in-memory list — racy; prefer _allocate_slot_and_add."""
+    if not combat.combatants:
+        return 0
+    return max(c.slot for c in combat.combatants) + 1
+
+
+async def _allocate_slot_and_add(
+    session: AsyncSession,
+    combat: Combat,
+    combatant: Combatant,
+) -> Combatant:
+    """Insert with the slot allocated SQL-side — concurrent adds can't collide on MAX(slot)+1."""
+    # slot comes from the SQL subquery, id from autoincrement — omit both
+    _touch(combat)
+    values = {
+        "combat_id": combatant.combat_id,
+        "character_id": combatant.character_id,
+        "discord_user_id": combatant.discord_user_id,
+        "name": combatant.name,
+        "is_npc": combatant.is_npc,
+        "basic_speed": combatant.basic_speed,
+        "dx": combatant.dx,
+        "tiebreaker": combatant.tiebreaker,
+        "hp_max": combatant.hp_max,
+        "hp_current": combatant.hp_current,
+        "fp_max": combatant.fp_max,
+        "fp_current": combatant.fp_current,
+        "ht": combatant.ht,
+        "will": combatant.will,
+        "maneuver": combatant.maneuver,
+        "status_effects": combatant.status_effects or [],
+        "parries_this_turn": 0,
+        "blocks_this_turn": 0,
+        "slot": (
+            select(func.coalesce(func.max(Combatant.slot) + 1, 0))
+            .where(Combatant.combat_id == combat.id)
+            .scalar_subquery()
+        ),
+    }
+    stmt = insert(Combatant).values(**values).returning(Combatant.id)
+    new_id = (await session.execute(stmt)).scalar_one()
+
+    # re-fetch so the caller gets a live ORM object with the SQL-computed slot
+    refreshed = (
+        await session.execute(
+            select(Combatant).where(Combatant.id == new_id)
+        )
+    ).scalar_one()
+    combat.combatants.append(refreshed)
+    return refreshed
+
+
+async def _read_character_combat_stats(
+    session: AsyncSession, character_id: int,
+) -> dict:
+    stmt = select(Attribute).where(Attribute.character_id == character_id)
+    result = await session.execute(stmt)
+    attrs: dict[str, float] = {}
+    for a in result.scalars().all():
+        attrs[a.attr_id] = a.value
+        if a.current is not None:
+            attrs[f"{a.attr_id}_current"] = a.current
+
+    return {
+        "basic_speed": attrs.get("basic_speed", 5.0),
+        "dx": int(attrs.get("dx", 10)),
+        "hp_max": int(attrs.get("hp", 10)),
+        "hp_current": int(attrs.get("hp_current", attrs.get("hp", 10))),
+        "fp_max": int(attrs.get("fp", 10)),
+        "fp_current": int(attrs.get("fp_current", attrs.get("fp", 10))),
+        "ht": int(attrs.get("ht", 10)),
+        "will": int(attrs.get("will", 10)),
+    }
+
+
+async def add_pc_combatant(
+    session: AsyncSession,
+    combat: Combat,
+    character_id: int,
+    character_name: str,
+    discord_user_id: int,
+) -> Combatant:
+    """Add a PC; ValueError if already in this combat."""
+    for c in combat.combatants:
+        if c.character_id == character_id:
+            raise ValueError(f"{character_name} is already in this combat.")
+
+    log.info("Adding PC '%s' to combat id=%d", character_name, combat.id)
+    stats = await _read_character_combat_stats(session, character_id)
+    combatant = Combatant(
+        combat_id=combat.id,
+        character_id=character_id,
+        discord_user_id=discord_user_id,
+        name=character_name,
+        is_npc=False,
+        basic_speed=stats["basic_speed"],
+        dx=stats["dx"],
+        tiebreaker=random.randint(0, 9999),
+        hp_max=stats["hp_max"],
+        hp_current=stats["hp_current"],
+        fp_max=stats["fp_max"],
+        fp_current=stats["fp_current"],
+        ht=stats["ht"],
+        will=stats["will"],
+        # slot allocated by _allocate_slot_and_add
+    )
+    added = await _allocate_slot_and_add(session, combat, combatant)
+    # adding reshuffles initiative order — re-anchor so the turn doesn't jump
+    _sync_index_to_anchor(combat)
+    return added
+
+
+async def add_npc_combatant(
+    session: AsyncSession,
+    combat: Combat,
+    name: str,
+    basic_speed: float,
+    hp: int,
+    fp: int,
+    dx: int = 10,
+    ht: int = 10,
+    will: int = 10,
+) -> Combatant:
+    # NaN compares False with everything, so a NaN speed makes the initiative
+    # sort arbitrary and undetectable; mirror the wealth service's guard.
+    if not math.isfinite(basic_speed):
+        raise ValueError("Basic Speed must be a finite number.")
+    log.info("Adding NPC '%s' to combat id=%d (speed=%.2f, hp=%d)", name, combat.id, basic_speed, hp)
+    combatant = Combatant(
+        combat_id=combat.id,
+        character_id=None,
+        discord_user_id=None,
+        name=name,
+        is_npc=True,
+        basic_speed=basic_speed,
+        dx=dx,
+        tiebreaker=random.randint(0, 9999),
+        hp_max=hp,
+        hp_current=hp,
+        fp_max=fp,
+        fp_current=fp,
+        ht=ht,
+        will=will,
+        # slot allocated by _allocate_slot_and_add
+    )
+    added = await _allocate_slot_and_add(session, combat, combatant)
+    # adding reshuffles initiative order — re-anchor so the turn doesn't jump
+    _sync_index_to_anchor(combat)
+    return added
+
+
+async def remove_combatant(
+    session: AsyncSession,
+    combat: Combat,
+    combatant_id: int,
+    *,
+    turn_messages: list[str] | None = None,
+) -> bool:
+    """Remove a combatant; removing the current actor passes the turn on.
+
+    Passing the turn goes through advance_turn, so it behaves exactly like Next
+    Turn from the removed combatant: a wrap starts the next round, and the
+    Dead/Unconscious skip, the B419 roll and Stunned all apply. Whatever that
+    announces is appended to `turn_messages` when the caller passes a list.
+    """
+    _touch(combat)
+    ordered = ordered_combatants(combat)
+    found = next(((i, c) for i, c in enumerate(ordered) if c.id == combatant_id), None)
+    if found is None:
+        return False
+    target_idx, target = found
+
+    removing_current = combat.current_combatant_id == combatant_id
+    if removing_current and len(ordered) > 1:
+        # hand the turn on BEFORE the row goes, from the removed combatant's
+        # seat — the same step Next Turn takes, round change included
+        message = advance_turn(combat)
+        if message and turn_messages is not None:
+            turn_messages.append(message)
+
+    await session.delete(target)
+    combat.combatants.remove(target)
+
+    remaining = ordered_combatants(combat)
+    if not remaining:
+        combat.current_index = 0
+        combat.current_combatant_id = None
+        return True
+
+    if combat.current_combatant_id is not None:
+        # anchor unchanged — resync its cached index after the shrink
+        _sync_index_to_anchor(combat)
+    else:
+        # pre-anchor combat — keep the legacy positional shift
+        if target_idx < combat.current_index:
+            combat.current_index = max(0, combat.current_index - 1)
+        elif combat.current_index >= len(remaining):
+            combat.current_index = 0
+
+    return True
+
+
+def advance_turn(combat: Combat) -> str | None:
+    """Advance the turn (sync, mutates in place); returns a stun/round message or None."""
+    ordered = ordered_combatants(combat)
+    if not ordered:
+        return None
+
+    # anchor first, stored index for pre-anchor combats
+    pos = _position_of(ordered, combat.current_combatant_id)
+    if pos is None:
+        pos = combat.current_index % len(ordered)
+
+    current = ordered[pos]
+    current.maneuver = None
+    current.parries_this_turn = 0
+    current.parries_by_weapon = {}
+    current.blocks_this_turn = 0
+
+    # scan bounded to n steps so the wrap fires at most once per call — an n+1
+    # scan double-wraps and emits duplicate "Round N begins" banners when
+    # everyone is down
+    n = len(ordered)
+    messages: list[str] = []
+    target: int | None = None
+    wrapped = False
+    for step in range(1, n + 1):
+        np = pos + step
+        if np >= n:
+            np -= n
+            wrapped = True
+        next_combatant = ordered[np]
+        effects = set(next_combatant.status_effects or [])
+
+        if StatusEffect.DEAD in effects or StatusEffect.UNCONSCIOUS in effects:
+            continue
+
+        # B419: at <=0 HP, roll HT at turn start or fall unconscious — at a
+        # cumulative -1 per full multiple of HP below zero (flat HT in the
+        # 0..-1xHP band, HT-1 from -1xHP, ...). Auto-rolled, GM can override
+        # via /combat status
+        if next_combatant.hp_current <= 0:
+            penalty = 0
+            if next_combatant.hp_max > 0:
+                penalty = -(abs(next_combatant.hp_current) // next_combatant.hp_max)
+            con = check(next_combatant.ht, penalty)
+            effective = next_combatant.ht + penalty
+            note = f", B419 {penalty} at -{-penalty}×HP" if penalty else ""
+            if con.outcome.succeeded:
+                messages.append(
+                    f"**{next_combatant.name}** stays conscious "
+                    f"(HT {con.rolled} vs {effective}{note})."
+                )
+            else:
+                # advance_turn is synchronous and works on the loaded ORM row, so
+                # this one stays read-mutate-write; it runs inside the turn-advance
+                # transaction, never concurrently with itself for one combat.
+                next_combatant.status_effects = (
+                    list(next_combatant.status_effects or []) + [StatusEffect.UNCONSCIOUS]
+                )
+                messages.append(
+                    f"**{next_combatant.name}** falls unconscious "
+                    f"(HT {con.rolled} vs {effective}{note})."
+                )
+                continue
+
+        target = np
+        if StatusEffect.STUNNED in effects:
+            next_combatant.maneuver = "Do Nothing"
+            messages.append(
+                f"**{next_combatant.name}** is Stunned — forced Do Nothing. "
+                "Roll HT to recover at end of turn."
+            )
+        break
+
+    if target is None:
+        # everyone down — advance exactly one step so rounds don't inflate
+        target = (pos + 1) % n
+        wrapped = pos + 1 >= n
+        messages.append("All combatants are down.")
+
+    if wrapped:
+        combat.round_number += 1
+        messages.insert(0, f"Round {combat.round_number} begins.")
+
+    combat.current_index = target
+    combat.current_combatant_id = ordered[target].id
+    combat.updated_at = datetime.now(timezone.utc)
+    return "\n".join(messages) if messages else None
+
+
+def previous_turn(combat: Combat) -> None:
+    """Move back to the previous combatant (undo). Sync — modifies ORM objects in-place."""
+    ordered = ordered_combatants(combat)
+    if not ordered:
+        return
+
+    pos = _position_of(ordered, combat.current_combatant_id)
+    if pos is None:
+        pos = combat.current_index % len(ordered)
+
+    # the mirror of advance_turn's skip: step back over Dead/Unconscious seats,
+    # so Prev undoes a Next that skipped them instead of landing on a corpse
+    # with the round still incremented. Bounded to n steps; if everyone is
+    # down, move exactly one seat, as advance_turn does.
+    n = len(ordered)
+    target: int | None = None
+    wrapped = False
+    for step in range(1, n + 1):
+        np = pos - step
+        if np < 0:
+            np += n
+            wrapped = True
+        effects = set(ordered[np].status_effects or [])
+        if StatusEffect.DEAD in effects or StatusEffect.UNCONSCIOUS in effects:
+            continue
+        target = np
+        break
+    if target is None:
+        target = (pos - 1) % n
+        wrapped = pos - 1 < 0
+    pos = target
+    if wrapped:
+        combat.round_number = max(1, combat.round_number - 1)
+
+    combat.current_index = pos
+    combat.current_combatant_id = ordered[pos].id
+    combat.updated_at = datetime.now(timezone.utc)
+
+
+async def get_combatant_trait_names(
+    session: AsyncSession, combatant: Combatant
+) -> list[str]:
+    """Trait names for the character behind a combatant, or [] for an NPC.
+
+    Mechanics rules that read traits (B420 pain threshold, B380 Injury
+    Tolerance, Fright Check modifiers) need names, not ORM rows. NPCs carry no
+    character_id, so they return empty and every such rule degrades to its
+    no-trait behaviour rather than erroring.
+    """
+    if combatant.character_id is None:
+        return []
+    stmt = select(Trait.name).where(Trait.character_id == combatant.character_id)
+    result = await session.execute(stmt)
+    return [name for name in result.scalars().all()]
+
+
+async def modify_hp(
+    session: AsyncSession, combatant_id: int, delta: int,
+) -> tuple[Combatant, str]:
+    """Apply an HP delta atomically; returns (combatant, warning)."""
+    # atomic clamp-and-add — read-modify-write loses one of two parallel hits
+    await _touch_via_combatant(session, combatant_id)
+    update_stmt = (
+        update(Combatant)
+        .where(Combatant.id == combatant_id)
+        .values(hp_current=func.min(Combatant.hp_max, Combatant.hp_current + delta))
+    )
+    await session.execute(update_stmt)
+
+    # re-fetch: the warning + DEAD check need the post-update hp
+    stmt = select(Combatant).where(Combatant.id == combatant_id)
+    result = await session.execute(stmt)
+    c = result.scalar_one()
+
+    warning = ""
+    if c.hp_current <= -5 * c.hp_max:
+        if StatusEffect.DEAD not in (c.status_effects or []):
+            c = await _cas_status_effects(
+                session, combatant_id,
+                lambda e: e if StatusEffect.DEAD in e else e + [StatusEffect.DEAD],
+            )
+        warning = f"**{c.name}** is dead (-5xHP)."
+    elif c.hp_current <= -c.hp_max:
+        warning = f"**{c.name}** must roll HT to survive ({c.hp_current} HP, threshold -{c.hp_max})."
+    elif c.hp_current <= 0:
+        warning = f"**{c.name}** must roll HT to stay conscious ({c.hp_current} HP)."
+
+    return c, warning
+
+
+async def modify_fp(
+    session: AsyncSession, combatant_id: int, delta: int,
+) -> Combatant:
+    """Apply an FP delta atomically — same race shape as modify_hp."""
+    await _touch_via_combatant(session, combatant_id)
+    update_stmt = (
+        update(Combatant)
+        .where(Combatant.id == combatant_id)
+        .values(fp_current=func.min(Combatant.fp_max, Combatant.fp_current + delta))
+    )
+    await session.execute(update_stmt)
+    stmt = select(Combatant).where(Combatant.id == combatant_id)
+    result = await session.execute(stmt)
+    return result.scalar_one()
+
+
+async def set_maneuver(
+    session: AsyncSession, combatant_id: int, maneuver: str,
+) -> Combatant:
+    await _touch_via_combatant(session, combatant_id)
+    stmt = select(Combatant).where(Combatant.id == combatant_id)
+    result = await session.execute(stmt)
+    c = result.scalar_one()
+    c.maneuver = maneuver
+    return c
+
+
+# Test seam: awaited after the read and before the compare-and-set in
+# _cas_status_effects, so a test can hold the window open deterministically.
+# Production leaves it None.
+_STATUS_READ_HOOK: Callable[[], Awaitable[None]] | None = None
+
+
+async def _cas_status_effects(
+    session: AsyncSession, combatant_id: int, mutate, *, attempts: int = 16,
+) -> Combatant:
+    """Change status_effects with a compare-and-set instead of read-mutate-write.
+
+    The JSON-list column cannot be updated arithmetically like hp_current, so
+    the write carries the list it read as a WHERE clause and retries when
+    another writer landed in between. The database arbitrates, the same way
+    modify_hp's atomic UPDATE does. Equality on the JSON column is text
+    equality on SQLite (the only dialect this bot ships with); on PostgreSQL
+    the column would need to be JSONB for `=` to exist.
+    """
+    await _touch_via_combatant(session, combatant_id)
+    for _ in range(attempts):
+        stmt = select(Combatant).where(Combatant.id == combatant_id)
+        c = (await session.execute(stmt)).scalar_one()
+        old_raw = c.status_effects
+        old = list(old_raw or [])
+        new = mutate(list(old))
+        if _STATUS_READ_HOOK is not None:
+            await _STATUS_READ_HOOK()
+        if new == old:
+            return c
+        guard = (
+            Combatant.status_effects.is_(None)
+            if old_raw is None
+            else Combatant.status_effects == old
+        )
+        # a DML execute returns a CursorResult; the session API types it as Result
+        result = cast("CursorResult[Any]", await session.execute(
+            update(Combatant)
+            .where(Combatant.id == combatant_id, guard)
+            .values(status_effects=new)
+        ))
+        if result.rowcount == 1:
+            session.expire(c, ["status_effects"])
+            await session.refresh(c, ["status_effects"])
+            return c
+        session.expire(c, ["status_effects"])
+    raise RuntimeError(
+        f"status_effects compare-and-set gave up after {attempts} attempts "
+        f"for combatant {combatant_id}"
+    )
+
+
+async def add_status(
+    session: AsyncSession, combatant_id: int, status: str,
+) -> Combatant:
+    """Add a status effect (validated against StatusEffect)."""
+    valid = {e.value for e in StatusEffect}
+    if status not in valid:
+        raise ValueError(f"Unknown status: {status}. Valid: {', '.join(sorted(valid))}")
+
+    def _add(effects: list) -> list:
+        if status not in effects:
+            effects.append(status)
+        return effects
+
+    return await _cas_status_effects(session, combatant_id, _add)
+
+
+async def remove_status(
+    session: AsyncSession, combatant_id: int, status: str,
+) -> Combatant:
+    """Remove a status effect (compare-and-set, see _cas_status_effects)."""
+
+    def _remove(effects: list) -> list:
+        if status in effects:
+            effects.remove(status)
+        return effects
+
+    return await _cas_status_effects(session, combatant_id, _remove)
+
+
+async def set_message_id(
+    session: AsyncSession, combat_id: int, message_id: int,
+) -> None:
+    """Store the Discord message ID of the tracker embed."""
+    stmt = select(Combat).where(Combat.id == combat_id)
+    result = await session.execute(stmt)
+    combat = result.scalar_one()
+    combat.message_id = message_id
+
+
+#: key used when no weapon is named — a table that never names one keeps the
+#: single-counter behaviour it always had
+DEFAULT_WEAPON_KEY = ""
+
+
+def parry_key(weapon: str | None) -> str:
+    """Normalise a weapon name to its per-weapon counter key (B376)."""
+    return (weapon or "").strip().casefold()
+
+
+async def record_defense(
+    session: AsyncSession,
+    combatant_id: int,
+    defense_type: str,
+    weapon: str | None = None,
+) -> Combatant:
+    """Bump this turn's parry/block counter (atomic — same race shape as modify_hp).
+
+    B376 scopes the parry penalty to each weapon or hand, so parries are
+    counted per weapon as well as in the turn total. The per-weapon map is
+    read-modify-written rather than incremented in SQL because JSON member
+    update is not portable; the row is re-read under the same session, and the
+    turn total keeps the atomic increment that the concurrency tests pin.
+    """
+    await _touch_via_combatant(session, combatant_id)
+    if defense_type == "parry":
+        column = Combatant.parries_this_turn
+        update_stmt = (
+            update(Combatant)
+            .where(Combatant.id == combatant_id)
+            .values(parries_this_turn=column + 1)
+        )
+    elif defense_type == "block":
+        column = Combatant.blocks_this_turn
+        update_stmt = (
+            update(Combatant)
+            .where(Combatant.id == combatant_id)
+            .values(blocks_this_turn=column + 1)
+        )
+    else:
+        raise ValueError(
+            f"Unknown defense_type: {defense_type}. Expected 'parry' or 'block'."
+        )
+
+    await session.execute(update_stmt)
+    stmt = select(Combatant).where(Combatant.id == combatant_id)
+    result = await session.execute(stmt)
+    combatant = result.scalar_one()
+
+    if defense_type == "parry":
+        key = parry_key(weapon)
+        # rebind rather than mutate in place: SQLAlchemy only sees a JSON column
+        # change if the attribute itself is reassigned
+        counts = dict(combatant.parries_by_weapon or {})
+        counts[key] = counts.get(key, 0) + 1
+        combatant.parries_by_weapon = counts
+
+    return combatant
+
+
+async def cleanup_stale_combats(
+    session: AsyncSession, max_age_hours: int = 24,
+) -> int:
+    """Delete combats untouched for `max_age_hours`. Returns how many. Caller commits.
+
+    Bulk DML rather than loading every stale Combat and deleting it row by row.
+    This runs hourly across all guilds, so it is the only write whose lock
+    duration grows with guild count — and SQLite serialises writers, so a live
+    command lands behind the whole sweep, not part of it. Measured on the old
+    row-by-row version: ~1 ms per stale combat, with the waiting command paying
+    essentially the full sweep (0.888 s against a 0.852 s sweep at 900 stale).
+
+    Combatants are deleted explicitly first, exactly as `purge_guild_combats`
+    does and for the same reason: bulk `delete(Combat)` fires no ORM cascade,
+    and whether the DB-level ON DELETE CASCADE fires depends on the deployed
+    schema's FK clause — which for a database created before that clause
+    existed is not guaranteed. Doing it in two statements depends on neither.
+    Combat has exactly one child table, so two statements is the whole job.
+
+    `synchronize_session=False` because the caller's session is discarded right
+    after; there is no in-memory state left to keep consistent, and the default
+    would spend a SELECT keeping it that way.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+    stale_ids = select(Combat.id).where(Combat.updated_at < cutoff)
+    await session.execute(
+        delete(Combatant)
+        .where(Combatant.combat_id.in_(stale_ids))
+        .execution_options(synchronize_session=False)
+    )
+    # a DML execute returns a CursorResult; the session API types it as Result
+    result = cast("CursorResult[Any]", await session.execute(
+        delete(Combat)
+        .where(Combat.updated_at < cutoff)
+        .execution_options(synchronize_session=False)
+    ))
+    return result.rowcount
+
+
+async def count_combats(session: AsyncSession) -> int:
+    """Total active combats across all guilds (/status diagnostics)."""
+    return await session.scalar(select(func.count(Combat.id))) or 0
+
+
+async def purge_guild_combats(session: AsyncSession, guild_id: int) -> None:
+    """Bulk-delete a guild's combats AND their combatants (guild teardown).
+
+    Combatant has no guild_id, and bulk delete(Combat) DML fires no ORM
+    cascade; whether the DB-level ON DELETE CASCADE fires depends on the
+    deployed schema's FK clause. Delete the guild's combatants explicitly
+    first so teardown depends on neither. Caller commits.
+    """
+    guild_combats = select(Combat.id).where(Combat.guild_id == guild_id)
+    await session.execute(
+        delete(Combatant).where(Combatant.combat_id.in_(guild_combats))
+    )
+    await session.execute(delete(Combat).where(Combat.guild_id == guild_id))

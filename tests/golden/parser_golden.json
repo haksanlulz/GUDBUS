@@ -1,0 +1,306 @@
+{
+  "coercion": {
+    "attributes": [
+      {
+        "attr_id": "st",
+        "current": null,
+        "points": 20,
+        "value": 12.0
+      }
+    ],
+    "calc": {},
+    "equipment": [],
+    "name": "Coercion Case",
+    "profile": {
+      "name": "Coercion Case"
+    },
+    "settings": {
+      "body_type": {}
+    },
+    "skills": [
+      {
+        "defaults": [],
+        "difficulty": "dx/a",
+        "level": 11,
+        "name": "Stealth",
+        "points": 0,
+        "relative_level": "DX+0",
+        "specialization": null
+      }
+    ],
+    "spells": [],
+    "total_points": 200,
+    "traits": []
+  },
+  "full": {
+    "attributes": [
+      {
+        "attr_id": "st",
+        "current": null,
+        "points": 30,
+        "value": 13.0
+      },
+      {
+        "attr_id": "dx",
+        "current": null,
+        "points": 40,
+        "value": 12.0
+      },
+      {
+        "attr_id": "iq",
+        "current": null,
+        "points": 0,
+        "value": 10.0
+      },
+      {
+        "attr_id": "ht",
+        "current": null,
+        "points": 10,
+        "value": 11.0
+      },
+      {
+        "attr_id": "hp",
+        "current": 13.0,
+        "points": 0,
+        "value": 13.0
+      },
+      {
+        "attr_id": "fp",
+        "current": 11.0,
+        "points": 0,
+        "value": 11.0
+      },
+      {
+        "attr_id": "basic_speed",
+        "current": null,
+        "points": 0,
+        "value": 5.75
+      }
+    ],
+    "calc": {},
+    "equipment": [
+      {
+        "description": "Broadsword",
+        "equipped": false,
+        "quantity": 1,
+        "value": "600",
+        "weapons": [],
+        "weight": "3 lb"
+      },
+      {
+        "description": "Backpack",
+        "equipped": false,
+        "quantity": 1,
+        "value": 0,
+        "weapons": [],
+        "weight": "0 lb"
+      },
+      {
+        "description": "Rations",
+        "equipped": false,
+        "quantity": 7,
+        "value": "14",
+        "weapons": [],
+        "weight": "3.5 lb"
+      }
+    ],
+    "name": "Sir Brannar",
+    "profile": {
+      "gender": "Male",
+      "height": "6'",
+      "name": "Sir Brannar",
+      "player_name": "TestPlayer",
+      "tech_level": "3",
+      "weight": "190 lb"
+    },
+    "settings": {
+      "body_type": {
+        "locations": [
+          {
+            "calc": {
+              "dr": {
+                "all": 2
+              },
+              "roll_range": "3-4"
+            },
+            "hit_penalty": -7,
+            "id": "skull",
+            "table_name": "Skull"
+          },
+          {
+            "calc": {
+              "dr": {
+                "all": 0
+              },
+              "roll_range": "9-10"
+            },
+            "hit_penalty": 0,
+            "id": "torso",
+            "table_name": "Torso"
+          }
+        ],
+        "name": "Humanoid"
+      }
+    },
+    "skills": [
+      {
+        "defaults": [
+          {
+            "modifier": -5,
+            "type": "dx"
+          },
+          {
+            "modifier": -2,
+            "name": "Shortsword",
+            "type": "skill"
+          }
+        ],
+        "difficulty": "dx/a",
+        "level": 14,
+        "name": "Broadsword",
+        "points": 8,
+        "relative_level": "DX+2",
+        "specialization": null
+      },
+      {
+        "defaults": [
+          {
+            "modifier": -4,
+            "type": "dx"
+          }
+        ],
+        "difficulty": "dx/e",
+        "level": 13,
+        "name": "Shield",
+        "points": 4,
+        "relative_level": "DX+1",
+        "specialization": "Shield"
+      }
+    ],
+    "spells": [
+      {
+        "casting_cost": "",
+        "casting_time": "",
+        "college": "Fire",
+        "difficulty": "iq/h",
+        "duration": "",
+        "level": 12,
+        "maintenance_cost": "",
+        "name": "Fireball",
+        "points": 4,
+        "relative_level": "IQ+2",
+        "spell_class": ""
+      },
+      {
+        "casting_cost": "",
+        "casting_time": "",
+        "college": "Light",
+        "difficulty": "iq/e",
+        "duration": "",
+        "level": 10,
+        "maintenance_cost": "",
+        "name": "Light",
+        "points": 1,
+        "relative_level": "IQ+0",
+        "spell_class": ""
+      }
+    ],
+    "total_points": 150,
+    "traits": [
+      {
+        "group_name": null,
+        "has_weapon": false,
+        "level": null,
+        "name": "Combat Reflexes",
+        "notes": "",
+        "points": 15,
+        "tags": [
+          "Advantage",
+          "Mental"
+        ],
+        "weapons": []
+      },
+      {
+        "group_name": null,
+        "has_weapon": false,
+        "level": null,
+        "name": "Sense of Duty",
+        "notes": "",
+        "points": -5,
+        "tags": [
+          "Disadvantage",
+          "Mental"
+        ],
+        "weapons": []
+      },
+      {
+        "group_name": null,
+        "has_weapon": true,
+        "level": null,
+        "name": "Claws, Sharp",
+        "notes": "",
+        "points": 5,
+        "tags": [
+          "Advantage",
+          "Physical"
+        ],
+        "weapons": [
+          {
+            "block": "",
+            "damage": "1d-1 cut",
+            "defaults": [
+              {
+                "type": "dx"
+              }
+            ],
+            "level": 12,
+            "parry": "",
+            "reach": "C",
+            "usage": "Slash"
+          }
+        ]
+      },
+      {
+        "group_name": null,
+        "has_weapon": false,
+        "level": null,
+        "name": "Damage Resistance",
+        "notes": "",
+        "points": 10,
+        "tags": [
+          "Advantage"
+        ],
+        "weapons": []
+      },
+      {
+        "group_name": "Disadvantages",
+        "has_weapon": false,
+        "level": null,
+        "name": "Bad Temper",
+        "notes": "",
+        "points": -10,
+        "tags": [
+          "Disadvantage",
+          "Mental"
+        ],
+        "weapons": []
+      }
+    ]
+  },
+  "minimal": {
+    "attributes": [],
+    "calc": {},
+    "equipment": [],
+    "name": "Bones",
+    "profile": {
+      "name": "Bones"
+    },
+    "settings": {
+      "body_type": {}
+    },
+    "skills": [],
+    "spells": [],
+    "total_points": 0,
+    "traits": []
+  }
+}

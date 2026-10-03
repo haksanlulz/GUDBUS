@@ -1,0 +1,220 @@
+"""Combat session wrapper — centralized permission enforcement and command context."""
+
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
+
+import discord
+
+from gurps_bot.config import DEFER_INTERACTIONS
+from gurps_bot.services.combat import current_combatant, get_combat
+from gurps_bot.ui.respond import defer as defer_interaction
+from gurps_bot.ui.respond import respond
+from gurps_bot.utils.fuzzy import fuzzy_match
+from gurps_bot.utils.scope import channel_scope
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from gurps_bot.bot import GURPSBot
+    from gurps_bot.db.models import Combat, Combatant
+
+log = logging.getLogger(__name__)
+
+
+class CombatPermissionError(Exception):
+    """Raised when a user lacks permission for a combat action."""
+
+
+class CombatNotFound(Exception):
+    """Raised when no active combat exists in the channel."""
+
+
+class CombatTargetNotFound(Exception):
+    """Raised when a combatant name doesn't match anyone."""
+
+    def __init__(self, name: str) -> None:
+        self.name = name
+        super().__init__(f"No combatant matching **{name}**.")
+
+
+class CombatSession:
+    """Permission + turn-state helpers over a Combat row."""
+
+    def __init__(self, combat: Combat, user_id: int) -> None:
+        self.combat = combat
+        self.user_id = user_id
+
+    @property
+    def is_gm(self) -> bool:
+        return self.combat.started_by == self.user_id
+
+    @property
+    def current_combatant(self) -> Combatant | None:
+        # anchor-resolved, not positional — see services.combat.current_combatant
+        return current_combatant(self.combat)
+
+    @property
+    def is_current_turn(self) -> bool:
+        current = self.current_combatant
+        return current is not None and current.discord_user_id == self.user_id
+
+    def require_gm(self) -> None:
+        if not self.is_gm:
+            raise CombatPermissionError("Only the GM can do this.")
+
+    def require_turn_or_gm(self) -> None:
+        if not self.is_gm and not self.is_current_turn:
+            raise CombatPermissionError(
+                "Only the current-turn player or the GM can do this."
+            )
+
+    def require_gm_or_owner(self, combatant: Combatant) -> None:
+        # gates per-combatant mutation (HP/FP/status); NPCs have no owning
+        # player (discord_user_id is None), so they are GM-only
+        if not self.is_gm and combatant.discord_user_id != self.user_id:
+            raise CombatPermissionError(
+                "Only the GM or that combatant's player can do this."
+            )
+
+    def find_own_combatant(self) -> Combatant | None:
+        return next(
+            (c for c in self.combat.combatants if c.discord_user_id == self.user_id),
+            None,
+        )
+
+    def find_combatant(self, name: str) -> Combatant:
+        names = [c.name for c in self.combat.combatants]
+        matches = fuzzy_match(name, names, limit=1, score_cutoff=50)
+        if not matches:
+            raise CombatTargetNotFound(name)
+        matched_name = matches[0][0]
+        return next(c for c in self.combat.combatants if c.name == matched_name)
+
+
+class CombatContext:
+    """Session + combat acquisition for subcommands; check ctx.ok, combat errors go out ephemeral."""
+
+    def __init__(
+        self,
+        interaction: discord.Interaction[GURPSBot],
+        *,
+        defer: bool | None = None,
+        ephemeral: bool = False,
+    ) -> None:
+        self.interaction = interaction
+        self._combat: Combat | None = None
+        self._cs: CombatSession | None = None
+        self._session_ctx = None
+        # None means "whatever the deployment is configured for" — on by
+        # default since 2026-07-29. Passing an explicit bool overrides it, which
+        # is what the tests do so they assert behaviour rather than the current
+        # default, and so they survived the default flipping.
+        self._defer = DEFER_INTERACTIONS if defer is None else defer
+        # the defer fixes the reply's visibility; a hidden roll must defer hidden
+        self._ephemeral = ephemeral
+
+    # bound by __aenter__; nothing reads it before the block is entered
+    session: AsyncSession
+
+    @property
+    def ok(self) -> bool:
+        """True if an active combat was found."""
+        return self._combat is not None
+
+    @property
+    def combat(self) -> Combat:
+        """The channel's combat. Only valid once `ok` has been checked."""
+        if self._combat is None:
+            raise RuntimeError("CombatContext.combat read without checking ctx.ok")
+        return self._combat
+
+    @property
+    def cs(self) -> CombatSession:
+        """Permission helpers over `combat`. Only valid once `ok` has been checked."""
+        if self._cs is None:
+            raise RuntimeError("CombatContext.cs read without checking ctx.ok")
+        return self._cs
+
+    async def __aenter__(self) -> CombatContext:
+        # Acknowledge before touching the database, when enabled. Discord
+        # invalidates an un-deferred token after 3 seconds; SQLite waits up to
+        # busy_timeout (5s) for a write lock, so a contended write can still be
+        # succeeding when the interaction is already dead. Deferring moves the
+        # ceiling to 15 minutes. Mirrors CharacterContext, which already did
+        # this. ON by default — see config.DEFER_INTERACTIONS for the
+        # measurements and for when a deployment should turn it off.
+        if self._defer:
+            await defer_interaction(self.interaction, ephemeral=self._ephemeral)
+
+        self._session_ctx = self.interaction.client.db()
+        self.session = await self._session_ctx.__aenter__()
+        self._combat = await get_combat(
+            self.session, *channel_scope(self.interaction),
+        )
+        if not self._combat:
+            await self._send_error("No active combat.")
+        else:
+            self._cs = CombatSession(self._combat, self.interaction.user.id)
+        return self
+
+    async def commit(self) -> None:
+        """Commit the transaction. Call after mutations, before refresh_tracker."""
+        await self.session.commit()
+
+    async def respond_and_refresh(self, content: str) -> None:
+        """Reply first, then refresh — the 3s interaction ACK window can't wait on the tracker edit.
+
+        Routed through `respond()` rather than calling `response.send_message`
+        directly. This method was the one place `ui.respond` was created for and
+        did not reach: after `__aenter__` defers, the interaction is already
+        acknowledged, so a direct `send_message` raises `InteractionResponded`.
+        Every one of the eight combat commands that ends here would then fail to
+        reply — and `hp_cmd` commits before it replies, so the damage landed and
+        the user was told the command failed. `_send_error` twenty lines below
+        had the branch all along, which is what made the omission easy to miss.
+        """
+        await respond(self.interaction, content)
+        if not await self.refresh_tracker():
+            await self.interaction.followup.send(
+                "⚠️ Couldn't update the combat tracker — check my "
+                "permissions in this channel.",
+                ephemeral=True,
+            )
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> bool:
+        suppress = False
+        if exc_type in (CombatPermissionError, CombatTargetNotFound):
+            msg = str(exc_val) if str(exc_val) else "Combat error."
+            await self._send_error(msg)
+            suppress = True
+        if self._session_ctx is not None:
+            await self._session_ctx.__aexit__(
+                None if suppress else exc_type,
+                None if suppress else exc_val,
+                None if suppress else exc_tb,
+            )
+        return suppress
+
+    async def _send_error(self, msg: str) -> None:
+        await respond(self.interaction, msg, ephemeral=True)
+
+    async def refresh_tracker(self) -> bool:
+        """Re-fetch combat + redraw the tracker; call after commit()."""
+        from gurps_bot.ui.tracker import TrackerManager
+
+        # Sessions are expire_on_commit=False, so without this the re-fetch is
+        # answered from the identity map: the rows as this command first read
+        # them, missing any concurrent command's HP change or new combatant,
+        # and whichever redraw reached Discord last would paint over the other.
+        self.session.expire_all()
+        self._combat = await get_combat(
+            self.session, *channel_scope(self.interaction),
+        )
+        # a concurrent /combat end can land between commit and here — combat comes
+        # back None, and dereferencing it would blow up after the reply went out
+        if self._combat is None:
+            return False
+        tracker = TrackerManager(self.interaction.channel, self._combat.message_id)
+        return await tracker.refresh(self._combat)

@@ -1,0 +1,72 @@
+# A second instance of the bot, tracking the :nightly channel.
+#
+# Copy this to its own Compose project directory as `docker-compose.yml` — it
+# must NOT share a project, a container name, a volume or a token with the
+# production instance. On the unRAID box:
+#
+#   mkdir -p /boot/config/plugins/compose.manager/projects/GUDBUS-dev
+#   cp nightly-compose.yml .../GUDBUS-dev/docker-compose.yml
+#   printf 'gudbus-dev' > .../GUDBUS-dev/name          # no trailing newline
+#   printf 'true'       > .../GUDBUS-dev/autostart
+#
+# Refresh it to the latest trunk build with, from inside that directory:
+#
+#   docker compose pull && docker compose up -d
+#
+# deploy/nas-update.sh also drives it, if you would rather pin an exact commit
+# than follow the moving tag:
+#
+#   GUDBUS_CONTAINER=gudbus-dev \
+#   GUDBUS_PROJECT_DIR=/boot/config/plugins/compose.manager/projects/GUDBUS-dev \
+#     sh nas-update.sh sha-<commit>
+#
+# It will report the channel as NIGHTLY, which for this instance is the point.
+#
+# ⚠️ THIS NEEDS ITS OWN DISCORD APPLICATION AND TOKEN. Two processes signed in
+# on one token both hold a gateway session and both answer every interaction —
+# you get duplicate replies and races on the same commands. Create a second
+# application in the Discord developer portal ("GUDBUS Dev" or similar), invite
+# it to a test guild only, and put ITS token in the env file below. Reusing the
+# production token is the one mistake here that is not self-correcting.
+#
+# ⚠️ Its slash commands register globally, same as production — global
+# registration is per-application, so they appear only in guilds this second
+# bot is actually in. Keep it out of the real guild and the two never collide.
+
+services:
+  gudbus-dev:
+    image: ghcr.io/haksanlulz/gudbus:nightly
+    container_name: gudbus-dev
+    restart: unless-stopped
+    # Same hardening as production. A dev instance that runs with more
+    # privilege than production is not testing production.
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    # Kept outside the project directory on purpose: that directory lives on
+    # the unRAID USB flash, which flash backups capture and unRAID Connect can
+    # upload off-site. Create it 0600 and owned by root:
+    #
+    #   install -d -m 700 /mnt/user/appdata/gudbus-dev
+    #   install -m 600 /dev/null /mnt/user/appdata/gudbus-dev/gudbus-dev.env
+    #
+    # It needs at minimum DISCORD_TOKEN and BOT_AUTHOR_LEGAL_NAME. Both fail
+    # closed in-container if missing — the entrypoint exits 1 on the name, and
+    # the bot raises on the token — so there is no silent half-configured boot.
+    # There is deliberately no `${VAR:?}` guard here: those interpolate from a
+    # .env in the project directory, which is exactly the file we are not
+    # keeping on the flash.
+    env_file: /mnt/user/appdata/gudbus-dev/gudbus-dev.env
+    volumes:
+      # Its OWN volume. Pointing this at production's data would let a trunk
+      # build run migrations against the real database — the one failure here
+      # that is not recoverable by restarting something.
+      - gudbus-dev-data:/app/data
+    stop_grace_period: 20s
+
+volumes:
+  gudbus-dev-data:

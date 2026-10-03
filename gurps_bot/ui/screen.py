@@ -1,0 +1,312 @@
+"""GM quick-reference screen — layout only; every number it renders is imported from the mechanics module that owns it."""
+
+from __future__ import annotations
+
+import discord
+
+from gurps_bot.mechanics import encumbrance as enc
+from gurps_bot.mechanics import hiking
+from gurps_bot.mechanics import speed_range as sr
+from gurps_bot.mechanics.combat_constants import STATUS_ICONS, Maneuver, StatusEffect
+from gurps_bot.mechanics.hit_location import deliberate_locations, gross_targeting_reference
+from gurps_bot.mechanics.posture import POSTURES, move_label
+from gurps_bot.mechanics.reaction import REACTION_BANDS
+from gurps_bot.mechanics.tables import (
+    CRITICAL_TABLES,
+    FRIGHT_TABLE_MAX,
+    FRIGHT_TABLE_MIN,
+    FRIGHT_TABLE_PAGES,
+)
+from gurps_bot.ui.embeds import EMBED_FIELD_LIMIT
+
+# imported, not retyped — ui/embeds.EMBED_FIELD_LIMIT owns the 1024
+_EMBED_FIELD_LIMIT = EMBED_FIELD_LIMIT
+
+# display rows only — every penalty/SM value is still queried from speed_range
+SAMPLE_DISTANCES: tuple[float, ...] = (
+    2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100, 150, 200, 300, 500,
+)
+SAMPLE_SIZES: tuple[float, ...] = (
+    0.1, 0.2, 0.5, 1, 1.5, 2, 3, 5, 10, 20, 50, 100,
+)
+
+# page order; /screen's category choice jumps to one of these
+CATEGORIES: tuple[str, ...] = (
+    "combat", "body", "ranged", "movement", "rolls", "fright",
+)
+CATEGORY_INDEX: dict[str, int] = {c: i for i, c in enumerate(CATEGORIES)}
+
+_COMBAT = discord.Color.dark_orange()
+_BLUE = discord.Color.blue()
+_GREEN = discord.Color.green()
+_GOLD = discord.Color.gold()
+_PURPLE = discord.Color.purple()
+_RED = discord.Color.dark_red()
+
+
+def _yd(value: float) -> str:
+    return f"{value:g}yd"
+
+
+def _cap(text: str, limit: int = _EMBED_FIELD_LIMIT) -> str:
+    """Truncate an embed-field body to Discord's 1024-char cap (safety net)."""
+    if len(text) <= limit:
+        return text
+    return text[: limit - 15] + "\n…(truncated)"
+
+
+# ---------------------------------------------------------------------------
+# Pure data builders (no discord) — each reflects its owning mechanics module
+# ---------------------------------------------------------------------------
+def maneuver_names() -> list[str]:
+    return [m.value for m in Maneuver]
+
+
+def status_effects() -> list[tuple[str, str]]:
+    return [(s.value, STATUS_ICONS[s]) for s in StatusEffect]
+
+
+def encumbrance_reference() -> list[tuple[str, float, int, float]]:
+    """(name, move mult, dodge penalty, max BL multiple) — queried at BL=1 so max_weight is the bare multiple."""
+    return [
+        (t.name, t.move_multiplier, t.dodge_penalty, t.max_weight)
+        for t in enc.encumbrance_thresholds(1)
+    ]
+
+
+def terrain_reference() -> list[tuple[str, float]]:
+    return [(t.name.replace("_", " ").title(), t.mult) for t in hiking.Terrain]
+
+
+def weather_reference() -> list[tuple[str, float]]:
+    return [(w.name.replace("_", " ").title(), w.mult) for w in hiking.Weather]
+
+
+def speed_range_reference() -> list[tuple[float, int]]:
+    return [(d, sr.speed_range_penalty(d)) for d in SAMPLE_DISTANCES]
+
+
+def size_reference() -> list[tuple[float, int]]:
+    return [(length, sr.size_modifier(length)) for length in SAMPLE_SIZES]
+
+
+def reaction_reference() -> list[tuple[str, str]]:
+    """(band name, adjusted-total range) — the two ends are open-ended."""
+    rows: list[tuple[str, str]] = []
+    last = len(REACTION_BANDS) - 1
+    for i, band in enumerate(REACTION_BANDS):
+        if i == 0:
+            rng = f"≤{band.upper}"
+        elif i == last:
+            rng = f"≥{band.lower}"
+        else:
+            rng = f"{band.lower}-{band.upper}"
+        rows.append((band.name, rng))
+    return rows
+
+
+def posture_reference() -> list[dict]:
+    """One dict per B551 posture, every field read from mechanics/posture.py."""
+    return [
+        {
+            "name": p.name,
+            "attack": p.attack_penalty,
+            "defense": p.defense_modifier,
+            "ranged": p.ranged_to_hit_you,
+            "melee": p.melee_to_hit_you,
+            "move": move_label(p),
+            "effect": p.effect,
+        }
+        for p in POSTURES
+    ]
+
+
+def targeting_reference() -> list[dict]:
+    """Deliberate-only hit locations the random 3d6 table omits (B552), plus the
+    optional Martial Arts additions, each carrying its own source."""
+    return [
+        {
+            "name": loc.name,
+            "penalty": loc.penalty,
+            "effect": loc.effect,
+            "source": loc.source,
+            "optional": loc.is_optional,
+        }
+        for loc in deliberate_locations()
+    ]
+
+
+def gross_target_reference() -> list[dict]:
+    """Gross 3d6 body locations + aim penalty per spot, read from the random-table owner."""
+    return [
+        {"name": name, "penalty": penalty}
+        for name, penalty, _effect in gross_targeting_reference()
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Page builders (discord.Embed) — layout only
+# ---------------------------------------------------------------------------
+def combat_page() -> discord.Embed:
+    e = discord.Embed(title="GM Screen — Combat", color=_COMBAT)
+    e.add_field(
+        name="Maneuvers (B363)",
+        value="\n".join(f"• {m}" for m in maneuver_names()),
+        inline=True,
+    )
+    e.add_field(
+        name="Status Effects",
+        value="\n".join(f"{icon} {name}" for name, icon in status_effects()),
+        inline=True,
+    )
+    return e
+
+
+def ranged_page() -> discord.Embed:
+    e = discord.Embed(title="GM Screen — Speed/Range & Size (B550)", color=_BLUE)
+    e.add_field(
+        name="Speed/Range penalty",
+        value="\n".join(f"`{_yd(d):>6}` {p}" for d, p in speed_range_reference()),
+        inline=True,
+    )
+    e.add_field(
+        name="Size Modifier",
+        value="\n".join(f"`{_yd(length):>6}` {sm:+d}" for length, sm in size_reference()),
+        inline=True,
+    )
+    return e
+
+
+def movement_page() -> discord.Embed:
+    e = discord.Embed(title="GM Screen — Movement", color=_GREEN)
+    e.add_field(
+        name="Encumbrance (B17)",
+        value="\n".join(
+            f"**{name}** ×{move:g} Move · Dodge -{dodge} · ≤{bl:g}×BL"
+            for name, move, dodge, bl in encumbrance_reference()
+        ),
+        inline=False,
+    )
+    e.add_field(
+        name="Travel terrain (B351)",
+        value=" · ".join(f"{n} ×{m:g}" for n, m in terrain_reference()),
+        inline=False,
+    )
+    e.add_field(
+        name="Travel weather (B351)",
+        value=" · ".join(f"{n} ×{m:g}" for n, m in weather_reference()),
+        inline=False,
+    )
+    return e
+
+
+def rolls_page() -> discord.Embed:
+    e = discord.Embed(title="GM Screen — Reaction & Criticals", color=_GOLD)
+    e.add_field(
+        name="Reaction (B560)",
+        value="\n".join(f"`{rng:>5}` {name}" for name, rng in reaction_reference()),
+        inline=False,
+    )
+    # The critical tables' result rows are the book's text and are not
+    # reproduced (SJG Online Policy); the bot names the table and the page.
+    e.add_field(
+        name="Critical tables — roll 3d",
+        value="\n".join(f"• {t.name} ({t.page})" for t in CRITICAL_TABLES),
+        inline=False,
+    )
+    return e
+
+
+def fright_page() -> discord.Embed:
+    return discord.Embed(
+        title=f"GM Screen — Fright Check ({FRIGHT_TABLE_PAGES})",
+        description=(
+            "Roll vs Will — capped at 13 if the Rule of 14 is on (see /campaign show). "
+            "On a failure: roll 3d + margin of failure, and read that total "
+            f"({FRIGHT_TABLE_MIN}-{FRIGHT_TABLE_MAX}+) on the Fright Check Table, "
+            f"{FRIGHT_TABLE_PAGES}. `/fright-check` does the arithmetic."
+        ),
+        color=_PURPLE,
+    )
+
+
+# Move rendering is owned by mechanics/posture.move_label and arrives already
+# formatted in posture_reference()["move"]. There were three copies of this
+# helper (here, body_ref.py, posture.py's caller) and none could express Lying
+# Down's flat "1 yard/second" (B551), because they all took a float fraction.
+
+
+def body_page() -> discord.Embed:
+    """Posture (B551) + deliberate targeting (B552) — the data the random 3d6 table omits."""
+    e = discord.Embed(
+        title="GM Screen — Body (Posture & Targeting)",
+        description="Att/Def = to your melee attack/defense · Rngd/Mle = to hit you.",
+        color=_RED,
+    )
+    posture_lines = []
+    for p in posture_reference():
+        posture_lines.append(
+            f"**{p['name']}** Att {p['attack']:+d} · Def {p['defense']:+d} · "
+            f"Rngd {p['ranged']:+d} · Mle {p['melee']:+d} · Move {p['move']}"
+        )
+    e.add_field(name="Posture (B551)", value=_cap("\n".join(posture_lines)), inline=False)
+
+    # effect notes are original summaries, not SJG text
+    e.add_field(
+        name="Posture notes",
+        value=_cap("\n".join(f"**{p['name']}** — {p['effect']}" for p in posture_reference())),
+        inline=False,
+    )
+
+    # Core rows carry their effect; the optional Martial Arts rows are listed
+    # compactly, because carrying eight more effect notes overflows Discord's
+    # 1024-char field cap (caught by test_no_page_field_is_silently_truncated).
+    # Full detail for any single location lives in /target.
+    rows = targeting_reference()
+    core_lines = [
+        f"`{r['penalty']:>3}` **{r['name']}** — {r['effect']}"
+        for r in rows
+        if not r["optional"]
+    ]
+    optional_names = [f"{r['name']} `{r['penalty']:+d}`" for r in rows if r["optional"]]
+    value = "\n".join(core_lines)
+    if optional_names:
+        sources = sorted({r["source"] for r in rows if r["source"]})
+        value += (
+            f"\n\n*Optional ({', '.join(sources)}):* "
+            + " · ".join(optional_names)
+            + "\n*Use `/target <name>` for the full effect.*"
+        )
+    e.add_field(
+        name="Deliberate targeting (B552)",
+        value=_cap(value),
+        inline=False,
+    )
+
+    gross_lines = [
+        f"`{g['penalty']:>3}` {g['name']}" for g in gross_target_reference()
+    ]
+    e.add_field(
+        name="Aim at a body part (B552) · `/hit-location` rolls one",
+        value=_cap(" · ".join(gross_lines)),
+        inline=False,
+    )
+    return e
+
+
+_PAGE_BUILDERS = (
+    combat_page,
+    body_page,
+    ranged_page,
+    movement_page,
+    rolls_page,
+    fright_page,
+)
+
+
+def build_screen_pages() -> list[discord.Embed]:
+    pages = [build() for build in _PAGE_BUILDERS]
+    total = len(pages)
+    for i, page in enumerate(pages, start=1):
+        page.set_footer(text=f"GM Screen {i}/{total} · GURPS quick-reference")
+    return pages

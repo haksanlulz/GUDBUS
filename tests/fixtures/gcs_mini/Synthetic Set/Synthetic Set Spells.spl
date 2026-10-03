@@ -1,0 +1,54 @@
+{
+  "version": 5,
+  "rows": [
+    {
+      "id": "syn-spl-001",
+      "name": "Lantern of Quiet Hours",
+      "difficulty": "iq/vh",
+      "college": ["Ember", "Veil"],
+      "power_source": "Arcane",
+      "spell_class": "Regular",
+      "resist": "HT",
+      "casting_cost": "3",
+      "maintenance_cost": "1",
+      "casting_time": "2 sec",
+      "duration": "1 min",
+      "reference": "SYN44",
+      "points": 4,
+      "tags": ["Ember"],
+      "local_notes": "The lantern gives no light at all, and everyone under it stops wanting to speak.",
+      "reference_highlight": "Lantern of Quiet Hours",
+      "prereqs": {"type": "prereq_list"}
+    },
+    {
+      "id": "syn-spl-002",
+      "name": "Mend the Weeping Seam",
+      "difficulty": "iq/h",
+      "college": "Veil",
+      "power_source": "Arcane",
+      "spell_class": "Regular",
+      "resist": "Attempts made to reopen the sealed seam",
+      "casting_cost": "2 to close a shallow seam; 8 to close one that is still weeping",
+      "maintenance_cost": "1",
+      "casting_time": "4 sec",
+      "duration": "Lasting, until the seam is reopened or the caster next sleeps",
+      "reference": "SYN45",
+      "points": 2,
+      "tags": ["Veil"],
+      "local_notes": "A seam mended twice never weeps again, and never opens again either."
+    },
+    {
+      "id": "syn-spl-003",
+      "name": "Summon @Element@ Wisp",
+      "difficulty": "iq/h",
+      "college": ["Ember"],
+      "spell_class": "Blocking",
+      "casting_cost": "Varies",
+      "maintenance_cost": "None",
+      "casting_time": "1 sec",
+      "duration": "Instantaneous",
+      "reference": "SYN46",
+      "tags": ["Ember"]
+    }
+  ]
+}

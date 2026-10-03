@@ -1,0 +1,77 @@
+[project]
+name = "gudbus"
+version = "1.1.0"
+description = "Unofficial Discord bot for GURPS 4e: character sheets, dice, rules calculators, and turn-based combat tracking. Not affiliated with or endorsed by Steve Jackson Games."
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = [
+    "discord.py>=2.3",
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.19",
+    "rapidfuzz>=3.0",
+    "python-dotenv>=1.0",
+    "alembic>=1.12",
+]
+
+# PEP-735 dependency group. `uv sync` installs the default `dev` group
+# automatically, so the documented `uv run python -m pytest` works on a fresh
+# clone without an explicit extra. (The `.[dev]` optional extra below is kept so
+# `pip install -e ".[dev]"` still resolves the same tools for non-uv setups.)
+[dependency-groups]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    # Pinned exactly, not floored. A pyright minor release adds checks, so a
+    # floor turns a green gate red on a bump nobody made, and
+    # .github/workflows/tests.yml gates on it. Bump deliberately, with whatever
+    # errors the new version finds in the same commit. (1.1.409 is what the
+    # gate was measured against; 1.1.414 was current at the time.)
+    "pyright==1.1.409",
+    # tools/make_icon.py and make_banner.py declare this themselves via PEP 723,
+    # but tests/test_brand_art.py has to import them, and a smoke test that
+    # skips itself for a missing dependency is a rung that never fires. The
+    # image builds with --no-dev, so this does not ship.
+    "pillow>=10",
+    # tests/test_ci_workflows.py reads the workflow files as structure rather
+    # than text, so the publish gate is asserted rather than grepped. Same
+    # no-skipping argument as pillow above; also does not ship.
+    "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "pyright==1.1.409",  # pinned; see the dependency-group above
+    "pillow>=10",
+    "pyyaml>=6",
+]
+
+[tool.setuptools.packages.find]
+include = ["gurps_bot*"]
+
+# Scope and floor live here, not in the CI step, so `uv run pyright` locally and
+# in CI answer the same question. The shipped package only: tools/ are
+# operator scripts and tests/ lean on mocks by design. The floor is the oldest
+# Python CI runs, so an annotation 3.10 cannot evaluate is caught here too.
+[tool.pyright]
+include = ["gurps_bot"]
+pythonVersion = "3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+# pytest 9 does not honour --strict-markers when it arrives via addopts (measured
+# 2026-09-11 on 9.0.3: an unregistered mark only warned); the ini key is what fires
+# there. addopts covers pytest 7/8, which predate the key. Drop it once >=9 is required.
+addopts = "--strict-markers"
+strict_markers = true
+markers = [
+    "slow: takes more than a few seconds (renders images, drives a shell script); skipped by the fast tier",
+    "integration: exercises real DB sessions or the full extension tree end to end rather than one unit",
+    "load: concurrency and throughput shapes, many combats or guilds at once",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"

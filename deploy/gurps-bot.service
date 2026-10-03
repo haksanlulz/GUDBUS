@@ -1,0 +1,27 @@
+[Unit]
+Description=GURPS Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- adjust these three to your install ---
+User=gurpsbot
+WorkingDirectory=/opt/gurps-bot
+# Run the venv interpreter directly (created by `uv sync`) so the service has no
+# dependency on uv being on PATH. If your venv lives elsewhere, point at it.
+ExecStart=/opt/gurps-bot/.venv/bin/python -m gurps_bot
+# ------------------------------------------
+
+# config.py loads .env from WorkingDirectory; data/ (DB + logs) lives under it.
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+
+# Light hardening (safe for this bot — it only touches its own dir + the network).
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

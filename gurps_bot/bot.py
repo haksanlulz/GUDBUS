@@ -1,0 +1,193 @@
+"""Discord bot class and startup."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import signal
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING
+
+import discord
+from discord.ext import commands
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from gurps_bot.command_sync import auto_sync
+from gurps_bot.config import AUTO_SYNC, COMMAND_FINGERPRINT_PATH, DISCORD_TOKEN
+from gurps_bot.db.engine import dispose_engine, init_db, init_engine
+
+if TYPE_CHECKING:
+    from gurps_bot.services.reference import ReferenceLookup
+
+log = logging.getLogger(__name__)
+
+EXTENSIONS = [
+    "gurps_bot.cogs.error_handler",
+    "gurps_bot.cogs.admin",
+    "gurps_bot.cogs.characters",
+    "gurps_bot.cogs.rolling",
+    "gurps_bot.cogs.combat",
+    "gurps_bot.cogs.calc_combat",
+    "gurps_bot.cogs.calc_movement",
+    "gurps_bot.cogs.calc_character",
+    "gurps_bot.cogs.calc_magic",
+    "gurps_bot.cogs.trackers",
+    "gurps_bot.cogs.gmscreen",
+    "gurps_bot.cogs.body_ref",
+    "gurps_bot.cogs.legal",
+    "gurps_bot.cogs.reference",
+    "gurps_bot.cogs.macros",
+    "gurps_bot.cogs.campaign",
+    "gurps_bot.cogs.crafting",
+    # Last: it reads the loaded tree for command descriptions, and loading it
+    # last is not required (it reads at invoke time) but keeps the order honest
+    # about what it depends on.
+    "gurps_bot.cogs.help",
+]
+
+
+def install_sigterm_handler(bot, loop: asyncio.AbstractEventLoop) -> None:
+    """Route SIGTERM to bot.close() so shutdown disposes the database.
+
+    asyncio.run, inside discord.py's Client.run, handles SIGINT only. Under
+    Docker the bot is PID 1, and the kernel drops SIGTERM for a PID 1 with no
+    handler: `docker stop` waited out the grace period and SIGKILLed it. Under
+    systemd, SIGTERM's default action killed it before close() ran.
+    """
+    pending: set[asyncio.Task] = set()
+
+    def _close() -> None:
+        log.info("SIGTERM received — closing")
+        task = loop.create_task(bot.close())
+        pending.add(task)  # keep a reference until it finishes
+        task.add_done_callback(pending.discard)
+
+    try:
+        loop.add_signal_handler(signal.SIGTERM, _close)
+    except (NotImplementedError, RuntimeError):
+        # Windows' event loops have no add_signal_handler; nothing to route
+        log.debug("SIGTERM handler not installed on this platform")
+
+
+class GURPSBot(commands.Bot):
+    db: async_sessionmaker[AsyncSession]
+    start_time: datetime
+    # built in setup_hook; cogs read it as bot.reference
+    reference: "ReferenceLookup"
+
+    def __init__(self) -> None:
+        intents = discord.Intents.default()
+        # user text (macro/npc/note names) is echoed into public replies; never let it ping
+        super().__init__(
+            # Mention prefix, deliberately: message-content intent is off, and
+            # @-mentions are the carve-out Discord still delivers content for.
+            # That makes "@<bot> sync" a rescue channel that works with ZERO
+            # slash commands registered and zero privileged intents.
+            command_prefix=commands.when_mentioned,
+            intents=intents,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        self.start_time = datetime.now(timezone.utc)
+
+    async def setup_hook(self) -> None:
+        install_sigterm_handler(self, asyncio.get_running_loop())
+        self.db = init_engine()
+        log.info("Initializing database...")
+        await init_db()
+
+        from gurps_bot.services.reference import get_reference_index
+
+        # first call walks the vendored library (~179ms); keep it off the loop
+        self.reference = await asyncio.to_thread(get_reference_index)
+        skills = len(self.reference.names("skills"))
+        spells = len(self.reference.names("spells"))
+        if skills or spells:
+            log.info("Reference catalog loaded: %d skills, %d spells", skills, spells)
+        else:
+            log.warning(
+                "Reference catalog is EMPTY — run tools/sync_gcs_library.py to "
+                "vendor the GCS master library snapshot."
+            )
+
+        for ext in EXTENSIONS:
+            try:
+                await self.load_extension(ext)
+                log.info("Loaded extension: %s", ext)
+            except Exception:
+                log.exception("Failed to load extension: %s", ext)
+
+        from gurps_bot.ui.tracker import get_tracker_view
+        self.add_view(get_tracker_view())
+
+        # SJG Online Policy: /legal + /about need a real author name
+        import os
+        if not os.getenv("BOT_AUTHOR_LEGAL_NAME"):
+            log.warning(
+                "BOT_AUTHOR_LEGAL_NAME is not set — /legal and /about will show a "
+                "PLACEHOLDER instead of a legal name, which is NOT compliant with "
+                "the SJG Online Policy. Set it in .env before any public use."
+            )
+
+        if AUTO_SYNC:
+            await auto_sync(self.tree, COMMAND_FINGERPRINT_PATH)
+        else:
+            log.info("AUTO_SYNC=0 — slash commands will not be registered at startup.")
+
+        log.info("Bot is ready.")
+
+    async def on_ready(self) -> None:
+        log.info(
+            "Logged in as %s (ID: %s)",
+            self.user,
+            self.user.id if self.user else "?",
+        )
+
+    async def close(self) -> None:
+        log.info("Shutting down — disposing database engine...")
+        await dispose_engine()
+        await super().close()
+
+
+def run_bot() -> None:
+    import logging.handlers
+
+    from gurps_bot.config import DATA_DIR
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fmt = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        DATA_DIR / "gurps_bot.log",
+        maxBytes=5 * 1024 * 1024,
+        backupCount=3,
+        encoding="utf-8",
+    )
+    console_handler = logging.StreamHandler()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=fmt,
+        handlers=[file_handler, console_handler],
+    )
+
+    if not DISCORD_TOKEN:
+        raise RuntimeError(
+            "DISCORD_TOKEN not set. Copy .env.example to .env and add your token."
+        )
+
+    # Schema gate — refuse to launch against a database the code has outgrown.
+    # setup_hook's init_db() -> create_all builds MISSING tables but can never
+    # ALTER an existing one, so a stale schema boots clean and fails mid-session.
+    # db/bootstrap owns the decision; this is only the wiring.
+    from gurps_bot.db.bootstrap import SchemaGateError, ensure_schema_current
+
+    try:
+        ensure_schema_current()
+    except SchemaGateError as exc:
+        # Log before re-raising so the refusal lands in the rotating log file as
+        # well as on the terminal the operator is watching.
+        log.critical("%s", exc)
+        raise
+
+    bot = GURPSBot()
+    bot.run(DISCORD_TOKEN, log_handler=None)

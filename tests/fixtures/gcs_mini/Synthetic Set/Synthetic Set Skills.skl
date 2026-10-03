@@ -1,0 +1,105 @@
+{
+  "version": 5,
+  "rows": [
+    {
+      "id": "syn-skl-001",
+      "name": "Glasswright",
+      "difficulty": "dx/a",
+      "points": 4,
+      "reference": "SYN14",
+      "tags": ["Craft", "Synthetic Craft"],
+      "defaults": [
+        {"type": "dx", "modifier": -5},
+        {"type": "skill", "name": "Kiln Tending", "modifier": -3}
+      ],
+      "local_notes": "Whenever the glass sings, the artisan must stop work and listen until the note fades.",
+      "reference_highlight": "Glasswright",
+      "features": [{"type": "skill_bonus"}],
+      "weapons": [{"id": "w", "usage_notes": "Whenever the glass sings, the artisan must stop work and listen until the note fades."}],
+      "prereqs": {"type": "prereq_list"},
+      "calc": {"level": 12, "rsl": "DX+0"}
+    },
+    {
+      "id": "syn-skl-002",
+      "name": "Duskspeech",
+      "specialization": "@Dialect@",
+      "difficulty": "iq/h",
+      "points": 2,
+      "reference": "SYN15",
+      "tags": ["Language"],
+      "defaults": [
+        {"type": "skill", "name": "Duskspeech", "specialization": "@Dialect@", "modifier": -3}
+      ],
+      "local_notes": "The dusk tongue is spoken only where the lamps have already been put out."
+    },
+    {
+      "id": "syn-skl-003",
+      "name": "Latch Craft",
+      "specialization": "Ironwork",
+      "difficulty": "iq/a",
+      "points": 8,
+      "reference": "SYN16",
+      "tags": ["Craft"],
+      "defaults": [{"type": "iq", "modifier": -4}]
+    },
+    {
+      "id": "syn-skl-004",
+      "name": "Latch Craft",
+      "specialization": "Clockwork",
+      "difficulty": "iq/h",
+      "points": 4,
+      "reference": "SYN16",
+      "tags": ["Craft"]
+    },
+    {
+      "id": "syn-skl-005",
+      "name": "Bind Servitor (@Servitor@)",
+      "difficulty": "iq/vh",
+      "points": 1,
+      "reference": "SYN17",
+      "tags": ["Esoteric"],
+      "defaults": [
+        {"type": "skill", "name": "@Any Binding Skill@", "modifier": -6},
+        {"type": "will", "modifier": -7}
+      ],
+      "local_notes": "A servitor bound at dusk answers slowly; one bound at noon does not answer at all."
+    },
+    {
+      "id": "syn-skl-006",
+      "name": "A Rambling Upstream Row That Is Really A Sentence Wearing A Name And Would Blow The Discord Title Limit Flat If Nothing Capped It",
+      "difficulty": "iq/e",
+      "points": 1,
+      "reference": "SYN18",
+      "tags": ["Malformed"]
+    },
+    {
+      "id": "syn-skl-grp-001",
+      "name": "Bladework Techniques",
+      "children": [
+        {
+          "id": "syn-tec-001",
+          "name": "Off-Guard Riposte",
+          "difficulty": "h",
+          "default": {"type": "skill", "name": "Glasswright", "modifier": -4},
+          "limit": 4,
+          "points": 3,
+          "reference": "SYN22",
+          "tags": ["Combat"],
+          "weapons": [{"id": "w"}],
+          "prereqs": {"type": "prereq_list"}
+        },
+        {
+          "id": "syn-tec-002",
+          "name": "Rote Feint",
+          "difficulty": "a",
+          "default": {"type": "skill", "name": "@Any Blade Skill@", "modifier": -2},
+          "limit": 2,
+          "points": 2,
+          "reference": "SYN23",
+          "tags": ["Combat"],
+          "local_notes": "A feint learned by rote fools the same opponent exactly once."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,440 @@
+#!/usr/bin/env python
+"""Vendor a pinned snapshot of the GCS master library into gurps_bot/data/gcs_library."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as _dt
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+# pinned upstream; bump these together to take a new snapshot
+REPO_URL = "https://github.com/richardwilkes/gcs_master_library.git"
+REPO_SLUG = "richardwilkes/gcs_master_library"
+BRANCH = "main"
+PINNED_REF = "924a2fd801fccda0e3e32d8bdc430a9403217241"
+
+# extension determines category (rows carry no type field); .skl holds both
+# skills and techniques, split downstream by row shape. catalog facts only:
+# prose files (.md/.not/.txt/.html) and sheets (.gcs/.gct) are never vendored
+CATEGORY_EXTENSIONS: dict[str, str] = {
+    "skills": ".skl",
+    "traits": ".adq",
+    "spells": ".spl",
+    "equipment": ".eqp",
+}
+
+VENDOR_EXTENSIONS: frozenset[str] = frozenset(CATEGORY_EXTENSIONS.values())
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+VENDOR_ROOT = PROJECT_ROOT / "gurps_bot" / "data" / "gcs_library"
+VENDOR_LIBRARY = VENDOR_ROOT / "Library"
+VENDOR_LICENSE = VENDOR_ROOT / "LICENSE"
+VENDOR_PROVENANCE = VENDOR_ROOT / "PROVENANCE.md"
+
+
+def _utc_now_iso() -> str:
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+#: Wall-clock ceiling on any single git subprocess, in seconds.
+#:
+#: subprocess.run blocks forever on a STALLED connection, as opposed to a
+#: refused one, and every git call here talks to the network. This script is
+#: run by hand and by deploy.sh at deploy time, where an unbounded hang is
+#: worst: the deploy does not fail, it just appears to still be working.
+#:
+#: Sized by the one genuinely slow call, `_clone_pinned`'s fetch, which pulls
+#: the pinned commit WITH blobs — about 201 MB, per the figure in
+#: `_pinned_ref_is_fetchable`'s docstring. Ten minutes covers any link that
+#: sustains roughly 350 KB/s, so a cold-cache fetch of a large upstream over a
+#: slow connection still finishes well inside it; the goal is to bound a hang,
+#: not to police throughput.
+#:
+#: Overridable at the point of failure, because "edit the constant" is not a
+#: fix where this runs: the Dockerfile calls it inside `docker build` and
+#: deploy/deploy.sh calls it at deploy time, so raising it in the source means
+#: rebuilding the thing that is timing out. The one regression direction a
+#: ceiling has is a slow-but-working link that used to finish, and that failure
+#: is indistinguishable from an unreachable upstream — so the escape hatch has
+#: to exist where the failure does. The two callers take it differently:
+#:
+#:     deploy/deploy.sh   GCS_GIT_TIMEOUT=1800 deploy/deploy.sh
+#:     docker build       docker build --build-arg GCS_GIT_TIMEOUT=1800 .
+#:
+#: `docker build` does not inherit the host environment, so the env-var form is
+#: inert there. The Dockerfile declares a matching `ARG GCS_GIT_TIMEOUT` ahead
+#: of the RUN; Docker passes an ARG to every subsequent RUN in that stage as a
+#: build-time environment variable, which is how it reaches os.environ below.
+#:
+#: No retry, deliberately: a manual/deploy-time tool should stop and say so,
+#: because a silent second attempt doubles the wait and buries the cause.
+_GIT_TIMEOUT_DEFAULT = 600
+
+
+def _timeout_seconds() -> int:
+    raw = os.environ.get("GCS_GIT_TIMEOUT")
+    if raw is None:
+        return _GIT_TIMEOUT_DEFAULT
+    try:
+        seconds = int(raw)
+    except ValueError:
+        raise ValueError(
+            f"GCS_GIT_TIMEOUT must be a whole number of seconds, got {raw!r}"
+        ) from None
+    if seconds <= 0:
+        raise ValueError(f"GCS_GIT_TIMEOUT must be positive, got {seconds}")
+    return seconds
+
+
+GIT_TIMEOUT_SECONDS = _timeout_seconds()
+
+
+def _git(args: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
+    """Run git and hand back the result. Callers decide what a failure means.
+
+    A timeout is the exception to that: there is no result to hand back, and
+    every caller here reads a CompletedProcess as "git ran and said no", which
+    a hung network is not. It raises instead, and `main` turns that into a
+    non-zero exit with the message attached.
+    """
+    try:
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        cmd = " ".join(["git", *args])
+        raise RuntimeError(
+            f"git timed out after {GIT_TIMEOUT_SECONDS}s: {cmd}\n"
+            f"upstream: {REPO_URL}\n"
+            f"A stalled connection blocks indefinitely without this ceiling, so "
+            f"this is a refusal to hang rather than a report that git failed. "
+            f"Check reachability of the upstream host and re-run; set "
+            f"GCS_GIT_TIMEOUT to a larger number of seconds if the link is "
+            f"simply slow."
+        ) from exc
+
+
+def _run_git(args: list[str], *, cwd: Path | None = None) -> None:
+    proc = _git(args, cwd=cwd)
+    if proc.returncode != 0:
+        cmd = " ".join(["git", *args])
+        raise RuntimeError(
+            f"git command failed ({proc.returncode}): {cmd}\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+
+
+def _clone_pinned(dest: Path) -> None:
+    """Fetch the pinned SHA directly (branch-independent, shallow), then detach-checkout."""
+    # PINNED_REF must be a bare hex SHA, never a ref expression or path
+    if not re.fullmatch(r"[0-9a-f]{7,40}", PINNED_REF):
+        raise RuntimeError(
+            f"PINNED_REF is not a hex SHA (got {PINNED_REF!r}); refusing to check out."
+        )
+    print(f"Fetching {REPO_URL} @ {PINNED_REF} ...", flush=True)
+    # Fetch the exact commit instead of cloning a named branch: the pin stays
+    # valid across upstream default-branch renames (master -> main broke the old
+    # clone), and --depth 1 pulls just that commit — GitHub serves any reachable SHA.
+    _run_git(["init", "-q", str(dest)])
+    _run_git(["remote", "add", "origin", REPO_URL], cwd=dest)
+    _run_git(["fetch", "--depth", "1", "origin", PINNED_REF], cwd=dest)
+    print(f"Checking out pinned ref {PINNED_REF} ...", flush=True)
+    # --detach: the fetched commit, taken as-is (never resolved as a branch or path)
+    _run_git(["checkout", "--detach", "FETCH_HEAD"], cwd=dest)
+
+
+def _copy_library(src_root: Path) -> int:
+    src_library = src_root / "Library"
+    if not src_library.is_dir():
+        raise RuntimeError(f"upstream Library/ not found at {src_library}")
+
+    # wipe first so upstream removals don't leave stale files
+    if VENDOR_LIBRARY.exists():
+        shutil.rmtree(VENDOR_LIBRARY)
+    VENDOR_LIBRARY.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for path in sorted(src_library.rglob("*")):
+        # skip symlinks before is_file(), which follows them: an upstream commit
+        # could point x.skl at /etc/passwd and copy2 would vendor the target's
+        # bytes; pinning doesn't help, the pinned commit can carry the symlink
+        if path.is_symlink():
+            continue
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in VENDOR_EXTENSIONS:
+            continue
+        rel = path.relative_to(src_library)
+        dest = VENDOR_LIBRARY / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, dest, follow_symlinks=False)
+        copied += 1
+    return copied
+
+
+def _copy_license(src_root: Path) -> None:
+    # upstream has historically shipped plain LICENSE; accept common variants
+    for name in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING"):
+        candidate = src_root / name
+        if candidate.is_file():
+            VENDOR_ROOT.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(candidate, VENDOR_LICENSE)
+            return
+    raise RuntimeError(
+        f"no LICENSE file found in upstream checkout at {src_root}"
+    )
+
+
+def _write_provenance(file_count: int) -> None:
+    VENDOR_ROOT.mkdir(parents=True, exist_ok=True)
+    synced = _utc_now_iso()
+    counts = _category_counts()
+    count_lines = "\n".join(
+        f"- **{cat}** (`{ext}`): {counts[cat]} file(s)"
+        for cat, ext in CATEGORY_EXTENSIONS.items()
+    )
+    content = f"""# Provenance — Vendored GCS Master Library
+
+This directory contains a **pinned, vendored snapshot** of catalog data files
+from the GCS master library. It is regenerated by
+`tools/sync_gcs_library.py`; do not edit by hand.
+
+## Source
+
+- **Repository:** <https://github.com/richardwilkes/gcs_master_library>
+- **Clone URL:** `{REPO_URL}`
+- **Branch:** `{BRANCH}`
+- **Pinned commit:** `{PINNED_REF}`
+- **Synced (UTC):** {synced}
+- **Catalog files vendored:** {file_count}
+
+### Per-category file counts
+
+{count_lines}
+
+## Attribution & licensing
+
+- **Data = facts.** The vendored `.skl` / `.adq` / `.spl` / `.eqp` files are GURPS
+  Character Sheet (GCS) JSON. The *facts* they encode — names, governing
+  attributes, difficulty codes, point costs, page references, and mechanical
+  relations (defaults, prerequisites, casting costs, damage codes, etc.) — are
+  used under the **Steve Jackson Games Online Policy**. GURPS is a trademark of
+  Steve Jackson Games, used under that policy; this project is not affiliated
+  with or endorsed by Steve Jackson Games.
+- **Code / compilation © Richard Wilkes**, licensed under the **Mozilla Public
+  License, Version 2.0 (MPL-2.0)**. The upstream license text is vendored
+  verbatim alongside this file as `LICENSE`.
+
+## Updating
+
+To ingest upstream changes, bump `PINNED_REF` (and `BRANCH` if it moves) in
+`tools/sync_gcs_library.py`, then re-run:
+
+```sh
+uv run python tools/sync_gcs_library.py
+```
+
+Verify the result with:
+
+```sh
+uv run python tools/sync_gcs_library.py --check
+```
+"""
+    VENDOR_PROVENANCE.write_text(content, encoding="utf-8")
+
+
+def _category_counts() -> dict[str, int]:
+    counts = {cat: 0 for cat in CATEGORY_EXTENSIONS}
+    if not VENDOR_LIBRARY.is_dir():
+        return counts
+    for cat, ext in CATEGORY_EXTENSIONS.items():
+        counts[cat] = sum(
+            1
+            for p in VENDOR_LIBRARY.rglob(f"*{ext}")
+            if p.is_file()
+        )
+    return counts
+
+
+def _book_folders() -> list[str]:
+    if not VENDOR_LIBRARY.is_dir():
+        return []
+    return sorted(p.name for p in VENDOR_LIBRARY.iterdir() if p.is_dir())
+
+
+def _remote_head_sha(branch: str) -> str | None:
+    """Tip SHA of ``branch`` upstream, or None if that head is not there.
+
+    ``ls-remote`` exits 0 with empty output for an absent ref, so a clean exit
+    is not by itself evidence the branch exists.
+    """
+    proc = _git(["ls-remote", "--heads", REPO_URL, branch])
+    if proc.returncode != 0:
+        return None
+    first = proc.stdout.strip().split("\n")[0].strip()
+    if not first:
+        return None
+    return first.split("\t")[0].split()[0]
+
+
+def _pinned_ref_is_fetchable() -> bool:
+    """Can upstream still serve the exact commit we vendor from?
+
+    A branch rename can no longer break vendoring, but an upstream force-push
+    can orphan the pinned commit and GC it — and that failure would surface at
+    deploy time, which is the escape this rung exists to prevent.
+
+    Blob-filtered so the probe stays affordable as a standing check: fetching
+    this commit whole is ~201 MB, without blobs it is ~1 MB. Reachability of the
+    commit is the question; the blobs are not in doubt if the commit resolves.
+    """
+    with tempfile.TemporaryDirectory(prefix="gcs_pin_probe_") as tmp:
+        probe = Path(tmp) / "probe"
+        probe.mkdir(parents=True, exist_ok=True)
+        if _git(["init", "-q", "."], cwd=probe).returncode != 0:
+            return False
+        if _git(["remote", "add", "origin", REPO_URL], cwd=probe).returncode != 0:
+            return False
+        fetched = _git(
+            ["fetch", "--depth", "1", "--filter=blob:none", "origin", PINNED_REF],
+            cwd=probe,
+        )
+        return fetched.returncode == 0
+
+
+def cmd_verify_upstream() -> int:
+    """Standing live rung: is the vendoring source still there?
+
+    Exit 0 = the pin is fetchable (a branch rename is reported as drift but does
+    not fail). Exit 1 = the pin is gone, and vendoring is broken for every
+    deploy and container build until the pin is bumped.
+    """
+    print(f"Upstream:       {REPO_URL}")
+    print(f"Pinned ref:     {PINNED_REF}")
+
+    head = _remote_head_sha(BRANCH)
+    if head is None:
+        # Exactly the 2026-07-21 shape (master -> main), now harmless to the
+        # fetch but it silently rots the branch line in PROVENANCE.md.
+        print(
+            f"Branch:         DRIFT - upstream has no head named {BRANCH!r}. "
+            f"The fetch is keyed on the pinned SHA so vendoring still works, "
+            f"but PROVENANCE.md claims this branch. Bump BRANCH when you next "
+            f"move the pin."
+        )
+    else:
+        print(f"Branch:         {BRANCH} @ {head}")
+        if head != PINNED_REF:
+            print("                (pin is behind the branch tip - expected)")
+
+    if not _pinned_ref_is_fetchable():
+        print(
+            f"Pin:            UNREACHABLE - upstream no longer serves "
+            f"{PINNED_REF}.\n"
+            f"                Vendoring is broken for every deploy and image "
+            f"build until PINNED_REF is bumped to a commit upstream still has.",
+            file=sys.stderr,
+        )
+        return 1
+
+    print("Pin:            fetchable")
+    return 0
+
+
+def cmd_sync() -> int:
+    with tempfile.TemporaryDirectory(prefix="gcs_master_library_") as tmp:
+        clone_dir = Path(tmp) / "repo"
+        _clone_pinned(clone_dir)
+
+        print("Copying catalog files ...", flush=True)
+        file_count = _copy_library(clone_dir)
+        print(f"  copied {file_count} catalog file(s)", flush=True)
+
+        print("Copying LICENSE ...", flush=True)
+        _copy_license(clone_dir)
+
+    print("Writing PROVENANCE.md ...", flush=True)
+    _write_provenance(file_count)
+
+    print("\nDone. Vendored snapshot summary:", flush=True)
+    return _print_check()
+
+
+def cmd_check() -> int:
+    return _print_check()
+
+
+def _print_check() -> int:
+    print(f"Vendor root:    {VENDOR_ROOT}")
+    print(f"Pinned ref:     {PINNED_REF}")
+
+    if not VENDOR_LIBRARY.is_dir():
+        print("Status:         NOT VENDORED (Library/ missing)")
+        print("Run:            uv run python tools/sync_gcs_library.py")
+        return 1
+
+    counts = _category_counts()
+    books = _book_folders()
+    total = sum(counts.values())
+
+    print(f"LICENSE:        {'present' if VENDOR_LICENSE.is_file() else 'MISSING'}")
+    print(
+        f"PROVENANCE.md:  "
+        f"{'present' if VENDOR_PROVENANCE.is_file() else 'MISSING'}"
+    )
+    print(f"Book folders:   {len(books)}")
+    print("Per-category file counts:")
+    for cat, ext in CATEGORY_EXTENSIONS.items():
+        print(f"  {cat:<12} ({ext}): {counts[cat]}")
+    print(f"Total catalog files: {total}")
+
+    # empty skills category means the vendor ran but produced nothing useful
+    return 0 if counts.get("skills", 0) > 0 else 1
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="sync_gcs_library",
+        description=(
+            "Vendor the pinned GCS master library snapshot into "
+            "gurps_bot/data/gcs_library/."
+        ),
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Dry run: verify vendored dir + print per-category counts (no network).",
+    )
+    parser.add_argument(
+        "--verify-upstream",
+        action="store_true",
+        help=(
+            "Live smoke: confirm upstream still serves the pinned commit. "
+            "Touches the network, never writes to the vendored tree."
+        ),
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        if args.verify_upstream:
+            return cmd_verify_upstream()
+        if args.check:
+            return cmd_check()
+        return cmd_sync()
+    except Exception as exc:  # surface a clean failure for the CLI/test caller
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

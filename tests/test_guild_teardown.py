@@ -1,0 +1,274 @@
+"""Leaving a guild must take that guild's data with it.
+
+PRIVACY.md tells users "kicking the bot from a server deletes that server's
+data automatically", and that sentence is the kind a verification review reads
+closely. It was not quite true: `campaign_settings` was added months after
+`cleanup_guild_data` and never added to it, so a kick and re-invite silently
+restored house rules the new occupants never chose. The bot has already been
+kicked and re-invited once, during the 2026-07-25 rename.
+
+The failure was not the missing call — it was that the set of guild-scoped
+tables lived in a docstring and in whoever last edited the function. So the
+first test here derives that set from the model metadata: adding a table with a
+`guild_id` column fails it until the author either purges the table or records
+why it survives.
+"""
+
+from __future__ import annotations
+
+import pytest_asyncio
+from sqlalchemy import func, select
+
+# Imported for their side effect: each module registers its tables on the
+# shared metadata, and a table that is not imported is not inspectable.
+from gurps_bot.db import crafting as _crafting  # noqa: F401
+from gurps_bot.db import notes as _notes  # noqa: F401
+from gurps_bot.db import study as _study  # noqa: F401
+from gurps_bot.db import timers as _timers  # noqa: F401
+from gurps_bot.db import wealth as _wealth  # noqa: F401
+from gurps_bot.db.engine import (
+    dispose_engine,
+    get_session_factory,
+    init_db,
+    init_engine,
+)
+from gurps_bot.db.models import ActiveCharacter, Base, CampaignSettings, Character
+from gurps_bot.db.notes import Note
+from gurps_bot.db.timers import Timer
+from gurps_bot.services.admin import cleanup_guild_data
+from gurps_bot.services.combat import add_npc_combatant, start_combat
+from gurps_bot.services.crafting import record_attempt, start_project
+
+GUILD = 555_000
+OTHER_GUILD = 555_001
+USER = 42
+
+#: Tables carrying a guild_id that `cleanup_guild_data` is expected to clear.
+#: Deliberately a literal: the test below compares it against what the metadata
+#: actually contains, so this list going stale is itself the failure.
+EXPECTED_GUILD_SCOPED = {
+    "active_characters",
+    "campaign_settings",
+    "combats",
+    "crafting_projects",
+    "notes",
+    "timers",
+}
+
+
+@pytest_asyncio.fixture
+async def session_factory(tmp_path):
+    db_path = tmp_path / "teardown.db"
+    init_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    await init_db()
+    yield get_session_factory()
+    await dispose_engine()
+
+
+def _guild_scoped_tables() -> set[str]:
+    return {
+        t.name
+        for t in Base.metadata.tables.values()
+        if "guild_id" in t.columns.keys()
+    }
+
+
+class TestTheSetIsNotKeptInSomeonesHead:
+    def test_no_unhandled_guild_scoped_table_exists(self):
+        found = _guild_scoped_tables()
+        assert found == EXPECTED_GUILD_SCOPED, (
+            "the set of guild-scoped tables changed.\n"
+            f"  in metadata : {sorted(found)}\n"
+            f"  expected    : {sorted(EXPECTED_GUILD_SCOPED)}\n"
+            "If you added a table with a guild_id, purge it in "
+            "services/admin.cleanup_guild_data and add it here. If it is "
+            "deliberately kept when the bot leaves, add it here with a comment "
+            "saying why — PRIVACY.md promises the server's data is deleted."
+        )
+
+
+class TestLeavingAGuildClearsIt:
+    async def _seed(self, session_factory, guild_id: int) -> None:
+        async with session_factory() as s:
+            char = Character(discord_user_id=USER, name=f"Hero{guild_id}")
+            s.add(char)
+            await s.flush()
+            s.add(ActiveCharacter(
+                discord_user_id=USER, guild_id=guild_id, character_id=char.id
+            ))
+            s.add(CampaignSettings(guild_id=guild_id, rule_of_14=False))
+            s.add(Note(
+                discord_user_id=USER, guild_id=guild_id, channel_id=1,
+                title="t", body="b",
+            ))
+            s.add(Timer(
+                guild_id=guild_id, channel_id=1, label="n",
+                total=3, remaining=3, unit="rounds",
+            ))
+            combat = await start_combat(s, guild_id, 1, USER)
+            await add_npc_combatant(
+                s, combat, name="M", basic_speed=5.0, hp=10, fp=10, ht=10
+            )
+            # Seeded with a charge, not bare: the ledger is a child table with
+            # no guild_id of its own, so purging only the parent would leave it
+            # orphaned and this test would never notice.
+            project = await start_project(
+                s,
+                discord_user_id=USER,
+                guild_id=guild_id,
+                name=f"engine{guild_id}",
+                complexity="average",
+                skill=14,
+            )
+            await record_attempt(s, project, amount=100, outcome="failure")
+            await s.commit()
+
+    async def _rows_for(self, session_factory, guild_id: int) -> dict[str, int]:
+        counts = {}
+        async with session_factory() as s:
+            for name in sorted(EXPECTED_GUILD_SCOPED):
+                table = Base.metadata.tables[name]
+                counts[name] = await s.scalar(
+                    select(func.count()).select_from(table).where(
+                        table.c.guild_id == guild_id
+                    )
+                )
+        return counts
+
+    async def test_every_guild_scoped_table_is_emptied(self, session_factory):
+        await self._seed(session_factory, GUILD)
+        assert all(v > 0 for v in (await self._rows_for(session_factory, GUILD)).values())
+
+        async with session_factory() as s:
+            await cleanup_guild_data(s, GUILD)
+            await s.commit()
+
+        remaining = await self._rows_for(session_factory, GUILD)
+        assert remaining == dict.fromkeys(EXPECTED_GUILD_SCOPED, 0), (
+            f"rows survived the teardown: "
+            f"{ {k: v for k, v in remaining.items() if v} }"
+        )
+
+    async def test_house_rules_do_not_survive_a_kick_and_reinvite(
+        self, session_factory
+    ):
+        """The concrete bug: a re-invited bot must not restore old house rules."""
+        from gurps_bot.services.campaign import get_campaign_rules
+
+        await self._seed(session_factory, GUILD)  # rule_of_14 turned OFF
+        async with session_factory() as s:
+            assert (await get_campaign_rules(s, GUILD)).rule_of_14 is False
+
+        async with session_factory() as s:
+            await cleanup_guild_data(s, GUILD)
+            await s.commit()
+
+        async with session_factory() as s:
+            # Back to the RAW default, not the departed guild's setting.
+            assert (await get_campaign_rules(s, GUILD)).rule_of_14 is True
+
+    async def test_it_does_not_touch_another_guild(self, session_factory):
+        await self._seed(session_factory, GUILD)
+        await self._seed(session_factory, OTHER_GUILD)
+
+        async with session_factory() as s:
+            await cleanup_guild_data(s, GUILD)
+            await s.commit()
+
+        survivors = await self._rows_for(session_factory, OTHER_GUILD)
+        assert all(v > 0 for v in survivors.values()), (
+            f"teardown reached another guild: {survivors}"
+        )
+
+    async def test_user_scoped_data_survives(self, session_factory):
+        """Characters, macros, study logs and wealth are the user's, not the
+        guild's — PRIVACY.md says the server's data goes, not the player's."""
+        await self._seed(session_factory, GUILD)
+        async with session_factory() as s:
+            await cleanup_guild_data(s, GUILD)
+            await s.commit()
+
+        async with session_factory() as s:
+            chars = await s.scalar(
+                select(func.count(Character.id)).where(
+                    Character.discord_user_id == USER
+                )
+            )
+        assert chars > 0, "leaving a guild deleted the player's character"
+
+
+class TestADepartureWhileOfflineIsCaughtAtStartup:
+    """on_guild_remove only fires if the bot is connected when it is removed.
+    Discord does not replay GUILD_DELETE after a fresh IDENTIFY — a guild that
+    removed the bot during downtime is simply absent from READY — so its data
+    stayed forever, contrary to PRIVACY.md and /legal."""
+
+    async def test_a_guild_the_bot_is_no_longer_in_is_purged(self, session_factory):
+        from gurps_bot.services.admin import reconcile_departed_guilds
+
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        await seeder._seed(session_factory, OTHER_GUILD)
+
+        async with session_factory() as s:
+            purged = await reconcile_departed_guilds(s, present={OTHER_GUILD})
+            await s.commit()
+
+        assert purged == [GUILD]
+        assert not any((await seeder._rows_for(session_factory, GUILD)).values())
+        assert all((await seeder._rows_for(session_factory, OTHER_GUILD)).values())
+
+    async def test_a_guild_with_stored_data_is_found(self, session_factory):
+        """The scan reads the same metadata-derived table set pinned above."""
+        from gurps_bot.services.admin import stored_guild_ids
+
+        assert _guild_scoped_tables() == EXPECTED_GUILD_SCOPED
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        async with session_factory() as s:
+            assert GUILD in await stored_guild_ids(s)
+
+    async def test_an_empty_guild_list_purges_nothing(self, session_factory):
+        """Zero guilds at startup is far likelier a cache that has not filled
+        than a bot removed from everywhere; wiping every server's data on that
+        reading is not a trade worth making."""
+        from gurps_bot.services.admin import reconcile_departed_guilds
+
+        seeder = TestLeavingAGuildClearsIt()
+        await seeder._seed(session_factory, GUILD)
+        async with session_factory() as s:
+            assert await reconcile_departed_guilds(s, present=set()) == []
+        assert all((await seeder._rows_for(session_factory, GUILD)).values())
+
+
+class TestTheReconcileRunsOnceAtStartup:
+    async def test_first_ready_reconciles_against_the_bots_guilds(self, monkeypatch):
+        from contextlib import asynccontextmanager
+        from unittest.mock import AsyncMock, MagicMock
+
+        from gurps_bot.cogs import admin as admin_cog
+
+        calls = []
+
+        async def fake_reconcile(session, present):
+            calls.append(present)
+            return []
+
+        monkeypatch.setattr(admin_cog, "reconcile_departed_guilds", fake_reconcile)
+        session = MagicMock()
+        session.commit = AsyncMock()
+
+        @asynccontextmanager
+        async def db():
+            yield session
+
+        bot = MagicMock()
+        bot.db = db
+        bot.guilds = [MagicMock(id=1), MagicMock(id=2)]
+        cog = admin_cog.AdminCog(bot)
+
+        await cog.on_ready()
+        await cog.on_ready()  # a reconnect fires it again; the scan must not
+
+        assert calls == [{1, 2}]
+        session.commit.assert_awaited_once()

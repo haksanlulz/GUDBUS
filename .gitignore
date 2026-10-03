@@ -1,0 +1,55 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Database (WAL/SHM/journal sidecars hold uncommitted user data too)
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Local DB snapshots. Versioned here rather than only in .git/info/exclude, so a
+# fresh clone inherits the protection instead of losing it with the exclude file.
+backups/
+
+# Vendored GCS master-library data — reproduce via tools/sync_gcs_library.py (pin = PINNED_REF in that script)
+gurps_bot/data/gcs_library/
+
+# IDE
+.vscode/
+.idea/
+
+# Test
+.pytest_cache/
+.coverage
+htmlcov/
+.ruff_cache/
+.mypy_cache/
+
+# Logs, rotated copies included
+*.log
+*.log.*
+
+# Local env / tooling
+.venv/
+
+# Brand art is generated, not shipped. The icon and banner are Discord app
+# assets uploaded by hand in the dev portal — they are not part of what the bot
+# runs, so the PNGs stay out of the repo. The generators in tools/ are tracked,
+# which is what makes the marks reproducible.
+/icon.png
+/banner.png
+
+# Generated on demand by tools/prose_inventory.py. Deliberately not tracked:
+# a checked-in copy is a second thing to keep true, and it goes stale the moment
+# a command description changes.
+prose-inventory.md
