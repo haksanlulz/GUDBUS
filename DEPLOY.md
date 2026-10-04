@@ -18,7 +18,7 @@ on every start. Multi-arch: builds on x86-64 and ARM (Oracle A1, Pi).
 git clone https://github.com/haksanlulz/GUDBUS.git /opt/gurps-bot
 cd /opt/gurps-bot
 cp .env.example .env
-nano .env                 # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
+nano .env                 # set DISCORD_TOKEN (+ BOT_SUPPORT_URL if others use it)
 
 docker compose up -d --build
 docker compose logs -f
@@ -185,7 +185,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 source ~/.bashrc
 cd /opt/gurps-bot
 cp .env.example .env
-nano .env                 # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
+nano .env                 # set DISCORD_TOKEN (+ BOT_SUPPORT_URL if others use it)
 
 ./deploy/deploy.sh        # deps, re-vendor GCS data, DB create/migrations, smoke test
 
@@ -205,11 +205,13 @@ nothing to run). If registrations are ever missing, mention the bot: `@<bot> syn
 |---|---|---|
 | `DISCORD_TOKEN` | yes | From the Discord Developer Portal. |
 | `DATABASE_URL` | no | Defaults to `sqlite+aiosqlite:///data/gurps_bot.db`. |
-| `BOT_AUTHOR_LEGAL_NAME` | for `/legal` | Name in the SJG game-aid notice. A handle is fine. Warns at startup if unset. |
+| `BOT_AUTHOR_NAME` | no | Author credited in the SJG game-aid notice: whoever wrote the code, not the host. Defaults to the project's author. A consistent handle or pen name is fine. The old name `BOT_AUTHOR_LEGAL_NAME` is still read. |
+| `BOT_OPERATOR_NAME` | no | Shown in `/legal` as "Hosted by ...". |
 | `AUTO_SYNC` | no | Default on: global command registration at startup, only when the command set changed. `0` disables. |
 | `DEFER_INTERACTIONS` | no | Default **on**. Combat commands acknowledge Discord before touching the DB. Discord kills an un-deferred interaction at 3s while SQLite waits up to 5s for a write lock, so a contended write can outlive its token and report "did not respond" on a command that worked — deferring moves that ceiling to 15 min, at the cost of a "thinking…" state on those commands. `0` turns it off, which is reasonable on a single-table instance on a fast disk: a combat write takes ~10 ms there and the 3s wall is unreachable. |
 | `BOT_INVITE_URL` | no | OAuth2 invite link. |
-| `BOT_SUPPORT_URL` | no | Support/contact link for `/legal`. |
+| `BOT_SUPPORT_URL` | if others use it | Contact link in `/legal`: how users reach you about their data. Warns at startup if unset. |
+| `BOT_PRIVACY_URL`, `BOT_TERMS_URL` | no | Where `/legal` links the privacy policy and terms. Default: this project's `PRIVACY.md` and `TERMS.md`. |
 
 ## Discord portal
 
@@ -264,3 +266,9 @@ Copy `backups/` somewhere off the box now and then.
 
 Free under the SJ Games Online Policy: facts-only reference data, verbatim notice
 in `/legal`. The bot takes no payments or donations. Don't paywall it.
+
+If you host an instance other people use, you are the operator of their data:
+set `BOT_SUPPORT_URL` so they can reach you, and publish a privacy policy and
+terms that match your instance (or keep this project's, via `BOT_PRIVACY_URL`
+and `BOT_TERMS_URL`, if you run it unchanged). Discord's Developer Portal asks
+for both URLs under General Information; verification requires them.

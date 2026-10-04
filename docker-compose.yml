@@ -1,6 +1,6 @@
 # One-command deploy for the GURPS bot.
 #
-#   cp .env.example .env      # set DISCORD_TOKEN + BOT_AUTHOR_LEGAL_NAME
+#   cp .env.example .env      # set DISCORD_TOKEN
 #   docker compose up -d --build
 #   docker compose logs -f
 #
@@ -39,12 +39,15 @@ services:
       DISCORD_TOKEN: ${DISCORD_TOKEN:?set DISCORD_TOKEN in .env (copy .env.example)}
       DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:///data/gurps_bot.db}
       # --- Legal / about (/legal, /about) ----------------------------------
-      # Also required. The SJG Online Policy notice /legal renders names the
-      # author; unset, it renders a placeholder where the name belongs and the
-      # notice is not policy-compliant. Fail here rather than ship that.
-      BOT_AUTHOR_LEGAL_NAME: ${BOT_AUTHOR_LEGAL_NAME:?set BOT_AUTHOR_LEGAL_NAME in .env — /legal must name the author to satisfy the SJG Online Policy}
+      # All optional. The SJG notice credits the code's author and defaults to
+      # the project's; set BOT_OPERATOR_NAME to add "Hosted by ..." for your
+      # instance, and BOT_SUPPORT_URL so users can reach you.
+      BOT_AUTHOR_NAME: ${BOT_AUTHOR_NAME:-}
+      BOT_OPERATOR_NAME: ${BOT_OPERATOR_NAME:-}
       BOT_INVITE_URL: ${BOT_INVITE_URL:-}
       BOT_SUPPORT_URL: ${BOT_SUPPORT_URL:-}
+      BOT_PRIVACY_URL: ${BOT_PRIVACY_URL:-}
+      BOT_TERMS_URL: ${BOT_TERMS_URL:-}
       # --- Command sync (optional) -----------------------------------------
       # Registration is startup behaviour: global, and only when the command
       # set actually changed. 0 disables it.

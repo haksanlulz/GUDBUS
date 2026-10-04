@@ -54,9 +54,8 @@ services:
     #   install -d -m 700 /mnt/user/appdata/gudbus-dev
     #   install -m 600 /dev/null /mnt/user/appdata/gudbus-dev/gudbus-dev.env
     #
-    # It needs at minimum DISCORD_TOKEN and BOT_AUTHOR_LEGAL_NAME. Both fail
-    # closed in-container if missing — the entrypoint exits 1 on the name, and
-    # the bot raises on the token — so there is no silent half-configured boot.
+    # It needs at minimum DISCORD_TOKEN, which fails closed in-container if
+    # missing (the bot raises), so there is no silent half-configured boot.
     # There is deliberately no `${VAR:?}` guard here: those interpolate from a
     # .env in the project directory, which is exactly the file we are not
     # keeping on the flash.

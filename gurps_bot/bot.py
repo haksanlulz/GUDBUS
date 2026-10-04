@@ -39,6 +39,7 @@ EXTENSIONS = [
     "gurps_bot.cogs.macros",
     "gurps_bot.cogs.campaign",
     "gurps_bot.cogs.crafting",
+    "gurps_bot.cogs.privacy",
     # Last: it reads the loaded tree for command descriptions, and loading it
     # last is not required (it reads at invoke time) but keeps the order honest
     # about what it depends on.
@@ -119,13 +120,13 @@ class GURPSBot(commands.Bot):
         from gurps_bot.ui.tracker import get_tracker_view
         self.add_view(get_tracker_view())
 
-        # SJG Online Policy: /legal + /about need a real author name
+        # Users reach the operator through /legal's contact link: privacy
+        # questions, and deletion requests the self-service command can't cover.
         import os
-        if not os.getenv("BOT_AUTHOR_LEGAL_NAME"):
+        if not (os.getenv("BOT_SUPPORT_URL") or "").strip():
             log.warning(
-                "BOT_AUTHOR_LEGAL_NAME is not set — /legal and /about will show a "
-                "PLACEHOLDER instead of a legal name, which is NOT compliant with "
-                "the SJG Online Policy. Set it in .env before any public use."
+                "BOT_SUPPORT_URL is not set — /legal shows no contact for this "
+                "instance. Anyone hosting the bot for others should set one."
             )
 
         if AUTO_SYNC:

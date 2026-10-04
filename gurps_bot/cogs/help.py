@@ -108,6 +108,7 @@ TOPICS: dict[str, tuple[str, str, tuple[str, ...]]] = {
 UNTOPICED: dict[str, str] = {
     "about": "shown on the /help landing page itself",
     "legal": "shown on the /help landing page itself",
+    "privacy delete-my-data": "shown on the /help landing page itself",
     "status": "diagnostics, not a player-facing feature",
     "sync": "owner-only recovery tool",
     "help": "this command",
@@ -177,7 +178,7 @@ class HelpCog(commands.Cog):
                 ),
                 inline=False,
             )
-            embed.set_footer(text="/about · /legal")
+            embed.set_footer(text="/about · /legal · /privacy delete-my-data")
             await respond(interaction, embed=embed, ephemeral=True)
             return
 
