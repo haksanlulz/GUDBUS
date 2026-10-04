@@ -75,8 +75,9 @@ def build_legal_embed(
         value=(
             "Reference data is sourced from the GURPS Character Sheet master "
             "library ([richardwilkes/gcs_master_library]"
-            "(https://github.com/richardwilkes/gcs_master_library)) by Richard "
-            "Wilkes, licensed MPL-2.0. GCS: [gurpscharactersheet.com]"
+            "(https://github.com/richardwilkes/gcs_master_library)), compiled by "
+            "Richard A. Wilkes and contributors, licensed MPL-2.0. GCS: "
+            "[gurpscharactersheet.com]"
             "(https://gurpscharactersheet.com)."
         ),
         inline=False,

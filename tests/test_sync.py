@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib.util
 import inspect
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -307,3 +308,69 @@ class TestGitCallsAreBounded:
             f"Dockerfile default {default} != _GIT_TIMEOUT_DEFAULT "
             f"{sync._GIT_TIMEOUT_DEFAULT}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Free-text fields are stripped at sync, and the catalog cannot tell.
+# ---------------------------------------------------------------------------
+_MINI = Path(__file__).resolve().parent / "fixtures" / "gcs_mini"
+
+
+def _strip_tree(src: Path, dest: Path) -> None:
+    for path in src.rglob("*"):
+        if path.is_file() and path.suffix.lower() in sync.VENDOR_EXTENSIONS:
+            out = dest / path.relative_to(src)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            sync._vendor_file(path, out)
+
+
+def _keys(node) -> set[str]:
+    if isinstance(node, dict):
+        return set(node) | {k for v in node.values() for k in _keys(v)}
+    if isinstance(node, list):
+        return {k for v in node for k in _keys(v)}
+    return set()
+
+
+class TestProseStripping:
+    def test_strip_reaches_nested_rows(self):
+        data = {"rows": [{"name": "A", "local_notes": "x", "children": [
+            {"name": "B", "usage_notes": "y", "reference": "B1"},
+        ]}]}
+        out = sync._strip_prose(data)
+        assert out == {"rows": [{"name": "A", "children": [{"name": "B", "reference": "B1"}]}]}
+
+    def test_the_fixture_carries_prose_to_strip(self):
+        found = set()
+        for path in _MINI.rglob("*"):
+            if path.suffix.lower() in sync.VENDOR_EXTENSIONS:
+                found |= _keys(json.loads(path.read_text(encoding="utf-8")))
+        assert found & sync.PROSE_KEYS, "fixture has no prose fields; the test below proves nothing"
+
+    def test_stripped_files_hold_no_prose(self, tmp_path):
+        _strip_tree(_MINI, tmp_path)
+        for path in tmp_path.rglob("*"):
+            if path.is_file():
+                keys = _keys(json.loads(path.read_text(encoding="utf-8")))
+                assert not keys & sync.PROSE_KEYS, (path.name, keys & sync.PROSE_KEYS)
+
+    def test_the_catalog_is_identical_with_prose_stripped(self, tmp_path):
+        from gurps_bot.gcs.library import load_library
+
+        _strip_tree(_MINI, tmp_path)
+        original = load_library(_MINI)
+        stripped = load_library(tmp_path)
+        assert sum(len(v) for v in original.values()) > 0
+        assert stripped == original
+
+    def test_vendored_snapshot_holds_no_prose(self):
+        lib = sync.VENDOR_LIBRARY
+        if not lib.is_dir():
+            pytest.skip("snapshot not vendored yet (run tools/sync_gcs_library.py)")
+        leaks = []
+        for path in lib.rglob("*"):
+            if path.is_file() and path.suffix.lower() in sync.VENDOR_EXTENSIONS:
+                hit = _keys(json.loads(path.read_text(encoding="utf-8"))) & sync.PROSE_KEYS
+                if hit:
+                    leaks.append(f"{path.relative_to(lib)}: {sorted(hit)}")
+        assert not leaks, "prose fields in the vendored snapshot; re-run the sync:\n" + "\n".join(leaks[:10])
