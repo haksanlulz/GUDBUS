@@ -1,215 +1,134 @@
-"""every number on the GM screen is imported from the module that owns it — it retypes nothing"""
+"""/screen is an index: it names the command that answers each row and the page
+to read, and lists option names read from their owners — never a table's values
+in book order."""
 
 from __future__ import annotations
 
-import discord
+import re
 
-from gurps_bot.mechanics import encumbrance as enc
-from gurps_bot.mechanics import hiking
-from gurps_bot.mechanics import speed_range as sr
+import discord
+import pytest_asyncio
+
+from gurps_bot.cogs.help import _tree_descriptions
 from gurps_bot.mechanics.combat_constants import STATUS_ICONS, Maneuver, StatusEffect
-from gurps_bot.mechanics.reaction import REACTION_BANDS
+from gurps_bot.mechanics.hit_location import deliberate_locations, gross_targeting_reference
+from gurps_bot.mechanics.posture import POSTURES
 from gurps_bot.mechanics.tables import CRITICAL_TABLES, FRIGHT_TABLE_PAGES
 from gurps_bot.ui import screen
 
 _EMBED_FIELD_LIMIT = 1024
 
+#: A signed modifier ("+2", "-4") not glued to a word or a range ("4-40").
+_SIGNED_VALUE = re.compile(r"(?<![\w/])[+\-−]\d")
+_COMMAND = re.compile(r"`(/[a-z][a-z0-9-]*(?: [a-z][a-z0-9-]*)?)`")
 
-class TestSourcing:
-    def test_maneuvers_from_enum(self):
-        assert screen.maneuver_names() == [m.value for m in Maneuver]
 
-    def test_status_effects_cover_enum_with_icons(self):
-        rows = screen.status_effects()
-        assert [r[0] for r in rows] == [s.value for s in StatusEffect]
-        for s in StatusEffect:
-            assert (s.value, STATUS_ICONS[s]) in rows
+def _text(page: discord.Embed) -> str:
+    parts = [page.title or "", page.description or ""]
+    for f in page.fields:
+        parts += [f.name or "", f.value or ""]
+    if page.footer and page.footer.text:
+        parts.append(page.footer.text)
+    return "\n".join(parts)
 
-    def test_encumbrance_reference_sources_move_multiplier(self):
-        rows = {r[0]: r for r in screen.encumbrance_reference()}
-        # light band: move x0.8, dodge -1, <= 2xBL
-        name, move_mult, dodge_pen, bl_mult = rows["Light"]
-        assert move_mult == enc.move_multiplier(1)
-        assert dodge_pen == 1
-        assert bl_mult == 2.0
 
-    def test_terrain_reference_sources_mult(self):
-        rows = dict(screen.terrain_reference())
-        assert rows["Average"] == hiking.Terrain.AVERAGE.mult
-        assert rows["Good"] == hiking.Terrain.GOOD.mult
+@pytest_asyncio.fixture
+async def tree():
+    from tests.test_extensions_load import loaded_bot
 
-    def test_weather_reference_sources_mult(self):
-        rows = dict(screen.weather_reference())
-        assert rows["Rain"] == hiking.Weather.RAIN.mult
+    async with loaded_bot() as bot:
+        yield bot.tree
 
-    def test_speed_range_reference_matches_function(self):
-        ref = screen.speed_range_reference()
-        assert (2.0, 0) in ref
-        for dist, penalty in ref:
-            assert penalty == sr.speed_range_penalty(dist)
 
-    def test_size_reference_matches_function(self):
-        ref = screen.size_reference()
-        assert (2.0, 0) in ref
-        for length, sm in ref:
-            assert sm == sr.size_modifier(length)
+class TestNoTables:
+    def test_no_page_carries_a_modifier_value(self):
+        for page in screen.build_screen_pages():
+            hits = _SIGNED_VALUE.findall(_text(page))
+            assert not hits, (page.title, hits)
 
-    def test_reaction_reference_names_and_ranges(self):
-        rows = screen.reaction_reference()
-        assert [r[0] for r in rows] == [b.name for b in REACTION_BANDS]
-        rng = dict(rows)
-        assert rng["Neutral"] == "10-12"
-        assert rng["Disastrous"].startswith("≤")
-        assert rng["Excellent"].startswith("≥")
+    def test_the_value_check_can_fail(self):
+        planted = discord.Embed(title="t", description="Kneeling Att -2 · Def -2")
+        assert _SIGNED_VALUE.findall(_text(planted))
+
+    def test_no_gm_screen_branding(self):
+        for page in screen.build_screen_pages():
+            assert "GM Screen" not in _text(page)
 
     def test_critical_tables_are_cited_not_reproduced(self):
-        page = screen.rolls_page()
-        crit = next(f for f in page.fields if f.name.startswith("Critical"))
+        text = _text(screen.rolls_page())
         for t in CRITICAL_TABLES:
-            assert f"{t.name} ({t.page})" in crit.value
+            assert t.name in text and t.page in text
+
+
+class TestEveryCommandNamedExists:
+    async def test_pages_name_only_live_commands(self, tree):
+        live = {f"/{name}" for name in _tree_descriptions(tree)}
+        groups = {c.rsplit(" ", 1)[0] for c in live if " " in c}
+        named = set()
+        for page in screen.build_screen_pages():
+            named |= set(_COMMAND.findall(_text(page)))
+        assert named, "the pages name no commands"
+        assert not named - live - groups, sorted(named - live - groups)
+
+
+class TestNamesComeFromOwners:
+    def test_maneuvers(self):
+        assert screen.maneuver_names() == [m.value for m in Maneuver]
+
+    def test_status_effects(self):
+        assert [n for n, _ in screen.status_effects()] == [s.value for s in StatusEffect]
+        assert all(icon == STATUS_ICONS[StatusEffect(n)] for n, icon in screen.status_effects())
+
+    def test_postures(self):
+        assert screen.posture_names() == [p.name for p in POSTURES]
+
+    def test_deliberate_locations(self):
+        assert screen.deliberate_location_names() == [loc.name for loc in deliberate_locations()]
+
+    def test_body_parts(self):
+        assert screen.body_part_names() == [n for n, _, _ in gross_targeting_reference()]
+
+    def test_the_body_page_lists_them(self):
+        text = _text(screen.body_page())
+        for name in (*screen.posture_names(), *screen.deliberate_location_names()):
+            assert name in text, name
 
 
 class TestPages:
-    def test_build_returns_embeds_with_titles(self):
+    def test_build_returns_titled_embeds(self):
         pages = screen.build_screen_pages()
         assert len(pages) == len(screen.CATEGORIES)
-        for p in pages:
-            assert isinstance(p, discord.Embed)
-            assert p.title
+        assert all(p.title for p in pages)
 
     def test_every_field_within_discord_cap(self):
-        for p in screen.build_screen_pages():
-            for field in p.fields:
-                assert len(field.value) <= _EMBED_FIELD_LIMIT, field.name
+        for page in screen.build_screen_pages():
+            for f in page.fields:
+                assert len(f.value) <= _EMBED_FIELD_LIMIT, (page.title, f.name)
+
+    def test_no_page_field_is_silently_truncated(self):
+        for page in screen.build_screen_pages():
+            for f in page.fields:
+                assert "(truncated)" not in f.value, (page.title, f.name)
 
     def test_category_index_maps_to_valid_pages(self):
         pages = screen.build_screen_pages()
-        for cat in screen.CATEGORIES:
-            idx = screen.CATEGORY_INDEX[cat]
-            assert 0 <= idx < len(pages)
-
-    def test_no_page_field_is_silently_truncated(self):
-        # _cap keeps Discord happy but eats reference rows — a rules table that
-        # renders truncated is a data-loss bug, not a layout choice.
-        for p in screen.build_screen_pages():
-            for field in p.fields:
-                assert "…(truncated)" not in field.value, (p.title, field.name)
-
-
-class TestCritsAndFrightPages:
-    def test_fright_page_cites_rather_than_reproduces(self):
-        # SJG Online Policy: no copied tables — the procedure and the page only.
-        assert screen.fright_page().fields == []
+        for cat, i in screen.CATEGORY_INDEX.items():
+            assert 0 <= i < len(pages), cat
 
     def test_screen_cog_choices_cover_every_category(self):
-        # The /screen category picker is hand-listed in the cog; a category
-        # without a Choice is unreachable except by paging.
         from gurps_bot.cogs.gmscreen import _CATEGORY_CHOICES
 
         assert {c.value for c in _CATEGORY_CHOICES} == set(screen.CATEGORIES)
 
-    def test_fright_page_describes_the_raw_procedure(self):
-        page = screen.fright_page()
-        desc = page.description or ""
-        # Will-based, Rule of 14, and the 3d+margin second roll — the old
-        # description said "Roll vs HT (or Will)" and keyed rows by margin.
+
+class TestFrightPage:
+    def test_cites_rather_than_reproduces(self):
+        assert screen.fright_page().fields == []
+
+    def test_describes_the_raw_procedure(self):
+        desc = screen.fright_page().description or ""
         assert "Will" in desc
         assert "14" in desc
         assert "HT" not in desc
         assert "3d" in desc and "margin" in desc
         assert FRIGHT_TABLE_PAGES in desc
-
-
-from gurps_bot.mechanics import damage
-from gurps_bot.mechanics.hit_location import deliberate_locations
-from gurps_bot.mechanics.posture import POSTURES, move_label
-
-
-class TestBodySourcing:
-    def test_posture_reference_reflects_owner(self):
-        rows = screen.posture_reference()
-        assert [r["name"] for r in rows] == [p.name for p in POSTURES]
-        by_name = {p.name: p for p in POSTURES}
-        for r in rows:
-            p = by_name[r["name"]]
-            assert r["attack"] == p.attack_penalty
-            assert r["defense"] == p.defense_modifier
-            assert r["ranged"] == p.ranged_to_hit_you
-            assert r["melee"] == p.melee_to_hit_you
-            # Move arrives pre-formatted, but still from the owner: the label
-            # rule lives in mechanics/posture.move_label, not in the renderer.
-            # Lying Down is a flat "1 yard/second" (B551) and has no fraction.
-            assert r["move"] == move_label(p)
-            assert r["effect"] == p.effect
-
-    def test_targeting_reference_reflects_owner_and_is_deliberate_only(self):
-        rows = screen.targeting_reference()
-        owned = {loc.name: loc for loc in deliberate_locations()}
-        assert {r["name"] for r in rows} == set(owned)
-        for r in rows:
-            loc = owned[r["name"]]
-            assert r["penalty"] == loc.penalty
-            assert r["effect"] == loc.effect
-
-    def test_targeting_reference_does_not_retype_random_table_numbers(self):
-        # deliberate-only rows are disjoint from the random table by construction
-        table_locs = {loc for _, loc, _ in damage.HIT_LOCATION_TABLE}
-        for r in screen.targeting_reference():
-            assert r["name"] not in table_locs, r["name"]
-
-    def test_eye_and_vitals_appear_on_body_targeting(self):
-        names = {r["name"] for r in screen.targeting_reference()}
-        assert "Eye" in names
-        assert "Vitals" in names
-
-    def test_gross_target_penalties_sourced_from_damage_table(self):
-        # gross aim penalties must equal damage.py's table, location-for-location
-        owner = {loc: pen for _rng, loc, pen in damage.HIT_LOCATION_TABLE}
-        shown = {g["name"]: g["penalty"] for g in screen.gross_target_reference()}
-        assert shown, "body page should list gross aim penalties"
-        for name, pen in shown.items():
-            assert pen == owner[name], name
-        # B552 anchors: catch a transcription flip even if both sides moved together
-        assert shown["Skull"] == -7
-        assert shown["Face"] == -5
-        assert shown["Torso"] == 0
-
-    def test_gross_targets_cover_every_random_table_location_once(self):
-        # sided rows (arm/leg span two 3d6 ranges) collapse to one entry per location
-        table_locs = {loc for _, loc, _ in damage.HIT_LOCATION_TABLE}
-        shown = [g["name"] for g in screen.gross_target_reference()]
-        assert sorted(set(shown)) == sorted(table_locs)
-        assert len(shown) == len(set(shown)), "a location was listed twice"
-
-
-class TestBodyPage:
-    def test_body_in_categories_and_index(self):
-        assert "body" in screen.CATEGORIES
-        assert "body" in screen.CATEGORY_INDEX
-        idx = screen.CATEGORY_INDEX["body"]
-        pages = screen.build_screen_pages()
-        assert 0 <= idx < len(pages)
-
-    def test_body_page_title_contains_body(self):
-        page = screen.body_page()
-        assert "Body" in page.title
-
-    def test_body_page_resolved_via_category_index(self):
-        pages = screen.build_screen_pages()
-        page = pages[screen.CATEGORY_INDEX["body"]]
-        assert "Body" in page.title
-
-    def test_body_page_fields_within_cap(self):
-        page = screen.body_page()
-        assert page.fields, "body page should have fields"
-        for f in page.fields:
-            assert len(f.value) <= _EMBED_FIELD_LIMIT, f.name
-
-    def test_body_page_mentions_a_posture_and_a_deliberate_location(self):
-        # guard against an empty-shell embed
-        page = screen.body_page()
-        blob = page.title + "\n" + "\n".join(
-            f.name + "\n" + f.value for f in page.fields
-        )
-        assert "Standing" in blob
-        assert "Eye" in blob

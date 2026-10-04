@@ -141,7 +141,7 @@ Every slash command the bot registers, by area. `/help` in Discord shows the sam
 
 | Command | Description |
 |---------|-------------|
-| `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction; page cites for crits and fright |
+| `/screen` | Quick reference: which command answers what, with page cites |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 
 ## Reference lookups
