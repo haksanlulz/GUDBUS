@@ -128,7 +128,7 @@ class TestAttribution:
     def test_gcs_master_library_credited(self):
         text = _full_text(_embed())
         assert "richardwilkes/gcs_master_library" in text
-        assert "Richard Wilkes" in text
+        assert "Richard A. Wilkes and contributors" in text
 
     def test_mpl_license_named(self):
         text = _full_text(_embed())

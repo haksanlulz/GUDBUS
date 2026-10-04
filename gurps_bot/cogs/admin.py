@@ -109,11 +109,8 @@ class AdminCog(commands.Cog):
 
         embed.set_footer(
             text=(
-                "GURPS is a trademark of Steve Jackson Games, and its rules and art "
-                "are copyrighted by Steve Jackson Games. All rights are reserved by "
-                "Steve Jackson Games. This game aid is not official and is not endorsed "
-                "by Steve Jackson Games. Released for free distribution under the "
-                "SJG Online Policy."
+                "Unofficial; not endorsed by Steve Jackson Games. GURPS is a "
+                "trademark of Steve Jackson Games. See /legal."
             )
         )
         # Ephemeral: /status is a diagnostic the caller runs for themselves, and
