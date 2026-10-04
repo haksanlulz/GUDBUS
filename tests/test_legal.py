@@ -36,13 +36,45 @@ def test_privacy_notice_discloses_combat_and_discord_ids():
     assert "server" in privacy.lower() and "channel" in privacy.lower()
 
 
-def test_unset_author_renders_loud_non_compliant_marker():
-    from gurps_bot.cogs.legal import _AUTHOR_PLACEHOLDER
-    assert "CONFIG REQUIRED" in _AUTHOR_PLACEHOLDER
-    assert "BOT_AUTHOR_LEGAL_NAME" in _AUTHOR_PLACEHOLDER
-    embed = build_legal_embed(author=_AUTHOR_PLACEHOLDER, invite_url=None, support_url=None)
-    text = "\n".join(f.value for f in embed.fields)
-    assert "not" in text.lower() and "compliant" in text.lower()
+class TestAuthorResolution:
+    """The notice credits the code's author. It defaults to the project's
+    handle, so an instance that sets nothing still names the right person."""
+
+    def test_defaults_to_the_project_handle(self, monkeypatch):
+        from gurps_bot.cogs.legal import DEFAULT_AUTHOR, resolve_author
+        monkeypatch.delenv("BOT_AUTHOR_NAME", raising=False)
+        monkeypatch.delenv("BOT_AUTHOR_LEGAL_NAME", raising=False)
+        assert resolve_author() == DEFAULT_AUTHOR == "haksanlulz"
+
+    def test_bot_author_name_wins(self, monkeypatch):
+        from gurps_bot.cogs.legal import resolve_author
+        monkeypatch.setenv("BOT_AUTHOR_NAME", "Pen Name")
+        monkeypatch.setenv("BOT_AUTHOR_LEGAL_NAME", "Old Name")
+        assert resolve_author() == "Pen Name"
+
+    def test_legacy_variable_still_honoured(self, monkeypatch):
+        from gurps_bot.cogs.legal import resolve_author
+        monkeypatch.delenv("BOT_AUTHOR_NAME", raising=False)
+        monkeypatch.setenv("BOT_AUTHOR_LEGAL_NAME", "Old Name")
+        assert resolve_author() == "Old Name"
+
+    def test_blank_values_fall_through_to_the_default(self, monkeypatch):
+        from gurps_bot.cogs.legal import DEFAULT_AUTHOR, resolve_author
+        monkeypatch.setenv("BOT_AUTHOR_NAME", "  ")
+        monkeypatch.setenv("BOT_AUTHOR_LEGAL_NAME", "")
+        assert resolve_author() == DEFAULT_AUTHOR
+
+
+class TestOperator:
+    def test_hosted_by_shown_when_set(self):
+        embed = build_legal_embed(
+            author=_AUTHOR, invite_url=None, support_url=None, operator="Table Host",
+        )
+        assert "Hosted by Table Host" in _full_text(embed)
+
+    def test_no_hosted_by_line_when_unset(self):
+        embed = build_legal_embed(author=_AUTHOR, invite_url=None, support_url=None)
+        assert "Hosted by" not in _full_text(embed)
 
 _POLICY_URL = "https://www.sjgames.com/general/online_policy.html"
 
@@ -96,7 +128,7 @@ class TestAttribution:
     def test_gcs_master_library_credited(self):
         text = _full_text(_embed())
         assert "richardwilkes/gcs_master_library" in text
-        assert "Richard Wilkes" in text
+        assert "Richard A. Wilkes and contributors" in text
 
     def test_mpl_license_named(self):
         text = _full_text(_embed())
@@ -126,6 +158,21 @@ class TestPrivacy:
     def test_explains_removal_path(self):
         text = _full_text(_embed())
         assert "/char delete" in text
+        assert "/privacy delete-my-data" in text
+
+    def test_links_the_privacy_policy_and_terms(self):
+        from gurps_bot.cogs.legal import DEFAULT_PRIVACY_URL, DEFAULT_TERMS_URL
+        text = _full_text(_embed())
+        assert DEFAULT_PRIVACY_URL in text
+        assert DEFAULT_TERMS_URL in text
+
+    def test_policy_urls_can_be_overridden(self):
+        embed = build_legal_embed(
+            author=_AUTHOR, invite_url=None, support_url=None,
+            privacy_url="https://example.com/p", terms_url="https://example.com/t",
+        )
+        text = _full_text(embed)
+        assert "https://example.com/p" in text and "https://example.com/t" in text
 
 
 class TestContact:
@@ -150,12 +197,12 @@ class TestDiscordCaps:
     def test_total_embed_within_cap(self):
         assert len(_embed()) <= _EMBED_LIMIT
 
-    def test_default_author_placeholder_when_unset(self):
-        # cog reads BOT_AUTHOR_LEGAL_NAME; the builder just takes the string
+    def test_every_optional_field_set_stays_within_caps(self):
         embed = build_legal_embed(
-            author="[set BOT_AUTHOR_LEGAL_NAME]",
-            invite_url=None,
-            support_url=None,
+            author="A Rather Long Pen Name For Cap Testing",
+            invite_url=_INVITE,
+            support_url=_SUPPORT,
+            operator="A Rather Long Operator Name For Cap Testing",
         )
         assert len(embed) <= _EMBED_LIMIT
         for field in embed.fields:

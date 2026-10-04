@@ -3,11 +3,9 @@
 #
 #   ./nas-update.sh sha-ef30b62
 #
-# Written after a 2026-07-27 deploy that edited the compose file, reported
-# nothing wrong, and left the old container running — caught only because
-# /status reported a 34-hour uptime. Every step here that can silently no-op is
-# therefore verified against the running artifact rather than against its own
-# exit code.
+# A compose deploy can edit the file, report nothing wrong, and leave the old
+# container running. Every step here that can silently no-op is therefore
+# verified against the running artifact rather than against its own exit code.
 #
 # Override for a different host layout:
 #   GUDBUS_PROJECT_DIR   compose project dir (holds docker-compose.yml)
@@ -35,18 +33,13 @@
 #
 # Pass --dry-run to run every check and stop before anything is modified. Worth
 # doing once on a new host: it proves the container really is the one this
-# script thinks it is, on a box that may be running other people's services.
+# script thinks it is, on a host that may run other services too.
 
 set -eu
 
 PROJECT_DIR=${GUDBUS_PROJECT_DIR:-/boot/config/plugins/compose.manager/projects/GUDBUS}
-# Verified against the running box 2026-07-29: the template container is
-# `GUDBUS`, uppercase. The default was `gudbus` because that is what Compose
-# Manager named it, and it went stale when production moved to the template on
-# 07-28 — so --preflight would have failed with "container not found" on its
-# first real use. Docker names are case-sensitive; the mismatch is invisible
-# until something looks. This one deployment has used five different spellings
-# of the name, and this is the fourth time one of them was guessed wrong.
+# Docker names are case-sensitive and a mismatch is invisible until something
+# looks: override GUDBUS_CONTAINER if your container is named differently.
 CONTAINER=${GUDBUS_CONTAINER:-GUDBUS}
 REPO=${GUDBUS_REPO:-haksanlulz/GUDBUS}
 COMPOSE="$PROJECT_DIR/docker-compose.yml"
@@ -73,25 +66,22 @@ done
 # --preflight runs the checks worth having and then stops, without requiring a
 # Compose project or touching the container.
 #
-# Production moved to an unRAID Docker *template* on 2026-07-28. A template
-# container carries no `com.docker.compose.*` labels and has no compose file to
-# rewrite, so the recreate below cannot drive it and the ownership check
-# correctly refuses it. What was lost with it was not the recreate — the unRAID
-# UI does that well — but the things around it: nobody checks whether the
-# commit's tests passed, and nobody takes a backup first.
+# A container managed by an unRAID Docker *template* carries no
+# `com.docker.compose.*` labels and has no compose file to rewrite, so the
+# recreate below cannot drive it and the ownership check correctly refuses it.
+# The unRAID UI does the recreate well; what it does not do is check whether
+# the commit's tests passed, or take a backup first.
 #
 # So this mode does exactly those, and mutates nothing except writing a backup.
-# That restriction is deliberate: this script cannot be tested against the real
-# box from a development machine, and a session that has already found a stale
-# copy of it and two shadow data directories there should not be writing an
-# untested recreate path for someone else's production container.
+# That restriction is deliberate: this path cannot be tested against a real
+# host from a development machine, so it does not recreate anything.
 
 # Remove superseded images for OUR repo only, newest-first, keeping the running
 # one plus $KEEP_IMAGES previous.
 #
-# The reference filter is the whole safety story: this host runs 60+ containers
-# belonging to other people, so `docker image prune -a` — the obvious thing —
-# would delete their images too. `docker rmi` is deliberately called WITHOUT
+# The reference filter is the whole safety story: on a shared host,
+# `docker image prune -a` — the obvious thing — would delete other services'
+# images too. `docker rmi` is deliberately called WITHOUT
 # -f, so an image another container still references refuses to be removed
 # rather than being torn out from under it.
 prune_images() {
@@ -202,7 +192,7 @@ $(docker ps -a --format '  {{.Names}}')"
 CURRENT_ID=$(docker inspect -f '{{.Id}}' "$CONTAINER")
 
 # --- ownership: prove this container is ours before touching anything -------
-# This host runs 60+ containers belonging to other people. Everything below
+# The host may run other services' containers. Everything below
 # acts on $CONTAINER and $PROJECT_DIR, but those are defaults, and a default is
 # not a guarantee. Refuse unless the container's own Compose labels say it
 # belongs to the project directory we were pointed at.
@@ -391,8 +381,7 @@ printf '  %s\n' "$(grep 'image:' "$COMPOSE" | head -1 | sed 's/^ *//')"
 
 # ------------------------------------------------------------- recreate
 # `docker compose` only finds the project when run from inside its directory.
-# Running it from elsewhere exits 0 and does nothing, which is the exact way
-# the 2026-07-27 deploy silently failed.
+# Running it from elsewhere exits 0 and does nothing.
 step "Recreating"
 cd "$PROJECT_DIR" || die "cannot cd to $PROJECT_DIR"
 # Named service, and --no-deps: an unqualified `up` recreates every service in

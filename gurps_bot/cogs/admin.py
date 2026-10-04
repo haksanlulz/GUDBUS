@@ -109,11 +109,8 @@ class AdminCog(commands.Cog):
 
         embed.set_footer(
             text=(
-                "GURPS is a trademark of Steve Jackson Games, and its rules and art "
-                "are copyrighted by Steve Jackson Games. All rights are reserved by "
-                "Steve Jackson Games. This game aid is not official and is not endorsed "
-                "by Steve Jackson Games. Released for free distribution under the "
-                "SJG Online Policy."
+                "Unofficial; not endorsed by Steve Jackson Games. GURPS is a "
+                "trademark of Steve Jackson Games. See /legal."
             )
         )
         # Ephemeral: /status is a diagnostic the caller runs for themselves, and
@@ -139,7 +136,7 @@ class AdminCog(commands.Cog):
         async with self.bot.db() as session:
             await cleanup_guild_data(session, guild.id)
             await session.commit()
-        log.info("Cleaned up guild-scoped data for guild %s (%s)", guild.name, guild.id)
+        log.info("Cleaned up guild-scoped data for guild %s", guild.id)
 
 
 async def setup(bot: GURPSBot) -> None:

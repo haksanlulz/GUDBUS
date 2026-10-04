@@ -25,8 +25,9 @@ _MAX_WEAPONS_PER_CHARACTER = 1000
 _MAX_NAME_LEN = 100
 
 #: local_notes on library traits is frequently verbatim SJG prose — dropped at
-#: the parser boundary, never persisted or rendered; named so the empty string
-#: reads as deliberate
+#: the parser boundary, so it never reaches a parsed field or a rendered reply.
+#: The uploaded file itself is kept whole (raw_gcs_json) for /char export.
+#: Named so the empty string reads as deliberate.
 _COPYRIGHT_DROPPED_NOTES = ""
 
 

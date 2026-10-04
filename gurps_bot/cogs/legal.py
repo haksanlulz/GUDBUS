@@ -16,12 +16,14 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 ONLINE_POLICY_URL = "https://www.sjgames.com/general/online_policy.html"
-# online policy requires the game aid be attributed to its author
-AUTHOR_ENV = "BOT_AUTHOR_LEGAL_NAME"
-_AUTHOR_PLACEHOLDER = (
-    "[CONFIG REQUIRED: set BOT_AUTHOR_LEGAL_NAME — this notice is NOT "
-    "SJG-Online-Policy-compliant until the author's legal name is set]"
-)
+# The Online Policy notice credits the game aid's author: whoever wrote the code,
+# not whoever hosts it. A consistent handle or pen name is fine.
+AUTHOR_ENV = "BOT_AUTHOR_NAME"
+LEGACY_AUTHOR_ENV = "BOT_AUTHOR_LEGAL_NAME"
+DEFAULT_AUTHOR = "haksanlulz"
+
+DEFAULT_PRIVACY_URL = "https://github.com/haksanlulz/GUDBUS/blob/main/PRIVACY.md"
+DEFAULT_TERMS_URL = "https://github.com/haksanlulz/GUDBUS/blob/main/TERMS.md"
 
 _INVITE_PLACEHOLDER = "*(invite link not configured — set BOT_INVITE_URL)*"
 _SUPPORT_PLACEHOLDER = "*(support link not configured — set BOT_SUPPORT_URL)*"
@@ -29,10 +31,23 @@ _SUPPORT_PLACEHOLDER = "*(support link not configured — set BOT_SUPPORT_URL)*"
 _LEGAL_COLOR = discord.Color.dark_grey()
 
 
+def _env(name: str) -> str | None:
+    value = (os.getenv(name) or "").strip()
+    return value or None
+
+
+def resolve_author() -> str:
+    """BOT_AUTHOR_NAME, else the legacy BOT_AUTHOR_LEGAL_NAME, else the default."""
+    return _env(AUTHOR_ENV) or _env(LEGACY_AUTHOR_ENV) or DEFAULT_AUTHOR
+
+
 def build_legal_embed(
     author: str,
     invite_url: str | None,
     support_url: str | None,
+    operator: str | None = None,
+    privacy_url: str = DEFAULT_PRIVACY_URL,
+    terms_url: str = DEFAULT_TERMS_URL,
 ) -> discord.Embed:
     """Build the legal/about embed; pure, no discord runtime or I/O."""
     embed = discord.Embed(
@@ -60,8 +75,9 @@ def build_legal_embed(
         value=(
             "Reference data is sourced from the GURPS Character Sheet master "
             "library ([richardwilkes/gcs_master_library]"
-            "(https://github.com/richardwilkes/gcs_master_library)) by Richard "
-            "Wilkes, licensed MPL-2.0. GCS: [gurpscharactersheet.com]"
+            "(https://github.com/richardwilkes/gcs_master_library)), compiled by "
+            "Richard A. Wilkes and contributors, licensed MPL-2.0. GCS: "
+            "[gurpscharactersheet.com]"
             "(https://gurpscharactersheet.com)."
         ),
         inline=False,
@@ -81,13 +97,16 @@ def build_legal_embed(
         name="Privacy",
         value=(
             "This bot **does not read message content** (it runs on default "
-            "Discord intents). Keyed to your Discord user ID, it stores data you "
-            "create through commands — characters, study logs, notes, timers, "
-            "wealth, and combat-tracker participation — plus the Discord server, "
-            "channel, and message IDs needed to scope combats, notes, and timers. "
-            "Remove an imported character with `/char delete`; guild-scoped data "
-            "(combats, notes, timers) is purged when the bot leaves a server; for "
-            "anything else, removal is available on request."
+            "Discord intents). Keyed to your Discord user ID, it stores what you "
+            "create through commands: imported characters (including the "
+            "uploaded sheet, so `/char export` can return it), macros, notes, "
+            "study logs, timers, wealth, crafting projects and combat-tracker "
+            "entries, plus the server, channel and message IDs that scope them. "
+            "`/char delete` removes a character; `/privacy delete-my-data` "
+            "removes everything keyed to you. When the bot leaves a server, that "
+            "server's combats, notes, timers, house rules and crafting projects "
+            f"are deleted. Full text: [Privacy Policy]({privacy_url}) · "
+            f"[Terms]({terms_url})."
         ),
         inline=False,
     )
@@ -100,9 +119,12 @@ def build_legal_embed(
     support_text = (
         f"[Support / contact]({support_url})" if support_url else _SUPPORT_PLACEHOLDER
     )
+    contact_lines = [invite_text, support_text]
+    if operator:
+        contact_lines.append(f"Hosted by {operator}")
     embed.add_field(
         name="Invite & Contact",
-        value=f"{invite_text}\n{support_text}",
+        value="\n".join(contact_lines),
         inline=False,
     )
 
@@ -111,10 +133,14 @@ def build_legal_embed(
 
 
 def _legal_embed_from_env() -> discord.Embed:
-    author = os.getenv(AUTHOR_ENV, _AUTHOR_PLACEHOLDER)
-    invite_url = os.getenv("BOT_INVITE_URL") or None
-    support_url = os.getenv("BOT_SUPPORT_URL") or None
-    return build_legal_embed(author=author, invite_url=invite_url, support_url=support_url)
+    return build_legal_embed(
+        author=resolve_author(),
+        invite_url=_env("BOT_INVITE_URL"),
+        support_url=_env("BOT_SUPPORT_URL"),
+        operator=_env("BOT_OPERATOR_NAME"),
+        privacy_url=_env("BOT_PRIVACY_URL") or DEFAULT_PRIVACY_URL,
+        terms_url=_env("BOT_TERMS_URL") or DEFAULT_TERMS_URL,
+    )
 
 
 class LegalCog(commands.Cog):

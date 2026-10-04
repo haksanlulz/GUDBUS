@@ -11,11 +11,12 @@ if the transaction rolls back (the safe direction).
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import CursorResult, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gurps_bot.db.models import (
@@ -206,7 +207,7 @@ async def import_character(
 
     if existing:
         # in-place update keeps row id + active_character refs alive
-        log.info("Re-importing character '%s' (id=%d) for user %d", parsed.name, existing.id, user_id)
+        log.info("Re-importing character id=%d for user %d", existing.id, user_id)
         existing.name = parsed.name  # may differ from the stored name (rename)
         if gcs_id is not None:
             existing.gcs_id = gcs_id  # set on first id-carrying import / keep current
@@ -234,7 +235,7 @@ async def import_character(
             session, Character, MAX_CHARACTERS_PER_USER, "characters",
             discord_user_id=user_id,
         )
-        log.info("Importing new character '%s' for user %d", parsed.name, user_id)
+        log.info("Importing new character for user %d", user_id)
         char = Character(
             discord_user_id=user_id,
             name=parsed.name,
@@ -318,12 +319,26 @@ async def delete_character(session: AsyncSession, char_id: int) -> bool:
     result = await session.execute(stmt)
     char = result.scalar_one_or_none()
     if char:
-        log.info("Deleting character '%s' (id=%d)", char.name, char_id)
+        log.info("Deleting character id=%d", char_id)
         skill_cache.invalidate_user(char.discord_user_id)
         await fold_character_wallet(session, char.discord_user_id, char_id)
         await session.delete(char)
         return True
     return False
+
+
+async def delete_user_characters(session: AsyncSession, user_id: int) -> int:
+    """Delete every character the user owns (self-service data deletion).
+
+    Bulk delete: the database cascades skills, spells, traits, attributes and
+    active-character selections, and unlinks combatant rows. Returns how many.
+    Caller commits.
+    """
+    result = cast("CursorResult[Any]", await session.execute(
+        delete(Character).where(Character.discord_user_id == user_id)
+    ))
+    skill_cache.invalidate_user(user_id)
+    return result.rowcount or 0
 
 
 async def count_characters(session: AsyncSession) -> int:

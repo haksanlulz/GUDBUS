@@ -128,8 +128,8 @@ _TRACKED_PROSE: dict[str, str] = {
 
 #: Fingerprints of a book's own front matter and running heads. Chosen to be
 #: absent from the SJG game-aid notice the bot is REQUIRED to reproduce
-#: verbatim in ``/legal`` — "All rights are reserved by Steve Jackson Games
-#: Incorporated" is in that notice, so it is deliberately not a marker here.
+#: verbatim in ``/legal`` — "All rights are reserved by Steve Jackson Games"
+#: is in that notice, so it is deliberately not a marker here.
 _FRONT_MATTER_MARKERS = (
     "printing history",
     "isbn",

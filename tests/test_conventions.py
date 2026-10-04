@@ -372,8 +372,10 @@ _DISCORD_TOP_LEVEL_CAP = 100
 #: going to force it.
 #:
 #: 2026-10-03, 46 → 44: two standalone commands retired.
-_TOP_LEVEL_COUNT = 44
-_GROUP_COUNT = 13
+#:
+#: 2026-10-03, 44 → 45: the `privacy` GROUP, for self-service deletion.
+_TOP_LEVEL_COUNT = 45
+_GROUP_COUNT = 14
 _STANDALONE_COUNT = 31
 
 

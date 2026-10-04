@@ -24,13 +24,13 @@ uv run python tools/sync_gcs_library.py --check
 
 echo "==> Checking .env"
 if [ ! -f .env ]; then
-  echo "!!  .env missing. Copy .env.example to .env and fill DISCORD_TOKEN +"
-  echo "    BOT_AUTHOR_LEGAL_NAME (your handle), then re-run."
+  echo "!!  .env missing. Copy .env.example to .env and fill DISCORD_TOKEN,"
+  echo "    then re-run."
   exit 1
 fi
 grep -qE '^DISCORD_TOKEN=.+' .env || { echo "!!  DISCORD_TOKEN not set in .env"; exit 1; }
-grep -qE '^BOT_AUTHOR_LEGAL_NAME=.+' .env \
-  || echo "!!  warning: BOT_AUTHOR_LEGAL_NAME unset — /legal notice ships non-compliant"
+grep -qE '^BOT_SUPPORT_URL=.+' .env \
+  || echo "!!  warning: BOT_SUPPORT_URL unset — /legal shows users no way to reach you"
 
 echo "==> Database create/stamp + migrations"
 # Fresh DB: created at current schema + stamped at Alembic head. Stamped DB:

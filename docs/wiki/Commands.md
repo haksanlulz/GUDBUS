@@ -141,7 +141,7 @@ Every slash command the bot registers, by area. `/help` in Discord shows the sam
 
 | Command | Description |
 |---------|-------------|
-| `/screen` | GM quick-reference: maneuvers, speed/range, encumbrance, reaction; page cites for crits and fright |
+| `/screen` | Quick reference: which command answers what, with page cites |
 | `/gm` | GM dashboard: live timers, combat, and your recent study and notes |
 
 ## Reference lookups
@@ -159,6 +159,7 @@ Every slash command the bot registers, by area. `/help` in Discord shows the sam
 | Command | Description |
 |---------|-------------|
 | `/legal` | Legal notice, credits, trademark, and privacy information |
+| `/privacy delete-my-data` | Delete everything this bot stores about you, in every server |
 | `/about` | About this bot: credits, trademark, and privacy |
 | `/help` | What this bot does, by topic |
 | `/status` | Bot diagnostics |
