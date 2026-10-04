@@ -10,6 +10,9 @@
   state game mechanics in the author's own words with page citations rather
   than quoting the rulebooks; reference lookups return facts and page
   citations only. Own the books.
+- What the bot stores, and how to delete it, is in
+  [PRIVACY.md](PRIVACY.md); `/privacy delete-my-data` removes everything
+  stored about you.
 - Use of the bot must comply with Discord's Terms of Service and Community
   Guidelines.
 - The operator of a bot instance may remove data or access at their

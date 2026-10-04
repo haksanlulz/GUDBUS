@@ -159,6 +159,7 @@ Every slash command the bot registers, by area. `/help` in Discord shows the sam
 | Command | Description |
 |---------|-------------|
 | `/legal` | Legal notice, credits, trademark, and privacy information |
+| `/privacy delete-my-data` | Delete everything this bot stores about you, in every server |
 | `/about` | About this bot: credits, trademark, and privacy |
 | `/help` | What this bot does, by topic |
 | `/status` | Bot diagnostics |

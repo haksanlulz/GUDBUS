@@ -41,8 +41,8 @@ async def add_timer(
         remaining_value = max(0, min(remaining, total))
 
     log.info(
-        "Adding timer '%s' (total=%d %s, target=%s) in guild=%d channel=%d",
-        label.strip(), total, unit, target, guild_id, channel_id,
+        "Adding timer (total=%d %s) in guild=%d channel=%d",
+        total, unit, guild_id, channel_id,
     )
     timer = Timer(
         guild_id=guild_id,
@@ -150,8 +150,8 @@ async def remove_timer(
     if timer is None:
         return False
     log.info(
-        "Removing timer id=%d ('%s') in guild=%d channel=%d",
-        timer.id, timer.label, guild_id, channel_id,
+        "Removing timer id=%d in guild=%d channel=%d",
+        timer.id, guild_id, channel_id,
     )
     await session.delete(timer)
     return True

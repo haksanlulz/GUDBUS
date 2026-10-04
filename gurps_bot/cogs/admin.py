@@ -139,7 +139,7 @@ class AdminCog(commands.Cog):
         async with self.bot.db() as session:
             await cleanup_guild_data(session, guild.id)
             await session.commit()
-        log.info("Cleaned up guild-scoped data for guild %s (%s)", guild.name, guild.id)
+        log.info("Cleaned up guild-scoped data for guild %s", guild.id)
 
 
 async def setup(bot: GURPSBot) -> None:

@@ -238,7 +238,7 @@ async def add_pc_combatant(
         if c.character_id == character_id:
             raise ValueError(f"{character_name} is already in this combat.")
 
-    log.info("Adding PC '%s' to combat id=%d", character_name, combat.id)
+    log.info("Adding PC to combat id=%d", combat.id)
     stats = await _read_character_combat_stats(session, character_id)
     combatant = Combatant(
         combat_id=combat.id,
@@ -278,7 +278,7 @@ async def add_npc_combatant(
     # sort arbitrary and undetectable; mirror the wealth service's guard.
     if not math.isfinite(basic_speed):
         raise ValueError("Basic Speed must be a finite number.")
-    log.info("Adding NPC '%s' to combat id=%d (speed=%.2f, hp=%d)", name, combat.id, basic_speed, hp)
+    log.info("Adding NPC to combat id=%d (speed=%.2f, hp=%d)", combat.id, basic_speed, hp)
     combatant = Combatant(
         combat_id=combat.id,
         character_id=None,

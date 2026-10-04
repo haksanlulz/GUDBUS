@@ -132,8 +132,8 @@ class MacroCog(commands.GroupCog, group_name="macro"):
             # save_macro validates on the way in, so this is a row that predates
             # the current parser bounds (or was written outside the service).
             log.warning(
-                "Unrollable stored macro %r for user %s: %s",
-                macro.name, interaction.user.id, e,
+                "Unrollable stored macro id=%s for user %s: %s",
+                macro.id, interaction.user.id, type(e).__name__,
             )
             await interaction.response.send_message(
                 f"Macro **{macro.name}** stores an expression that no longer "

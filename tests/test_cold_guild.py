@@ -47,6 +47,10 @@ NEEDS_REAL_INPUT = {
     "sync": "owner-gated; covered by test_command_sync",
     "status": "formats live gateway latency and uptime off the real client",
     "combat start": "stores the tracker message id from a real Discord message",
+    "privacy delete-my-data": (
+        "earlier commands in this sweep store data for the test user, so it "
+        "waits on a confirmation button; covered by test_privacy_cog"
+    ),
 }
 
 
