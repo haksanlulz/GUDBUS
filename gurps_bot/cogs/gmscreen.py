@@ -1,4 +1,4 @@
-"""/screen paginated rules reference and /gm session dashboard."""
+"""/screen quick-reference index and /gm session dashboard."""
 
 from __future__ import annotations
 
@@ -77,14 +77,14 @@ def _dashboard_embed(dash: Dashboard) -> discord.Embed:
 
 
 class GMScreenCog(commands.Cog):
-    """GM Quick-Reference Screen Composed From the Shipped Rules Tables."""
+    """Quick Reference Index and Session Dashboard."""
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
     @app_commands.command(
         name="screen",
-        description="GM quick-reference screen — paginated GURPS tables",
+        description="Quick reference: which command answers what, with page cites",
     )
     @app_commands.describe(category="Jump straight to a section (optional)")
     @app_commands.choices(category=_CATEGORY_CHOICES)

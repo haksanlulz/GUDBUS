@@ -40,7 +40,7 @@ Markers are declared in `pyproject.toml` under `[tool.pytest.ini_options]` with 
 
 Counts, to the nearest thousand lines, pinned to the tree by `tests/test_readme.py`:
 - application code: 24K lines (`find gurps_bot -name '*.py' | xargs cat | wc -l`)
-- tests: 34K lines (`find tests -name '*.py' | xargs cat | wc -l`)
+- tests: 33K lines (`find tests -name '*.py' | xargs cat | wc -l`)
 
 Rounded and pinned instead of exact and dated. The previous figures carried a
 date, printed a tenth of a thousand, and were both wrong within days of being

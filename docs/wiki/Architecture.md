@@ -10,7 +10,7 @@ gurps_bot/
     rolling.py        # /roll, /check, /contest, /damage
     combat.py         # /attack, /defend, /combat group
     error_handler.py  # Global error handler
-    ...               # + 12 more cogs (calc_*, trackers, macros, reference, gmscreen, body_ref, campaign, help, legal)
+    ...               # + 13 more cogs (calc_*, trackers, macros, reference, gmscreen, body_ref, campaign, help, legal, privacy)
   db/
     engine.py         # Async SQLAlchemy engine + session factory
     models.py         # ORM models (Character, Skill, Spell, Trait, Combat, Combatant)
