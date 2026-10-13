@@ -59,6 +59,15 @@ The [wiki](https://github.com/haksanlulz/GUDBUS/wiki) has the detail: the [full 
 [architecture](https://github.com/haksanlulz/GUDBUS/wiki/Architecture) and [development and testing](https://github.com/haksanlulz/GUDBUS/wiki/Development).
 Its pages are kept in [`docs/wiki/`](docs/wiki/) and tested with the code.
 
+## What I'd do differently
+
+- **Pin every rule to the page it comes from.** The fright-check and critical tables shipped for over a month with invented rows: keyed on margin, no Rule of 14. A regression test also defended a +4 melee bonus against prone targets that the cited page does not contain. Mechanics tests now cite the printed page and reproduce the book's own worked examples, and each mechanics module is checked against its source.
+- **The repair tool must not live inside the thing it repairs.** A server kick during the rename wiped every slash command, and `/sync`, the repair, was one of the commands wiped. Registration now runs at startup, and the rescue is a mention-prefix text command that a registration wipe cannot remove.
+- **A privacy promise is a testable claim.** The privacy policy said kicking the bot deletes that server's data. A table added later was never added to the teardown, so a re-invite restored the old server's house rules. The teardown now derives its table list from the model metadata, and a test checks it.
+- **Gate the deploy on the tests.** The Docker publish workflow did not depend on the test workflow, so a commit with a failing test matrix still published a pullable image. It does now, and the gate was proven by publishing a branch with a planted failing test and confirming no image appeared.
+- **Order state changes and replies carefully.** After deferred replies were switched on, eight combat commands saved an HP change and then failed to reply, telling the user the command had failed and inviting them to apply the damage twice. That reply now goes through the shared helper that checks whether the interaction was already answered.
+- **Local green is one interpreter.** CI runs Python 3.10 and 3.12; eleven commits went up on a green local run that CI failed.
+
 ## AI assistance
 
 This project was built with AI assistance (Claude). Correctness was established
