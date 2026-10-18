@@ -44,7 +44,6 @@ USER = 999_000
 #: a breadth test whose exemption list grows silently is worth very little.
 NEEDS_REAL_INPUT = {
     "char import": "takes a discord.Attachment; covered by test_parser + import tests",
-    "admin import": "takes a discord.Attachment; covered by test_admin_chars",
     "sync": "owner-gated; covered by test_command_sync",
     "status": "formats live gateway latency and uptime off the real client",
     "combat start": "stores the tracker message id from a real Discord message",

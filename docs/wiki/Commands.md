@@ -164,7 +164,3 @@ Every slash command the bot registers, by area. `/help` in Discord shows the sam
 | `/help` | What this bot does, by topic |
 | `/status` | Bot diagnostics |
 | `/sync` | Force a global command re-register (owner) |
-| `/admin list` | A member's imported characters, by user (owner) |
-| `/admin import` | Import a .gcs file as a member's character and make it their active one, with an optional server id (owner) |
-| `/admin switch` | Set a member's active character (owner) |
-| `/admin delete` | Delete a member's imported character, with confirmation (owner) |

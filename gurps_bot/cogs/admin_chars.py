@@ -1,10 +1,21 @@
-"""Owner tools: /admin — another member's imported characters.
+"""Owner tools: `@<bot> admin ...` — another member's imported characters.
 
 The host sometimes has to do a member's sheet work for them (an NPC set imported under
-the GM's account, a stale sheet removed from a phone-only player). These act on the
-same services /char does, with the target user and, optionally, the server supplied as
-parameters. Bot owner only; the group is hidden from members by default permissions
-and the owner check runs on every call regardless.
+the GM's account, a stale sheet removed for a phone-only player). These act on the same
+services /char does, with the member and, optionally, the server given as arguments.
+
+Mention-prefixed text commands rather than slash commands on purpose: Discord shows a
+slash command to everyone its permissions allow and cannot hide one by identity, so an
+owner-only slash entry is clutter in every member's picker. A text command registers
+nothing with Discord; it is owner-gated by ``commands.is_owner`` and, like ``@<bot> sync``,
+needs no message-content intent (a message that mentions the bot carries its content).
+
+    @<bot> admin list @member [server-id]
+    @<bot> admin import @member [server-id]      (the .gcs attached to the same message)
+    @<bot> admin switch @member [server-id] <name>
+    @<bot> admin delete @member <name>
+
+Replies are ordinary messages in the channel the owner typed in.
 """
 
 from __future__ import annotations
@@ -13,13 +24,12 @@ import logging
 from typing import TYPE_CHECKING
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
 
-from gurps_bot.cogs.characters import import_sheet
+from gurps_bot.cogs.characters import precheck_upload, read_sheet, store_sheet
 from gurps_bot.services.characters import (
     delete_character,
     get_active_character,
@@ -30,153 +40,138 @@ from gurps_bot.services.characters import (
 from gurps_bot.services.wealth import WalletOverflow
 from gurps_bot.ui import embeds
 from gurps_bot.ui.views import ConfirmView
-from gurps_bot.utils.scope import guild_id_of
 
 log = logging.getLogger(__name__)
 
-
-async def _owner_only(interaction: discord.Interaction[GURPSBot]) -> bool:
-    if await interaction.client.is_owner(interaction.user):
-        return True
-    await interaction.response.send_message(
-        "Only the bot owner can use /admin commands.", ephemeral=True
-    )
-    return False
+USAGE = (
+    "`@bot admin list @member [server-id]` · `@bot admin import @member [server-id]` with the "
+    "`.gcs` attached · `@bot admin switch @member [server-id] <name>` · "
+    "`@bot admin delete @member <name>`"
+)
 
 
-async def _target_guild(
-    interaction: discord.Interaction[GURPSBot], guild_id: str | None
-) -> int | None:
-    """The server whose active-character pointer is meant: this one unless an id is given."""
-    if guild_id is None or not guild_id.strip():
-        return guild_id_of(interaction)
-    text = guild_id.strip()
-    if not text.isdigit():
-        await interaction.response.send_message(
-            "`guild_id` must be a server id (digits only).", ephemeral=True
-        )
-        return None
-    return int(text)
+def _guild_for(ctx: commands.Context, guild_id: int | None) -> int | None:
+    """The server whose active-character pointer is meant: the given id, else this server."""
+    if guild_id is not None:
+        return guild_id
+    return ctx.guild.id if ctx.guild is not None else None
 
 
-@app_commands.guild_only()
-@app_commands.default_permissions(administrator=True)
-class AdminGroup(commands.GroupCog, group_name="admin"):
-    "Bot owner tools."
+class AdminCharsCog(commands.Cog):
+    "Owner tools for another member's sheets (mention-prefixed; owner only)."
 
     def __init__(self, bot: GURPSBot) -> None:
         self.bot = bot
 
-    @app_commands.command(name="list", description="List a member's imported characters (owner)")
-    @app_commands.describe(user="The member", guild_id="Server id for the active mark; this server if blank")
-    async def list_chars(
-        self, interaction: discord.Interaction[GURPSBot], user: discord.User,
-        guild_id: str | None = None,
+    @commands.group(name="admin", invoke_without_command=True, help="@<bot> admin ... (owner)")
+    @commands.is_owner()
+    async def admin(self, ctx: commands.Context) -> None:
+        await ctx.reply(USAGE)
+
+    @admin.command(name="list")
+    @commands.is_owner()
+    async def admin_list(
+        self, ctx: commands.Context, user: discord.User, guild_id: int | None = None,
     ) -> None:
-        if not await _owner_only(interaction):
-            return
-        gid = await _target_guild(interaction, guild_id)
+        gid = _guild_for(ctx, guild_id)
         if gid is None:
+            await ctx.reply("Give a server id when running this outside a server.")
             return
-        await interaction.response.defer(ephemeral=True)
-        async with interaction.client.db() as session:
+        async with ctx.bot.db() as session:
             chars = await get_user_characters(session, user.id)
             active = await get_active_character(session, user.id, gid)
             active_id = active.id if active else None
         embed = embeds.char_list_embed([(c.name, c.total_points, c.id == active_id) for c in chars])
         embed.title = f"Characters of {user.display_name}"
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await ctx.reply(embed=embed)
 
-    @app_commands.command(name="import", description="Import a .gcs file as a member's character (owner)")
-    @app_commands.describe(
-        user="The member it belongs to", file="A .gcs character sheet file",
-        guild_id="Server where it becomes their active character; this server if blank",
-    )
-    async def import_char(
-        self, interaction: discord.Interaction[GURPSBot], user: discord.User,
-        file: discord.Attachment, guild_id: str | None = None,
+    @admin.command(name="import")
+    @commands.is_owner()
+    async def admin_import(
+        self, ctx: commands.Context, user: discord.User, guild_id: int | None = None,
     ) -> None:
-        if not await _owner_only(interaction):
-            return
-        gid = await _target_guild(interaction, guild_id)
+        gid = _guild_for(ctx, guild_id)
         if gid is None:
+            await ctx.reply("Give a server id when running this outside a server.")
             return
-        log.warning("admin: owner %s imports a sheet for user %s in guild %s",
-                    interaction.user.id, user.id, gid)
-        await import_sheet(
-            interaction, file, user_id=user.id, guild_id=gid, for_whom=f" for {user.mention}",
-        )
+        if not ctx.message.attachments:
+            await ctx.reply("Attach the `.gcs` file to the same message.")
+            return
+        file = ctx.message.attachments[0]
+        refusal = precheck_upload(file)
+        if refusal:
+            await ctx.reply(refusal)
+            return
+        got = await read_sheet(file, user.id)
+        if isinstance(got, str):
+            await ctx.reply(got)
+            return
+        parsed, data = got
+        log.warning("admin: owner %s imports a sheet for user %s in guild %s", ctx.author.id, user.id, gid)
+        async with ctx.bot.db() as session:
+            stored = await store_sheet(
+                session, user_id=user.id, guild_id=gid, parsed=parsed, data=data,
+                filename=file.filename,
+            )
+        if isinstance(stored, str):
+            await ctx.reply(stored)
+            return
+        text, embed = stored
+        await ctx.reply(f"{text} for {user.mention}.", embed=embed)
 
-    @app_commands.command(name="switch", description="Set a member's active character (owner)")
-    @app_commands.describe(
-        user="The member", name="Their character's name (exact)",
-        guild_id="Server for the active mark; this server if blank",
-    )
-    async def switch(
-        self, interaction: discord.Interaction[GURPSBot], user: discord.User, name: str,
-        guild_id: str | None = None,
+    @admin.command(name="switch")
+    @commands.is_owner()
+    async def admin_switch(
+        self, ctx: commands.Context, user: discord.User, guild_id: int | None = None, *, name: str,
     ) -> None:
-        if not await _owner_only(interaction):
-            return
-        gid = await _target_guild(interaction, guild_id)
+        gid = _guild_for(ctx, guild_id)
         if gid is None:
+            await ctx.reply("Give a server id when running this outside a server.")
             return
-        async with interaction.client.db() as session:
+        async with ctx.bot.db() as session:
             char = await get_character_by_name(session, user.id, name)
             if not char:
-                await interaction.response.send_message(
-                    f"{user.mention} has no character named **{name}**.", ephemeral=True
-                )
+                await ctx.reply(f"{user.mention} has no character named **{name}**.")
                 return
             await set_active_character(session, user.id, gid, char.id)
             await session.commit()
         log.warning("admin: owner %s switched the active character of user %s in guild %s",
-                    interaction.user.id, user.id, gid)
-        await interaction.response.send_message(
-            f"Switched {user.mention} to **{name}**.", ephemeral=True
-        )
+                    ctx.author.id, user.id, gid)
+        await ctx.reply(f"Switched {user.mention} to **{name}**.")
 
-    @app_commands.command(name="delete", description="Delete a member's imported character (owner)")
-    @app_commands.describe(user="The member", name="Their character's name (exact)")
-    async def delete_char(
-        self, interaction: discord.Interaction[GURPSBot], user: discord.User, name: str,
-    ) -> None:
-        if not await _owner_only(interaction):
-            return
-        async with interaction.client.db() as session:
+    @admin.command(name="delete")
+    @commands.is_owner()
+    async def admin_delete(self, ctx: commands.Context, user: discord.User, *, name: str) -> None:
+        async with ctx.bot.db() as session:
             char = await get_character_by_name(session, user.id, name)
         if not char:
-            await interaction.response.send_message(
-                f"{user.mention} has no character named **{name}**.", ephemeral=True
-            )
+            await ctx.reply(f"{user.mention} has no character named **{name}**.")
             return
 
-        view = ConfirmView(author_id=interaction.user.id)
-        await interaction.response.send_message(
+        view = ConfirmView(author_id=ctx.author.id)
+        view.message = await ctx.reply(
             f"Delete **{name}** ({char.total_points} pts) belonging to {user.mention}? "
             "This cannot be undone.",
-            view=view, ephemeral=True,
+            view=view,
         )
-        view.message = await interaction.original_response()
         await view.wait()
         if not view.confirmed:
             return
 
-        async with interaction.client.db() as session:
+        async with ctx.bot.db() as session:
             try:
                 deleted = await delete_character(session, char.id)
             except WalletOverflow as e:
-                await interaction.followup.send(str(e), ephemeral=True)
+                await ctx.reply(str(e))
                 return
             if deleted:
                 await session.commit()
         if deleted:
-            log.warning("admin: owner %s deleted a character of user %s",
-                        interaction.user.id, user.id)
-            await interaction.followup.send(f"Deleted **{name}** for {user.mention}.", ephemeral=True)
+            log.warning("admin: owner %s deleted a character of user %s", ctx.author.id, user.id)
+            await ctx.reply(f"Deleted **{name}** for {user.mention}.")
         else:
-            await interaction.followup.send("Nothing deleted; it may already be gone.", ephemeral=True)
+            await ctx.reply("Nothing deleted; it may already be gone.")
 
 
 async def setup(bot: GURPSBot) -> None:
-    await bot.add_cog(AdminGroup(bot))
+    await bot.add_cog(AdminCharsCog(bot))

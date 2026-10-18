@@ -1,8 +1,9 @@
-"""/admin at the command surface: owner-gated, acts on the TARGET user's rows.
+"""`@<bot> admin ...`: owner-gated text commands that act on the TARGET user's rows.
 
-Each command is driven through its callback with a fake interaction, the same way
-test_char_import_cog drives /char import. The assertions read the database, so a
-command that silently acted on the caller instead of the target would fail here.
+Each subcommand is driven through its callback with a fake Context, the way
+test_command_sync drives `@<bot> sync`. The gate is asserted on the commands' own check
+list (``commands.is_owner``), and the assertions read the database, so a command that
+silently acted on the caller instead of the target would fail here.
 """
 
 from __future__ import annotations
@@ -12,10 +13,12 @@ import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 import pytest_asyncio
+from discord.ext import commands
 from sqlalchemy import select
 
-from gurps_bot.cogs.admin_chars import AdminGroup
+from gurps_bot.cogs.admin_chars import AdminCharsCog
 from gurps_bot.db.models import ActiveCharacter, Character
 
 OWNER = 1
@@ -40,23 +43,21 @@ def _attachment(data: dict, filename: str = "hero.gcs"):
     return file
 
 
-def _interaction(session_factory, *, owner: bool = True):
-    interaction = MagicMock()
-    interaction.guild_id = GUILD
-    interaction.user.id = OWNER
-    interaction.client.is_owner = AsyncMock(return_value=owner)
-    interaction.response.send_message = AsyncMock()
-    interaction.response.defer = AsyncMock()
-    interaction.followup.send = AsyncMock()
-    interaction.original_response = AsyncMock()
+def _ctx(session_factory, *, owner: bool = True, attachments=()):
+    ctx = MagicMock()
+    ctx.author.id = OWNER
+    ctx.guild.id = GUILD
+    ctx.message.attachments = list(attachments)
+    ctx.reply = AsyncMock(return_value=MagicMock())
+    ctx.bot.is_owner = AsyncMock(return_value=owner)
 
     @asynccontextmanager
     async def db():
         async with session_factory() as s:
             yield s
 
-    interaction.client.db = db
-    return interaction
+    ctx.bot.db = db
+    return ctx
 
 
 def _user(uid: int = TARGET):
@@ -67,18 +68,15 @@ def _user(uid: int = TARGET):
     return user
 
 
-def _said(interaction) -> str:
+def _said(ctx) -> str:
     parts = []
-    for mock in (interaction.response.send_message, interaction.followup.send):
-        for call in mock.await_args_list:
-            parts += [str(a) for a in call.args]
-            if call.kwargs.get("content"):
-                parts.append(call.kwargs["content"])
-            embed = call.kwargs.get("embed")
-            if embed is not None:
-                parts.append(str(embed.title))
-                parts.append(str(embed.description))
-                parts += [str(f.value) for f in embed.fields]
+    for call in ctx.reply.await_args_list:
+        parts += [str(a) for a in call.args]
+        embed = call.kwargs.get("embed")
+        if embed is not None:
+            parts.append(str(embed.title))
+            parts.append(str(embed.description))
+            parts += [str(f.value) for f in embed.fields]
     return "\n".join(parts)
 
 
@@ -109,48 +107,67 @@ def _view(confirmed: bool | None):
     return View
 
 
-async def _import(session_factory, data, *, owner=True, guild_id=None):
-    cog = AdminGroup(MagicMock())
-    interaction = _interaction(session_factory, owner=owner)
-    await cog.import_char.callback(cog, interaction, _user(), _attachment(data), guild_id)
-    return interaction
+async def _import(session_factory, data, *, guild_id=None):
+    cog = AdminCharsCog(MagicMock())
+    ctx = _ctx(session_factory, attachments=[_attachment(data)])
+    await AdminCharsCog.admin_import.callback(cog, ctx, _user(), guild_id)
+    return ctx
 
 
 class TestOwnerGate:
-    async def test_a_non_owner_is_refused_and_nothing_is_written(self, session_factory, sample_gcs_data):
-        interaction = await _import(session_factory, _sheet(sample_gcs_data, "Hero"), owner=False)
-        assert "Only the bot owner" in _said(interaction)
-        chars, active = await _rows(session_factory)
-        assert chars == [] and active == []
+    """The gate is the framework check on every command, so a non-owner never reaches the
+    callback; asserted on the check list itself, the way the framework runs it."""
 
-    async def test_every_subcommand_is_gated(self, session_factory):
-        cog = AdminGroup(MagicMock())
-        for call in (
-            lambda i: cog.list_chars.callback(cog, i, _user(), None),
-            lambda i: cog.switch.callback(cog, i, _user(), "Hero", None),
-            lambda i: cog.delete_char.callback(cog, i, _user(), "Hero"),
-        ):
-            interaction = _interaction(session_factory, owner=False)
-            await call(interaction)
-            assert "Only the bot owner" in _said(interaction)
+    @pytest.mark.parametrize("cmd", [
+        AdminCharsCog.admin, AdminCharsCog.admin_list, AdminCharsCog.admin_import,
+        AdminCharsCog.admin_switch, AdminCharsCog.admin_delete,
+    ])
+    async def test_every_command_carries_the_owner_check(self, session_factory, cmd):
+        assert cmd.checks, f"{cmd.qualified_name} has no checks at all"
+        ctx = _ctx(session_factory, owner=False)
+        with pytest.raises(commands.NotOwner):
+            for check in cmd.checks:
+                await check(ctx)
+        ctx = _ctx(session_factory, owner=True)
+        for check in cmd.checks:
+            assert await check(ctx)
+
+    def test_nothing_is_registered_as_a_slash_command(self):
+        """The whole point: no entry in anyone's picker."""
+        from discord import app_commands
+
+        cog = AdminCharsCog(MagicMock())
+        assert cog.get_app_commands() == []
+        assert not isinstance(cog, commands.GroupCog)
+        assert not any(isinstance(c, app_commands.Command) for c in vars(AdminCharsCog).values())
 
 
 class TestImportForAnotherMember:
     async def test_the_sheet_lands_under_the_target_and_is_their_active_one(self, session_factory, sample_gcs_data):
-        interaction = await _import(session_factory, _sheet(sample_gcs_data, "Hero"))
-        assert "Hero" in _said(interaction) and f"<@{TARGET}>" in _said(interaction)
+        ctx = await _import(session_factory, _sheet(sample_gcs_data, "Hero"))
+        assert "Hero" in _said(ctx) and f"<@{TARGET}>" in _said(ctx)
         chars, active = await _rows(session_factory)
         assert chars == [(TARGET, "Hero")]
         assert [(u, g) for u, g, _ in active] == [(TARGET, GUILD)]
 
     async def test_a_server_id_aims_the_active_mark_elsewhere(self, session_factory, sample_gcs_data):
-        await _import(session_factory, _sheet(sample_gcs_data, "Hero"), guild_id=str(OTHER_GUILD))
+        await _import(session_factory, _sheet(sample_gcs_data, "Hero"), guild_id=OTHER_GUILD)
         _, active = await _rows(session_factory)
         assert [(u, g) for u, g, _ in active] == [(TARGET, OTHER_GUILD)]
 
-    async def test_a_malformed_server_id_is_refused_before_anything_runs(self, session_factory, sample_gcs_data):
-        interaction = await _import(session_factory, _sheet(sample_gcs_data, "Hero"), guild_id="not-an-id")
-        assert "server id" in _said(interaction)
+    async def test_no_attachment_is_told_what_to_attach(self, session_factory):
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
+        await AdminCharsCog.admin_import.callback(cog, ctx, _user(), None)
+        assert "Attach" in _said(ctx)
+        chars, _ = await _rows(session_factory)
+        assert chars == []
+
+    async def test_the_upload_prechecks_apply(self, session_factory, sample_gcs_data):
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory, attachments=[_attachment(_sheet(sample_gcs_data, "Hero"), "hero.txt")])
+        await AdminCharsCog.admin_import.callback(cog, ctx, _user(), None)
+        assert ".gcs" in _said(ctx)
         chars, _ = await _rows(session_factory)
         assert chars == []
 
@@ -162,18 +179,18 @@ class TestListSwitchDelete:
 
     async def test_list_names_the_targets_characters(self, session_factory, sample_gcs_data):
         await self._seed_two(session_factory, sample_gcs_data)
-        cog = AdminGroup(MagicMock())
-        interaction = _interaction(session_factory)
-        await cog.list_chars.callback(cog, interaction, _user(), None)
-        said = _said(interaction)
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
+        await AdminCharsCog.admin_list.callback(cog, ctx, _user(), None)
+        said = _said(ctx)
         assert "Hero" in said and "Villain" in said and f"user-{TARGET}" in said
 
     async def test_switch_moves_the_targets_active_mark(self, session_factory, sample_gcs_data):
         await self._seed_two(session_factory, sample_gcs_data)   # Villain is active after the second import
-        cog = AdminGroup(MagicMock())
-        interaction = _interaction(session_factory)
-        await cog.switch.callback(cog, interaction, _user(), "Hero", None)
-        assert "Switched" in _said(interaction)
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
+        await AdminCharsCog.admin_switch.callback(cog, ctx, _user(), None, name="Hero")
+        assert "Switched" in _said(ctx)
         _, active = await _rows(session_factory)
         async with session_factory() as s:
             hero_id = await s.scalar(select(Character.id).where(Character.name == "Hero"))
@@ -181,26 +198,26 @@ class TestListSwitchDelete:
 
     async def test_switch_to_an_unknown_name_says_so(self, session_factory, sample_gcs_data):
         await self._seed_two(session_factory, sample_gcs_data)
-        cog = AdminGroup(MagicMock())
-        interaction = _interaction(session_factory)
-        await cog.switch.callback(cog, interaction, _user(), "Nobody", None)
-        assert "no character named" in _said(interaction)
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
+        await AdminCharsCog.admin_switch.callback(cog, ctx, _user(), None, name="Nobody")
+        assert "no character named" in _said(ctx)
 
     async def test_delete_confirmed_removes_the_targets_row_only(self, session_factory, sample_gcs_data):
         await self._seed_two(session_factory, sample_gcs_data)
-        cog = AdminGroup(MagicMock())
-        interaction = _interaction(session_factory)
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
         with patch("gurps_bot.cogs.admin_chars.ConfirmView", _view(True)):
-            await cog.delete_char.callback(cog, interaction, _user(), "Hero")
-        assert "Deleted" in _said(interaction)
+            await AdminCharsCog.admin_delete.callback(cog, ctx, _user(), name="Hero")
+        assert "Deleted" in _said(ctx)
         chars, _ = await _rows(session_factory)
         assert chars == [(TARGET, "Villain")]
 
     async def test_delete_cancelled_keeps_the_row(self, session_factory, sample_gcs_data):
         await self._seed_two(session_factory, sample_gcs_data)
-        cog = AdminGroup(MagicMock())
-        interaction = _interaction(session_factory)
+        cog = AdminCharsCog(MagicMock())
+        ctx = _ctx(session_factory)
         with patch("gurps_bot.cogs.admin_chars.ConfirmView", _view(False)):
-            await cog.delete_char.callback(cog, interaction, _user(), "Hero")
+            await AdminCharsCog.admin_delete.callback(cog, ctx, _user(), name="Hero")
         chars, _ = await _rows(session_factory)
         assert sorted(n for _, n in chars) == ["Hero", "Villain"]

@@ -375,10 +375,12 @@ _DISCORD_TOP_LEVEL_CAP = 100
 #:
 #: 2026-10-03, 44 → 45: the `privacy` GROUP, for self-service deletion.
 #:
-#: 2026-10-18, 45 → 46: the `admin` GROUP (owner tools; `/admin` acts on another
-#: member's sheets). Operator-requested; further owner tools cost no entries.
-_TOP_LEVEL_COUNT = 46
-_GROUP_COUNT = 15
+#: 2026-10-18: an `admin` GROUP for owner tools was added and withdrawn the same day.
+#: Discord cannot hide a slash command by identity, so an owner-only entry is clutter in
+#: every member's picker; the owner tools are mention-prefixed text commands
+#: (cogs/admin_chars.py), outside this tree. 45 stands.
+_TOP_LEVEL_COUNT = 45
+_GROUP_COUNT = 14
 _STANDALONE_COUNT = 31
 
 
