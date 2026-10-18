@@ -44,6 +44,7 @@ USER = 999_000
 #: a breadth test whose exemption list grows silently is worth very little.
 NEEDS_REAL_INPUT = {
     "char import": "takes a discord.Attachment; covered by test_parser + import tests",
+    "admin import": "takes a discord.Attachment; covered by test_admin_chars",
     "sync": "owner-gated; covered by test_command_sync",
     "status": "formats live gateway latency and uptime off the real client",
     "combat start": "stores the tracker message id from a real Discord message",
@@ -137,7 +138,13 @@ def _dummy_args(cmd) -> dict:
             args[name] = spec.choices[0].value
             continue
         text = str(param.annotation)
-        if "int" in text and "Interaction" not in text:
+        if "discord.User" in text or "discord.Member" in text:
+            member = MagicMock()
+            member.id = 424242
+            member.mention = "<@424242>"
+            member.display_name = "newcomer"
+            args[name] = member
+        elif "int" in text and "Interaction" not in text:
             args[name] = 1
         elif "float" in text:
             args[name] = 1.0

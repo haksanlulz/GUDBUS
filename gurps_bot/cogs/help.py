@@ -111,6 +111,10 @@ UNTOPICED: dict[str, str] = {
     "privacy delete-my-data": "shown on the /help landing page itself",
     "status": "diagnostics, not a player-facing feature",
     "sync": "owner-only recovery tool",
+    "admin list": "owner-only: another member's sheets",
+    "admin import": "owner-only: another member's sheets",
+    "admin switch": "owner-only: another member's sheets",
+    "admin delete": "owner-only: another member's sheets",
     "help": "this command",
 }
 

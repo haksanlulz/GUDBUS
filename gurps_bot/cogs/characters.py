@@ -57,6 +57,95 @@ async def _fetch_char_names(
 _char_name_autocomplete = make_autocomplete(_fetch_char_names)
 
 
+async def import_sheet(
+    interaction: discord.Interaction[GURPSBot],
+    file: discord.Attachment,
+    *,
+    user_id: int,
+    guild_id: int,
+    for_whom: str = "",
+) -> None:
+    """Validate, parse and store a .gcs upload as ``user_id``'s character, then make it their
+    active one in ``guild_id``. Shared by /char import (the caller's own ids) and the owner's
+    /admin import (another member's); ``for_whom`` is the suffix the confirmation carries."""
+    # extension check is just ux; the json parse below is the real validation
+    if not file.filename.endswith(".gcs"):
+        await interaction.response.send_message(
+            "Please upload a `.gcs` file.", ephemeral=True
+        )
+        return
+
+    if file.size and file.size > MAX_IMPORT_SIZE:
+        await interaction.response.send_message(
+            f"File too large ({file.size // 1024} KB). Maximum is 5 MB.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(thinking=True)
+
+    try:
+        raw = await file.read()
+    except discord.HTTPException:
+        await interaction.followup.send("Failed to download file.")
+        return
+
+    if len(raw) > MAX_IMPORT_SIZE:
+        await interaction.followup.send(
+            f"File too large ({len(raw) // 1024} KB). Maximum is 5 MB.",
+        )
+        return
+
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        await interaction.followup.send(f"Failed to read file: {e}")
+        return
+
+    try:
+        parsed = parse_gcs(data)
+    except GCSParseError as e:
+        await interaction.followup.send(f"GCS parse error: {e}")
+        return
+    except (RecursionError, ValueError, TypeError, AttributeError, KeyError):
+        # parse_gcs only raises GCSParseError for known-bad shapes; a novel
+        # malformed sheet gets a clean message here instead of the generic error
+        log.exception("Unexpected error parsing GCS import for user %s", user_id)
+        await interaction.followup.send(
+            "That doesn't look like a valid GCS v5 character file."
+        )
+        return
+
+    async with interaction.client.db() as session:
+        # the service owns the cap: only it knows whether this is a new row
+        try:
+            char, was_replacement = await import_character(
+                session, user_id, parsed, file.filename, raw_data=data,
+            )
+        except (StorageLimitExceeded, CharacterNameTaken) as e:
+            await interaction.followup.send(str(e))
+            return
+        await set_active_character(session, user_id, guild_id, char.id)
+        await session.commit()
+        # Cache invalidation is owned by services/characters.py
+        # (import_character + set_active_character), so /char switch and
+        # /char delete get it too — they never had it here.
+
+        attrs = {a.attr_id: a.value for a in parsed.attributes}
+        for a in parsed.attributes:
+            if a.current is not None:
+                attrs[f"{a.attr_id}_current"] = a.current
+
+    embed = embeds.char_summary_embed(
+        parsed.name, parsed.total_points, attrs, parsed.calc, file.filename
+    )
+    replaced = " (replaced existing)" if was_replacement else ""
+    await interaction.followup.send(
+        f"Imported **{parsed.name}**{replaced} and set as active{for_whom}.",
+        embed=embed,
+    )
+
+
 async def _send_paginated(
     interaction: discord.Interaction[GURPSBot],
     title: str,
@@ -102,86 +191,8 @@ class CharGroup(commands.GroupCog, group_name="char"):
     @app_commands.command(name="import", description="Import a .gcs character file")
     @app_commands.describe(file="A .gcs character sheet file")
     async def import_char(self, interaction: discord.Interaction[GURPSBot], file: discord.Attachment) -> None:
-        # extension check is just ux; the json parse below is the real validation
-        if not file.filename.endswith(".gcs"):
-            await interaction.response.send_message(
-                "Please upload a `.gcs` file.", ephemeral=True
-            )
-            return
-
-        if file.size and file.size > MAX_IMPORT_SIZE:
-            await interaction.response.send_message(
-                f"File too large ({file.size // 1024} KB). Maximum is 5 MB.",
-                ephemeral=True,
-            )
-            return
-
-        await interaction.response.defer(thinking=True)
-
-        try:
-            raw = await file.read()
-        except discord.HTTPException:
-            await interaction.followup.send("Failed to download file.")
-            return
-
-        if len(raw) > MAX_IMPORT_SIZE:
-            await interaction.followup.send(
-                f"File too large ({len(raw) // 1024} KB). Maximum is 5 MB.",
-            )
-            return
-
-        try:
-            data = json.loads(raw)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            await interaction.followup.send(f"Failed to read file: {e}")
-            return
-
-        try:
-            parsed = parse_gcs(data)
-        except GCSParseError as e:
-            await interaction.followup.send(f"GCS parse error: {e}")
-            return
-        except (RecursionError, ValueError, TypeError, AttributeError, KeyError):
-            # parse_gcs only raises GCSParseError for known-bad shapes; a novel
-            # malformed sheet gets a clean message here instead of the generic error
-            log.exception(
-                "Unexpected error parsing GCS import for user %s", interaction.user.id
-            )
-            await interaction.followup.send(
-                "That doesn't look like a valid GCS v5 character file."
-            )
-            return
-
-        user_id = interaction.user.id
-        guild_id = guild_id_of(interaction)
-
-        async with interaction.client.db() as session:
-            # the service owns the cap: only it knows whether this is a new row
-            try:
-                char, was_replacement = await import_character(
-                    session, user_id, parsed, file.filename, raw_data=data,
-                )
-            except (StorageLimitExceeded, CharacterNameTaken) as e:
-                await interaction.followup.send(str(e))
-                return
-            await set_active_character(session, user_id, guild_id, char.id)
-            await session.commit()
-            # Cache invalidation is owned by services/characters.py
-            # (import_character + set_active_character), so /char switch and
-            # /char delete get it too — they never had it here.
-
-            attrs = {a.attr_id: a.value for a in parsed.attributes}
-            for a in parsed.attributes:
-                if a.current is not None:
-                    attrs[f"{a.attr_id}_current"] = a.current
-
-        embed = embeds.char_summary_embed(
-            parsed.name, parsed.total_points, attrs, parsed.calc, file.filename
-        )
-        replaced = " (replaced existing)" if was_replacement else ""
-        await interaction.followup.send(
-            f"Imported **{parsed.name}**{replaced} and set as active.",
-            embed=embed,
+        await import_sheet(
+            interaction, file, user_id=interaction.user.id, guild_id=guild_id_of(interaction),
         )
 
     @app_commands.command(name="view", description="View your active character summary")

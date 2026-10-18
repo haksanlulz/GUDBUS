@@ -374,8 +374,11 @@ _DISCORD_TOP_LEVEL_CAP = 100
 #: 2026-10-03, 46 → 44: two standalone commands retired.
 #:
 #: 2026-10-03, 44 → 45: the `privacy` GROUP, for self-service deletion.
-_TOP_LEVEL_COUNT = 45
-_GROUP_COUNT = 14
+#:
+#: 2026-10-18, 45 → 46: the `admin` GROUP (owner tools; `/admin` acts on another
+#: member's sheets). Operator-requested; further owner tools cost no entries.
+_TOP_LEVEL_COUNT = 46
+_GROUP_COUNT = 15
 _STANDALONE_COUNT = 31
 
 

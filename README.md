@@ -1,6 +1,6 @@
 # GUDBUS
 
-**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 108 slash commands.
+**GUDBUS (The Generic Universal Discord Bot Unofficial System) is a Discord bot for helping you run your GURPS games.** Import GCS character sheets, roll skill checks, and run turn-based combat with persistent initiative tracking. 112 slash commands.
 
 ## Features
 
@@ -49,6 +49,7 @@ The main areas, with the full table in the [wiki](https://github.com/haksanlulz/
 - **Campaign tools**: study logs, notes, timers, wealth, house rules
 - **Crafting**: inventions, repairs, mundane crafting, alchemy, enchanting, with saved projects
 - **Reference**: `/skill`, `/trait`, `/spell`, `/technique`, `/item` (facts and page cites only)
+- **Owner**: `/admin list`, `import`, `switch`, `delete` — a member's sheets by user, with an optional server id
 
 `/help` in Discord walks through them by topic.
 
