@@ -96,6 +96,19 @@ class _WeaponBudget:
         return weapons
 
 
+def _fill(text: object, item: dict) -> str:
+    """GCS fillable rows keep the library text with @Key@ placeholders and the chosen values in
+    `replacements`; GCS renders the substitution, so a sheet never shows `@Quirk@` there."""
+    if not isinstance(text, str):
+        return ""
+    repl = item.get("replacements")
+    if isinstance(repl, dict) and "@" in text:
+        for key, value in repl.items():
+            if isinstance(key, str) and isinstance(value, str):
+                text = text.replace(f"@{key}@", value)
+    return text
+
+
 def _has_calc_or_difficulty(item: dict, calc: dict) -> bool:
     """container/placeholder rows have neither calc nor difficulty — skip, don't emit junk"""
     return bool(calc) or "difficulty" in item
@@ -248,9 +261,10 @@ def _flatten_stat_items(
 
 
 def _build_skill(item: dict, calc: dict) -> ParsedSkill:
+    spec = item.get("specialization")
     return ParsedSkill(
-        name=item.get("name", "Unknown"),
-        specialization=item.get("specialization"),
+        name=_fill(item.get("name", "Unknown"), item),
+        specialization=_fill(spec, item) if spec is not None else None,
         difficulty=item.get("difficulty", ""),
         level=_as_int(calc.get("level", 0)),
         relative_level=calc.get("rsl", ""),
@@ -261,7 +275,7 @@ def _build_skill(item: dict, calc: dict) -> ParsedSkill:
 
 def _build_spell(item: dict, calc: dict) -> ParsedSpell:
     return ParsedSpell(
-        name=item.get("name", "Unknown"),
+        name=_fill(item.get("name", "Unknown"), item),
         college=_join_college(item.get("college", [])),
         difficulty=item.get("difficulty", ""),
         level=_as_int(calc.get("level", 0)),
@@ -310,7 +324,7 @@ def _parse_traits(
                 _parse_traits(
                     _as_list(item["children"]),
                     out,
-                    group_name=item.get("name", group_name),
+                    group_name=_fill(item.get("name", group_name), item) if "name" in item else group_name,
                     weapons=weapons,
                     _depth=_depth + 1,
                 )
@@ -322,7 +336,7 @@ def _parse_traits(
 def _build_meta_trait(item: dict, group_name: str | None) -> ParsedTrait:
     calc = _as_dict(item.get("calc"))
     return ParsedTrait(
-        name=item.get("name", "Unknown"),
+        name=_fill(item.get("name", "Unknown"), item),
         group_name=group_name,
         points=_as_int(calc.get("points", 0)),
         level=None,
@@ -339,7 +353,7 @@ def _build_leaf_trait(
     calc = _as_dict(item.get("calc"))
     weapons = budget.take(_as_list(item.get("weapons")))
     return ParsedTrait(
-        name=item.get("name", "Unknown"),
+        name=_fill(item.get("name", "Unknown"), item),
         group_name=group_name,
         points=_as_int(calc.get("points", 0)),
         level=_trait_level(item, calc),
@@ -406,7 +420,7 @@ def _build_equipment_entry(item: dict, budget: _WeaponBudget) -> dict:
     calc = _as_dict(item.get("calc"))
     weapons = budget.take(_as_list(item.get("weapons")))
     return {
-        "description": item.get("description", ""),
+        "description": _fill(item.get("description", ""), item),
         "quantity": _as_int(item.get("quantity", 1), 1),
         "weight": calc.get("extended_weight", "0 lb"),
         "value": calc.get("extended_value", 0),
