@@ -105,6 +105,46 @@ class ErrorHandler(commands.Cog):
         # attached in __init__ so reload_extension re-hooks tree.on_error
         self.bot.tree.on_error = self.on_app_command_error
 
+    # The mention-prefixed text commands (@<bot> sync, @<bot> admin ...) had no handler: a
+    # failed check or a bad argument went to discord.py's default, which prints to stderr
+    # and posts nothing, and a success logged nothing either. On 2026-10-18 that left an
+    # owner command's silence undiagnosable from the channel or the container log.
+    @commands.Cog.listener()
+    async def on_command(self, ctx: commands.Context) -> None:
+        log.info(
+            "text command %s by user %s in guild %s",
+            ctx.command.qualified_name if ctx.command else "?",
+            ctx.author.id, ctx.guild.id if ctx.guild else None,
+        )
+
+    @commands.Cog.listener()
+    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError) -> None:
+        if isinstance(error, commands.CommandNotFound):
+            return  # a mention with no command after it is conversation, not an error
+        cmd = ctx.command.qualified_name if ctx.command else "?"
+        if isinstance(error, commands.NotOwner):
+            msg = "Only the bot owner can use this."
+        elif isinstance(error, commands.CheckFailure):
+            msg = "You don't have permission to use this command."
+        elif isinstance(error, commands.UserInputError):
+            # MissingRequiredArgument, BadArgument (a member that could not be
+            # resolved, a non-numeric server id), TooManyArguments
+            msg = f"Bad input for `{cmd}`: {error}"
+        else:
+            original = getattr(error, "original", None) or error
+            if isinstance(original, StorageLimitExceeded):
+                msg = str(original)
+            else:
+                log.exception(
+                    "Unhandled text command error in %s — user=%s guild=%s",
+                    cmd, ctx.author.id, ctx.guild.id if ctx.guild else None, exc_info=error,
+                )
+                msg = "Something went wrong. The error has been logged."
+        try:
+            await ctx.reply(msg)
+        except Exception:
+            log.exception("Text error handler itself failed — command=%s user=%s", cmd, ctx.author.id)
+
     async def on_app_command_error(
         self,
         interaction: discord.Interaction[GURPSBot],
