@@ -49,6 +49,7 @@ The main areas, with the full table in the [wiki](https://github.com/haksanlulz/
 - **Campaign tools**: study logs, notes, timers, wealth, house rules
 - **Crafting**: inventions, repairs, mundane crafting, alchemy, enchanting, with saved projects
 - **Reference**: `/skill`, `/trait`, `/spell`, `/technique`, `/item` (facts and page cites only)
+- **Owner** (mention-prefixed, nothing in the slash picker): `@GUDBUS admin list|import|switch|delete @member` — a member's sheets, with an optional server id; `@GUDBUS sync` re-registers
 
 `/help` in Discord walks through them by topic.
 
