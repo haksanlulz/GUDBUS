@@ -25,6 +25,7 @@ EXTENSIONS = [
     "gurps_bot.cogs.error_handler",
     "gurps_bot.cogs.admin",
     "gurps_bot.cogs.characters",
+    "gurps_bot.cogs.admin_chars",  # text commands only; after characters, whose import path it shares
     "gurps_bot.cogs.rolling",
     "gurps_bot.cogs.combat",
     "gurps_bot.cogs.calc_combat",

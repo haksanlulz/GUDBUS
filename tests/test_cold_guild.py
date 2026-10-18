@@ -137,7 +137,13 @@ def _dummy_args(cmd) -> dict:
             args[name] = spec.choices[0].value
             continue
         text = str(param.annotation)
-        if "int" in text and "Interaction" not in text:
+        if "discord.User" in text or "discord.Member" in text:
+            member = MagicMock()
+            member.id = 424242
+            member.mention = "<@424242>"
+            member.display_name = "newcomer"
+            args[name] = member
+        elif "int" in text and "Interaction" not in text:
             args[name] = 1
         elif "float" in text:
             args[name] = 1.0
