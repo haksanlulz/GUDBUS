@@ -16,7 +16,7 @@ for the rest of the fight.
 
 **Player, `/combat join`.** Speed, HP and FP come off their active character.
 
-> **Aldric** joined combat (Speed 5.75).
+> **James** joined combat (Speed 5.75).
 
 **GM, `/combat add-npc` `name: Ogre` `speed: 4.5` `hp: 25` `fp: 12`.**
 
@@ -25,7 +25,7 @@ for the rest of the fight.
 The tracker message now reads:
 
 > **Combat — Round 1**
-> ▶ **Aldric** | Spd 5.75 | [########] 13/13 HP | [########] 11/11 FP
+> ▶ **James** | Spd 5.75 | [########] 13/13 HP | [########] 11/11 FP
 >  **Ogre** | Spd 4.5 | [########] 25/25 HP | [########] 12/12 FP
 
 Order is Basic Speed descending, then DX, then a per-combatant tiebreaker.
@@ -34,7 +34,7 @@ Order is Basic Speed descending, then DX, then a per-combatant tiebreaker.
 **Player, `/attack` `weapon: Broadsword`.** 3d against the weapon's skill level
 as imported from the sheet. The embed lays these out as fields side by side:
 
-> **Aldric — Attack: Broadsword (swung)**
+> **James — Attack: Broadsword (swung)**
 > Rolled **11** (4 + 6 + 1) — Target 14 — Margin +3
 > Result: **Success**
 > Damage 2d cut — Reach 1
@@ -55,7 +55,7 @@ Shock scales with the target's own HP: at 25 HP the Ogre pays 2 HP per point of
 it rather than 1 (B380/B419). The tracker redraws itself:
 
 > **Combat — Round 1**
-> ▶ **Aldric** | Spd 5.75 | [########] 13/13 HP | [########] 11/11 FP
+> ▶ **James** | Spd 5.75 | [########] 13/13 HP | [########] 11/11 FP
 >  **Ogre** | Spd 4.5 | [#####---] 16/25 HP | [########] 12/12 FP
 
 **GM, `/combat end`.**

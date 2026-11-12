@@ -132,7 +132,7 @@ def test_the_worked_session_quotes_the_real_tracker_lines():
 
     text = _session_text()
     for name, speed, hp, hp_max, fp, fp_max, current in (
-        ("Aldric", 5.75, 13, 13, 11, 11, True),
+        ("James", 5.75, 13, 13, 11, 11, True),
         ("Ogre", 4.5, 16, 25, 12, 12, False),
     ):
         line = format_combatant_line(
