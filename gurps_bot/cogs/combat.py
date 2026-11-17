@@ -13,6 +13,7 @@ from discord.ext import commands, tasks
 if TYPE_CHECKING:
     from gurps_bot.bot import GURPSBot
 
+from gurps_bot import config
 from gurps_bot.db.models import Trait
 from gurps_bot.mechanics.checks import Outcome, check
 from gurps_bot.mechanics.combat_constants import Maneuver, StatusEffect
@@ -357,9 +358,13 @@ class CombatTrackerGroup(commands.GroupCog, group_name="combat"):
 
     @tasks.loop(hours=1)
     async def _cleanup_task(self) -> None:
+        if config.STALE_COMBAT_HOURS <= 0:
+            return  # sweep turned off
         try:
             async with self.bot.db() as session:
-                count = await cleanup_stale_combats(session)
+                count = await cleanup_stale_combats(
+                    session, max_age_hours=config.STALE_COMBAT_HOURS,
+                )
                 if count:
                     await session.commit()
                     log.info("Cleaned up %d stale combats", count)

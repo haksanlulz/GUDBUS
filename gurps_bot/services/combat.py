@@ -731,7 +731,12 @@ async def cleanup_stale_combats(
     `synchronize_session=False` because the caller's session is discarded right
     after; there is no in-memory state left to keep consistent, and the default
     would spend a SELECT keeping it that way.
+
+    `max_age_hours` of 0 or less deletes nothing: its cutoff is now, which every
+    combat is older than (config.STALE_COMBAT_HOURS uses 0 to mean "off").
     """
+    if max_age_hours <= 0:
+        return 0
     cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
     stale_ids = select(Combat.id).where(Combat.updated_at < cutoff)
     await session.execute(

@@ -23,6 +23,18 @@ def _parse_flag(raw: str | None, default: bool) -> bool:
     return raw.strip().lower() not in ("0", "false", "no", "off")
 
 
+def _parse_hours(raw: str | None, default: int) -> int:
+    """Env whole-hour count: unset/blank -> default, 0 allowed, anything else
+    that is not a non-negative integer fails at startup rather than quietly
+    falling back to a value nobody chose."""
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip()
+    if not (value.isascii() and value.isdigit()):
+        raise ValueError(f"STALE_COMBAT_HOURS must be a whole number of hours, got {raw!r}")
+    return int(value)
+
+
 # Fingerprint-gated global command registration at startup. On by default:
 # registration is deploy behavior, not a chat command (an in-Discord /sync
 # cannot fix a bot whose commands are gone — 2026-07-25 escape).
@@ -67,3 +79,10 @@ COMMAND_FINGERPRINT_PATH = DATA_DIR / ".command_fingerprint"
 # instance on a fast disk: there the 3-second wall is genuinely unreachable
 # (~10ms writes) and the flicker buys nothing.
 DEFER_INTERACTIONS: bool = _parse_flag(os.getenv("DEFER_INTERACTIONS"), True)
+
+# How long a combat may sit untouched before the hourly sweep deletes it. A
+# combat is touched by anything that changes it: HP, status, defends, turns.
+# 24 suits a table that plays a fight in one sitting. A play-by-post table can
+# go days between moves, and at 24 its fight is deleted between turns; give it
+# a few days or weeks (336 = two weeks). 0 turns the sweep off.
+STALE_COMBAT_HOURS: int = _parse_hours(os.getenv("STALE_COMBAT_HOURS"), 24)
