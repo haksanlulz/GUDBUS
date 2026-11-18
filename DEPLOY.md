@@ -209,6 +209,7 @@ nothing to run). If registrations are ever missing, mention the bot: `@<bot> syn
 | `BOT_OPERATOR_NAME` | no | Shown in `/legal` as "Hosted by ...". |
 | `AUTO_SYNC` | no | Default on: global command registration at startup, only when the command set changed. `0` disables. |
 | `DEFER_INTERACTIONS` | no | Default **on**. Combat commands acknowledge Discord before touching the DB. Discord kills an un-deferred interaction at 3s while SQLite waits up to 5s for a write lock, so a contended write can outlive its token and report "did not respond" on a command that worked — deferring moves that ceiling to 15 min, at the cost of a "thinking…" state on those commands. `0` turns it off, which is reasonable on a single-table instance on a fast disk: a combat write takes ~10 ms there and the 3s wall is unreachable. |
+| `STALE_COMBAT_HOURS` | no | Default `24`. A combat untouched this many hours is deleted by the hourly sweep; anything that changes it (HP, status, a defense, a turn) counts as a touch. A play-by-post table that goes days between moves needs more (`336` = two weeks). `0` turns the sweep off. A value that is not a whole number stops the bot at startup. |
 | `BOT_INVITE_URL` | no | OAuth2 invite link. |
 | `BOT_SUPPORT_URL` | if others use it | Contact link in `/legal`: how users reach you about their data. Warns at startup if unset. |
 | `BOT_PRIVACY_URL`, `BOT_TERMS_URL` | no | Where `/legal` links the privacy policy and terms. Default: this project's `PRIVACY.md` and `TERMS.md`. |
